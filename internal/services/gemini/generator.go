@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -45,6 +46,9 @@ func (g *Generator) GenerateArticle(referenceArticles []string, keywords []strin
 	if exclusions != "" {
 		prompt.WriteString(fmt.Sprintf("- 含めないでほしい内容: %s\n", exclusions))
 	}
+
+	// プロンプトをログに出力
+	log.Printf("Gemini APIに送信するプロンプト:\n%s", prompt.String())
 
 	// Gemini APIを使用してコンテンツを生成
 	content, err := g.client.GenerateContent(prompt.String())
