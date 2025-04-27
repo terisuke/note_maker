@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/teradakousuke/note_maker/internal/services/gemini"
@@ -46,8 +47,8 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	// 入力検証
-	if req.NoteURL == "" && req.Username == "" {
-		respondWithError(w, "MISSING_REQUIRED_FIELD", "note_url or username is required", "", http.StatusBadRequest)
+	if req.Theme == "" {
+		respondWithError(w, "MISSING_REQUIRED_FIELD", "theme is required", "", http.StatusBadRequest)
 		return
 	}
 
@@ -100,14 +101,8 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 参照記事が取得できなかった場合のエラー処理
 	if len(referenceArticles) == 0 {
-		details := ""
-		if req.Username != "" {
-			details = fmt.Sprintf("No articles found for user: %s", req.Username)
-		} else if req.NoteURL != "" {
-			details = fmt.Sprintf("No content found in article: %s", req.NoteURL)
-		}
-		respondWithError(w, "NO_REFERENCE_ARTICLES", "No valid reference articles found", details, http.StatusBadRequest)
-		return
+		// エラーを返さず、空の参照記事で続行
+		log.Printf("No reference articles found, proceeding with empty references")
 	}
 
 	// Gemini APIを使用した記事生成サービスの初期化

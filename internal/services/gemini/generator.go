@@ -27,11 +27,17 @@ func NewGenerator() (*Generator, error) {
 func (g *Generator) GenerateArticle(referenceArticles []string, keywords []string, theme, targetAudience, exclusions, styleChoice, toneChoice string, wordCount int) (string, error) {
 	// プロンプトの構築
 	var prompt strings.Builder
-	prompt.WriteString("以下の参考記事を基に、新しい記事を生成してください。\n\n")
 
-	// 参考記事の追加
-	for i, article := range referenceArticles {
-		prompt.WriteString(fmt.Sprintf("参考記事 %d:\n%s\n\n", i+1, article))
+	// 参考記事がある場合は追加
+	if len(referenceArticles) > 0 {
+		prompt.WriteString("以下の参考記事を基に、新しい記事を生成してください。\n\n")
+
+		// 参考記事の追加
+		for i, article := range referenceArticles {
+			prompt.WriteString(fmt.Sprintf("参考記事 %d:\n%s\n\n", i+1, article))
+		}
+	} else {
+		prompt.WriteString("新しい記事を生成してください。\n\n")
 	}
 
 	// 指示の追加
