@@ -1,0 +1,123 @@
+<!-- static/index.html -->
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Note記事下書きジェネレーター</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <header>
+      <h1>Note記事下書きジェネレーター</h1>
+      <p>Note記事URLまたはユーザー名と指示から、AIが新しい記事の下書きを生成します</p>
+    </header>
+
+    <main>
+      <div class="input-section">
+        <div class="form-group">
+          <label for="note-url">参照するNote記事URL</label>
+          <input type="url" id="note-url" placeholder="https://note.com/...">
+          <p class="help-text">または、下のユーザー名を入力してください</p>
+        </div>
+
+        <div class="form-group">
+          <label for="username">Noteユーザー名</label>
+          <input type="text" id="username" placeholder="例: username">
+          <p class="help-text">ユーザー名を入力すると、最新の3記事を参考にします</p>
+        </div>
+
+        <div class="form-group">
+          <label for="keywords">キーワード (カンマ区切り)</label>
+          <input type="text" id="keywords" placeholder="例: AI, 生産性向上, 未来">
+        </div>
+
+        <div class="form-group">
+          <label for="theme">主なテーマ・視点</label>
+          <input type="text" id="theme" placeholder="例: 中小企業におけるAI導入のメリット">
+        </div>
+
+        <div class="form-group">
+          <label for="target-audience">想定読者層</label>
+          <input type="text" id="target-audience" placeholder="例: 中小企業の経営者">
+        </div>
+
+        <div class="form-group">
+          <label for="exclusions">含めないでほしい内容</label>
+          <input type="text" id="exclusions" placeholder="例: 専門的すぎる技術詳細">
+        </div>
+
+        <div class="form-group-inline">
+          <div class="form-group">
+            <label for="style-choice">文体</label>
+            <select id="style-choice">
+              <option value="ですます調" selected>ですます調</option>
+              <option value="である調">である調</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tone-choice">トーン</label>
+            <select id="tone-choice">
+              <option value="客観的" selected>客観的</option>
+              <option value="情熱的">情熱的</option>
+              <option value="ユーモラス">ユーモラス</option>
+              <option value="前向き">前向き</option>
+              <option value="丁寧">丁寧</option>
+              <option value="具体的">具体的</option>
+              <option value="親しみやすい">親しみやすい</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="word-count">目標文字数</label>
+            <select id="word-count">
+              <option value="1000">短め (~1000字)</option>
+              <option value="1500" selected>中程度 (~1500字)</option>
+              <option value="2000">やや長め (~2000字)</option>
+              <option value="3000">長め (~3000字)</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="generate-btn" class="primary-btn">記事下書きを生成</button>
+      </div>
+
+      <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p>記事を生成中です…</p>
+        <p class="small">※AIモデルの処理には1分程度かかる場合があります</p>
+      </div>
+
+      <div id="result-section" class="hidden">
+        <h2>生成された下書き</h2>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="preview">プレビュー</button>
+          <button class="tab-btn" data-tab="markdown">マークダウン</button>
+        </div>
+
+        <div class="tab-content">
+          <div id="preview-tab" class="tab-pane active">
+            <div id="preview-content"></div>
+          </div>
+          <div id="markdown-tab" class="tab-pane">
+            <textarea id="markdown-output" readonly></textarea>
+            <button id="copy-btn" class="secondary-btn">コピー</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="error-message-area"></div>
+    </main>
+
+    <footer>
+      <p>© 2025 Note記事下書きジェネレーター</p>
+    </footer>
+  </div>
+
+  <script src="/static/js/script.js"></script>
+</body>
+
+</html>

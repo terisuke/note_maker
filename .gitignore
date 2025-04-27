@@ -1,0 +1,43 @@
+# Go関連
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# 環境変数
+.env
+.env.local
+.env.*.local
+
+# IDE関連
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS関連
+.DS_Store
+Thumbs.db
+
+# ビルド関連
+bin/
+dist/
+tmp/
+
+# ログ関連
+*.log
+logs/
+
+# 依存関係
+vendor/
+node_modules/
+
+# その他
+*.bak
+*.tmp
+*.temp 
