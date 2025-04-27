@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/teradakousuke/note_maker/internal/services/gemini"
@@ -11,15 +12,20 @@ import (
 
 // GenerateRequest は記事生成のリクエストボディの構造体
 type GenerateRequest struct {
-	NoteURL        string   `json:"note_url"`
-	Username       string   `json:"username"`
-	Keywords       []string `json:"keywords"`
-	Theme          string   `json:"theme"`
-	TargetAudience string   `json:"target_audience"`
-	Exclusions     string   `json:"exclusions"`
-	StyleChoice    string   `json:"style_choice"`
-	ToneChoice     string   `json:"tone_choice"`
-	WordCount      int      `json:"word_count"`
+	NoteURL            string   `json:"note_url"`
+	Username           string   `json:"username"`
+	Keywords           []string `json:"keywords"`
+	Theme              string   `json:"theme"`
+	TargetAudience     string   `json:"target_audience"`
+	Exclusions         string   `json:"exclusions"`
+	StyleChoice        string   `json:"style_choice"`
+	ToneChoice         string   `json:"tone_choice"`
+	WordCount          int      `json:"word_count"`
+	ArticlePurpose     string   `json:"article_purpose"`
+	DesiredContent     string   `json:"desired_content"`
+	IntroductionPoints string   `json:"introduction_points"`
+	MainPoints         string   `json:"main_points"`
+	ConclusionMessage  string   `json:"conclusion_message"`
 }
 
 // ErrorResponse はエラーレスポンスの構造体
@@ -27,6 +33,7 @@ type ErrorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
+		Details string `json:"details,omitempty"`
 	} `json:"error"`
 }
 
@@ -39,14 +46,14 @@ type SuccessResponse struct {
 func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 	var req GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", http.StatusBadRequest)
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
 	// 入力検証
-	if req.NoteURL == "" && req.Username == "" {
-		respondWithError(w, "MISSING_REQUIRED_FIELD", "note_url or username is required", http.StatusBadRequest)
+	if req.Theme == "" {
+		respondWithError(w, "MISSING_REQUIRED_FIELD", "theme is required", "", http.StatusBadRequest)
 		return
 	}
 
@@ -70,24 +77,46 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 		// ユーザー名から最新の記事を取得
 		articles, err := fetcher.FetchUserLatestArticles(req.Username, 3)
 		if err != nil {
-			respondWithError(w, "FETCH_ARTICLES_FAILED", fmt.Sprintf("Failed to fetch articles: %v", err), http.StatusInternalServerError)
+			respondWithError(w, "FETCH_ARTICLES_FAILED",
+				fmt.Sprintf("Failed to fetch articles for user %s", req.Username),
+				err.Error(),
+				http.StatusInternalServerError)
 			return
 		}
-		referenceArticles = articles
+		// 記事の内容を[]stringに変換
+		for _, article := range articles {
+			if article.Content != "" {
+				referenceArticles = append(referenceArticles, article.Content)
+			}
+		}
 	} else if req.NoteURL != "" {
 		// 単一の記事を取得
 		article, err := fetcher.FetchArticle(req.NoteURL)
 		if err != nil {
-			respondWithError(w, "FETCH_ARTICLE_FAILED", fmt.Sprintf("Failed to fetch article: %v", err), http.StatusInternalServerError)
+			respondWithError(w, "FETCH_ARTICLE_FAILED",
+				fmt.Sprintf("Failed to fetch article from URL %s", req.NoteURL),
+				err.Error(),
+				http.StatusInternalServerError)
 			return
 		}
-		referenceArticles = append(referenceArticles, article)
+		if article.Content != "" {
+			referenceArticles = append(referenceArticles, article.Content)
+		}
+	}
+
+	// 参照記事が取得できなかった場合のエラー処理
+	if len(referenceArticles) == 0 {
+		// エラーを返さず、空の参照記事で続行
+		log.Printf("No reference articles found, proceeding with empty references")
 	}
 
 	// Gemini APIを使用した記事生成サービスの初期化
 	generator, err := gemini.NewGenerator()
 	if err != nil {
-		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED", fmt.Sprintf("Failed to initialize generator: %v", err), http.StatusInternalServerError)
+		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED",
+			"Failed to initialize article generator",
+			err.Error(),
+			http.StatusInternalServerError)
 		return
 	}
 
@@ -101,9 +130,17 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 		req.StyleChoice,
 		req.ToneChoice,
 		req.WordCount,
+		req.ArticlePurpose,
+		req.DesiredContent,
+		req.IntroductionPoints,
+		req.MainPoints,
+		req.ConclusionMessage,
 	)
 	if err != nil {
-		respondWithError(w, "ARTICLE_GENERATION_FAILED", fmt.Sprintf("Failed to generate article: %v", err), http.StatusInternalServerError)
+		respondWithError(w, "ARTICLE_GENERATION_FAILED",
+			"Failed to generate article",
+			err.Error(),
+			http.StatusInternalServerError)
 		return
 	}
 
@@ -111,12 +148,15 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // respondWithError はエラーレスポンスを返す
-func respondWithError(w http.ResponseWriter, code, message string, statusCode int) {
+func respondWithError(w http.ResponseWriter, code, message, details string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(statusCode)
 	errResp := ErrorResponse{}
 	errResp.Error.Code = code
 	errResp.Error.Message = message
+	if details != "" {
+		errResp.Error.Details = details
+	}
 	json.NewEncoder(w).Encode(errResp)
 }
 

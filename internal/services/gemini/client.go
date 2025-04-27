@@ -38,11 +38,21 @@ func NewClient() (*Client, error) {
 
 // GenerateContent はGemini APIを使用してコンテンツを生成
 func (c *Client) GenerateContent(prompt string) (string, error) {
+	temperature := float32(0.7)
+	topP := float32(0.95)
+	topK := float32(40)
+	maxOutputTokens := int32(8192)
+
 	result, err := c.client.Models.GenerateContent(
 		c.ctx,
-		"gemini-2.0-flash",
+		"gemini-2.5-pro-preview-03-25",
 		genai.Text(prompt),
-		nil,
+		&genai.GenerateContentConfig{
+			Temperature:     &temperature,
+			MaxOutputTokens: maxOutputTokens,
+			TopP:            &topP,
+			TopK:            &topK,
+		},
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)

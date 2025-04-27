@@ -1,15 +1,22 @@
 package note
 
 import (
+	"encoding/json"
 	"fmt"
-	"io"
+	"log"
 	"net/http"
 	"strings"
-
-	"github.com/PuerkitoBio/goquery"
+	"time"
 )
 
-// Fetcher はNote記事取得サービス
+// Article は記事の情報を表す構造体
+type Article struct {
+	URL     string
+	Title   string
+	Content string
+}
+
+// Fetcher はNote APIから記事を取得するサービス
 type Fetcher struct {
 	client *http.Client
 }
@@ -17,118 +24,201 @@ type Fetcher struct {
 // NewFetcher は新しいFetcherを作成
 func NewFetcher() *Fetcher {
 	return &Fetcher{
-		client: &http.Client{},
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
-// FetchUserLatestArticles は指定されたユーザー名から最新の記事を取得
-func (f *Fetcher) FetchUserLatestArticles(username string, count int) ([]string, error) {
-	if count <= 0 {
-		count = 3 // デフォルトは3記事
-	}
+// FetchUserLatestArticles は指定されたユーザーの最新記事を取得
+func (f *Fetcher) FetchUserLatestArticles(userID string, limit int) ([]Article, error) {
+	// Note APIのエンドポイント
+	url := fmt.Sprintf("https://note.com/api/v2/creators/%s/contents?kind=note&page=1", userID)
+	log.Printf("記事一覧を取得: %s", url)
 
-	// ユーザーページのURL
-	userURL := fmt.Sprintf("https://note.com/%s", username)
-
-	// リクエストの作成
-	req, err := http.NewRequest("GET", userURL, nil)
+	// APIリクエスト
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("リクエストの作成に失敗: %w", err)
 	}
 
-	// User-Agentの設定
+	// User-Agentヘッダーを追加
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-	// リクエストの実行
+	// レスポンスの取得
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch user page: %w", err)
+		return nil, fmt.Errorf("APIリクエストに失敗: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// レスポンスの検証
+	// ステータスコードの確認
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to fetch user page: status=%d, body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("APIエラー: %s", resp.Status)
 	}
 
-	// HTMLの解析
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	// レスポンスの解析
+	var response struct {
+		Data struct {
+			Contents []struct {
+				Name      string `json:"name"`
+				NoteURL   string `json:"noteUrl"`
+				Status    string `json:"status"`
+				PublishAt string `json:"publishAt"`
+			} `json:"contents"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("レスポンスの解析に失敗: %w", err)
+	}
+
+	log.Printf("取得した記事数: %d", len(response.Data.Contents))
+
+	// 公開済みの記事のみを抽出
+	var articles []Article
+	for i, content := range response.Data.Contents {
+		log.Printf("記事 %d: %s (ステータス: %s)", i+1, content.Name, content.Status)
+		if content.Status == "published" {
+			// 記事の内容を取得
+			article, err := f.FetchArticle(content.NoteURL)
+			if err != nil {
+				log.Printf("記事の取得に失敗: %v", err)
+				continue // エラーが発生した場合は次の記事へ
+			}
+			log.Printf("記事の内容を取得: %s (長さ: %d文字)", article.Title, len(article.Content))
+			articles = append(articles, *article)
+			if len(articles) >= limit {
+				break
+			}
+		}
+	}
+
+	log.Printf("有効な記事数: %d", len(articles))
+	return articles, nil
+}
+
+// FetchArticle は指定されたURLの記事を取得
+func (f *Fetcher) FetchArticle(url string) (*Article, error) {
+	// URLからnote IDを抽出
+	noteID := extractNoteID(url)
+	if noteID == "" {
+		return nil, fmt.Errorf("無効なnote URL: %s", url)
+	}
+
+	// Note APIの記事詳細エンドポイント
+	apiURL := fmt.Sprintf("https://note.com/api/v3/notes/%s", noteID)
+	log.Printf("記事の詳細を取得: %s (note ID: %s)", apiURL, noteID)
+
+	// リクエストの作成
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		return nil, fmt.Errorf("リクエストの作成に失敗: %w", err)
 	}
 
-	// 記事URLの取得
-	var articleURLs []string
-	doc.Find("a.o-noteContentLink").Each(func(i int, s *goquery.Selection) {
-		if href, exists := s.Attr("href"); exists && i < count {
-			articleURLs = append(articleURLs, "https://note.com"+href)
-		}
-	})
+	// User-Agentヘッダーを追加
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-	// 記事の取得
-	var articles []string
-	for _, url := range articleURLs {
-		article, err := f.FetchArticle(url)
-		if err != nil {
-			fmt.Printf("Warning: Failed to fetch article %s: %v\n", url, err)
-			continue
-		}
-		articles = append(articles, article)
+	// レスポンスの取得
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("記事の取得に失敗: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// ステータスコードの確認
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("記事の取得に失敗: %s", resp.Status)
+	}
+
+	// レスポンスの解析
+	var response struct {
+		Data struct {
+			Name string `json:"name"`
+			Body string `json:"body"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("レスポンスの解析に失敗: %w", err)
+	}
+
+	article := &Article{
+		URL:     url,
+		Title:   response.Data.Name,
+		Content: response.Data.Body,
+	}
+
+	log.Printf("記事の詳細を取得完了: %s (長さ: %d文字)", article.Title, len(article.Content))
+	return article, nil
+}
+
+// extractNoteID はnote URLからnote IDを抽出
+func extractNoteID(url string) string {
+	// URLの形式: https://note.com/username/n/noteID
+	parts := strings.Split(url, "/")
+	if len(parts) >= 5 {
+		// URLの最後の部分がnote ID
+		noteID := parts[len(parts)-1]
+		log.Printf("URLから抽出したnote ID: %s (元のURL: %s)", noteID, url)
+		return noteID
+	}
+	log.Printf("無効なURL形式: %s", url)
+	return ""
+}
+
+// FetchArticlesByKeyword はキーワードで記事を検索
+func (f *Fetcher) FetchArticlesByKeyword(keyword string, limit int) ([]Article, error) {
+	// Note APIの検索エンドポイント
+	url := fmt.Sprintf("https://api.note.com/v1/search/articles?q=%s&limit=%d", keyword, limit)
+
+	// APIリクエスト
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("リクエストの作成に失敗: %w", err)
+	}
+
+	// レスポンスの取得
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("APIリクエストに失敗: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// ステータスコードの確認
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("APIエラー: %s", resp.Status)
+	}
+
+	// レスポンスの解析
+	var articles []Article
+	if err := json.NewDecoder(resp.Body).Decode(&articles); err != nil {
+		return nil, fmt.Errorf("レスポンスの解析に失敗: %w", err)
 	}
 
 	return articles, nil
 }
 
-// FetchArticle は指定されたURLからNote記事を取得
-func (f *Fetcher) FetchArticle(url string) (string, error) {
-	// URLの検証
-	if !strings.HasPrefix(url, "https://note.com/") {
-		return "", fmt.Errorf("invalid note URL: %s", url)
-	}
-
-	// リクエストの作成
-	req, err := http.NewRequest("GET", url, nil)
+// FetchArticleContent は記事の本文を取得
+func (f *Fetcher) FetchArticleContent(url string) (string, error) {
+	article, err := f.FetchArticle(url)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", err
 	}
+	return article.Content, nil
+}
 
-	// User-Agentの設定
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-
-	// リクエストの実行
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch article: %w", err)
+// FetchMultipleArticles は複数の記事を取得
+func (f *Fetcher) FetchMultipleArticles(urls []string) ([]Article, error) {
+	var articles []Article
+	for i, url := range urls {
+		log.Printf("記事 %d/%d を取得: %s", i+1, len(urls), url)
+		article, err := f.FetchArticle(url)
+		if err != nil {
+			return nil, fmt.Errorf("記事の取得に失敗 (%s): %w", url, err)
+		}
+		articles = append(articles, *article)
 	}
-	defer resp.Body.Close()
-
-	// レスポンスの検証
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("failed to fetch article: status=%d, body=%s", resp.StatusCode, string(body))
-	}
-
-	// HTMLの解析
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse HTML: %w", err)
-	}
-
-	// 記事本文の取得
-	var content strings.Builder
-	doc.Find("div.o-noteContentText").Each(func(i int, s *goquery.Selection) {
-		content.WriteString(s.Text())
-		content.WriteString("\n\n")
-	})
-
-	// 記事タイトルの取得
-	title := doc.Find("h1.o-noteContentTitle").Text()
-	if title == "" {
-		title = "無題の記事"
-	}
-
-	// 記事の整形
-	article := fmt.Sprintf("# %s\n\n%s", title, content.String())
-	return article, nil
+	log.Printf("全記事の取得完了: %d件", len(articles))
+	return articles, nil
 }

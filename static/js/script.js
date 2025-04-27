@@ -9,6 +9,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const styleChoiceSelect = document.getElementById('style-choice');
     const toneChoiceSelect = document.getElementById('tone-choice');
     const wordCountSelect = document.getElementById('word-count');
+    const articlePurposeSelect = document.getElementById('article-purpose');
+    const articlePurposeOtherInput = document.getElementById('article-purpose-other');
+    const desiredContentInput = document.getElementById('desired-content');
+    const introductionPointsInput = document.getElementById('introduction-points');
+    const mainPointsInput = document.getElementById('main-points');
+    const conclusionMessageInput = document.getElementById('conclusion-message');
     const generateBtn = document.getElementById('generate-btn');
     const resultSection = document.getElementById('result-section');
     const markdownOutput = document.getElementById('markdown-output');
@@ -18,6 +24,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const tabBtns = document.querySelectorAll('.tab-btn');
     const tabPanes = document.querySelectorAll('.tab-pane');
     const errorMessageArea = document.getElementById('error-message-area');
+
+    // 記事の目的選択時の処理
+    articlePurposeSelect.addEventListener('change', function() {
+        if (this.value === 'その他') {
+            articlePurposeOtherInput.classList.remove('hidden');
+        } else {
+            articlePurposeOtherInput.classList.add('hidden');
+        }
+    });
 
     // 記事生成ボタンクリック時の処理
     generateBtn.addEventListener('click', function() {
@@ -31,6 +46,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const styleChoice = styleChoiceSelect.value;
         const toneChoice = toneChoiceSelect.value;
         const wordCount = parseInt(wordCountSelect.value);
+        const articlePurpose = articlePurposeSelect.value === 'その他' 
+            ? articlePurposeOtherInput.value.trim() 
+            : articlePurposeSelect.value;
+        const desiredContent = desiredContentInput.value.trim();
+        const introductionPoints = introductionPointsInput.value.trim();
+        const mainPoints = mainPointsInput.value.trim();
+        const conclusionMessage = conclusionMessageInput.value.trim();
 
         // 入力検証
         if (!noteUrl && !username) {
@@ -61,7 +83,12 @@ document.addEventListener('DOMContentLoaded', function() {
             exclusions: exclusions,
             style_choice: styleChoice,
             tone_choice: toneChoice,
-            word_count: wordCount
+            word_count: wordCount,
+            article_purpose: articlePurpose,
+            desired_content: desiredContent,
+            introduction_points: introductionPoints,
+            main_points: mainPoints,
+            conclusion_message: conclusionMessage
         };
 
         // 記事の生成開始

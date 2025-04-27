@@ -74,7 +74,7 @@ header h1 {
 
 .form-group-inline .form-group {
     flex: 1;
-    min-width: 200px;
+    min-width: 150px;
     margin-bottom: 0;
 }
 
@@ -204,4 +204,44 @@ footer {
     padding-top: 2rem;
     border-top: 1px solid var(--border-color);
     color: var(--secondary-color);
+}
+
+/* 記事の目的選択のスタイル */
+#article-purpose-other {
+    margin-top: 0.5rem;
+}
+
+/* 構成要素入力のスタイル */
+.structure-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.structure-input {
+    margin-bottom: 0.5rem;
+}
+
+.structure-input textarea {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: vertical;
+}
+
+/* テキストエリアのスタイル */
+textarea {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.1);
 } 
