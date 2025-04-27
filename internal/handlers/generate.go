@@ -12,15 +12,20 @@ import (
 
 // GenerateRequest は記事生成のリクエストボディの構造体
 type GenerateRequest struct {
-	NoteURL        string   `json:"note_url"`
-	Username       string   `json:"username"`
-	Keywords       []string `json:"keywords"`
-	Theme          string   `json:"theme"`
-	TargetAudience string   `json:"target_audience"`
-	Exclusions     string   `json:"exclusions"`
-	StyleChoice    string   `json:"style_choice"`
-	ToneChoice     string   `json:"tone_choice"`
-	WordCount      int      `json:"word_count"`
+	NoteURL            string   `json:"note_url"`
+	Username           string   `json:"username"`
+	Keywords           []string `json:"keywords"`
+	Theme              string   `json:"theme"`
+	TargetAudience     string   `json:"target_audience"`
+	Exclusions         string   `json:"exclusions"`
+	StyleChoice        string   `json:"style_choice"`
+	ToneChoice         string   `json:"tone_choice"`
+	WordCount          int      `json:"word_count"`
+	ArticlePurpose     string   `json:"article_purpose"`
+	DesiredContent     string   `json:"desired_content"`
+	IntroductionPoints string   `json:"introduction_points"`
+	MainPoints         string   `json:"main_points"`
+	ConclusionMessage  string   `json:"conclusion_message"`
 }
 
 // ErrorResponse はエラーレスポンスの構造体
@@ -125,6 +130,11 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 		req.StyleChoice,
 		req.ToneChoice,
 		req.WordCount,
+		req.ArticlePurpose,
+		req.DesiredContent,
+		req.IntroductionPoints,
+		req.MainPoints,
+		req.ConclusionMessage,
 	)
 	if err != nil {
 		respondWithError(w, "ARTICLE_GENERATION_FAILED",

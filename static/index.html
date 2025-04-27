@@ -51,6 +51,42 @@
           <input type="text" id="exclusions" placeholder="例: 専門的すぎる技術詳細">
         </div>
 
+        <div class="form-group">
+          <label for="article-purpose">記事の目的</label>
+          <select id="article-purpose">
+            <option value="情報提供">情報提供</option>
+            <option value="問題解決">問題解決</option>
+            <option value="啓蒙">啓蒙</option>
+            <option value="エンターテイメント">エンターテイメント</option>
+            <option value="商品・サービス紹介">商品・サービス紹介</option>
+            <option value="その他">その他</option>
+          </select>
+          <input type="text" id="article-purpose-other" class="hidden" placeholder="具体的な目的を入力してください">
+        </div>
+
+        <div class="form-group">
+          <label for="desired-content">記事に含めたい具体的な内容</label>
+          <textarea id="desired-content" rows="3" placeholder="例: 具体的な事例、データ、引用、インタビュー内容など"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>記事の構成要素</label>
+          <div class="structure-inputs">
+            <div class="structure-input">
+              <label for="introduction-points">導入部分で触れるポイント</label>
+              <textarea id="introduction-points" rows="2" placeholder="例: 読者の課題、記事の重要性"></textarea>
+            </div>
+            <div class="structure-input">
+              <label for="main-points">本論で説明する項目</label>
+              <textarea id="main-points" rows="2" placeholder="例: 具体的な解決方法、実践的なステップ"></textarea>
+            </div>
+            <div class="structure-input">
+              <label for="conclusion-message">結論で強調したいメッセージ</label>
+              <textarea id="conclusion-message" rows="2" placeholder="例: 読者へのメッセージ、次のアクション"></textarea>
+            </div>
+          </div>
+        </div>
+
         <div class="form-group-inline">
           <div class="form-group">
             <label for="style-choice">文体</label>

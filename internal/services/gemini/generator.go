@@ -24,7 +24,21 @@ func NewGenerator() (*Generator, error) {
 }
 
 // GenerateArticle はGemini APIを使用して記事を生成
-func (g *Generator) GenerateArticle(referenceArticles []string, keywords []string, theme, targetAudience, exclusions, styleChoice, toneChoice string, wordCount int) (string, error) {
+func (g *Generator) GenerateArticle(
+	referenceArticles []string,
+	keywords []string,
+	theme,
+	targetAudience,
+	exclusions,
+	styleChoice,
+	toneChoice string,
+	wordCount int,
+	articlePurpose,
+	desiredContent,
+	introductionPoints,
+	mainPoints,
+	conclusionMessage string,
+) (string, error) {
 	// プロンプトの構築
 	var prompt strings.Builder
 
@@ -48,6 +62,23 @@ func (g *Generator) GenerateArticle(referenceArticles []string, keywords []strin
 	prompt.WriteString(fmt.Sprintf("- 文体: %s\n", styleChoice))
 	prompt.WriteString(fmt.Sprintf("- トーン: %s\n", toneChoice))
 	prompt.WriteString(fmt.Sprintf("- 目標文字数: %d\n", wordCount))
+	prompt.WriteString(fmt.Sprintf("- 記事の目的: %s\n", articlePurpose))
+
+	if desiredContent != "" {
+		prompt.WriteString(fmt.Sprintf("- 含めたい具体的な内容: %s\n", desiredContent))
+	}
+
+	if introductionPoints != "" {
+		prompt.WriteString(fmt.Sprintf("- 導入部分で触れるポイント: %s\n", introductionPoints))
+	}
+
+	if mainPoints != "" {
+		prompt.WriteString(fmt.Sprintf("- 本論で説明する項目: %s\n", mainPoints))
+	}
+
+	if conclusionMessage != "" {
+		prompt.WriteString(fmt.Sprintf("- 結論で強調したいメッセージ: %s\n", conclusionMessage))
+	}
 
 	if exclusions != "" {
 		prompt.WriteString(fmt.Sprintf("- 含めないでほしい内容: %s\n", exclusions))
