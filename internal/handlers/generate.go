@@ -157,12 +157,16 @@ func respondWithError(w http.ResponseWriter, code, message, details string, stat
 	if details != "" {
 		errResp.Error.Details = details
 	}
-	json.NewEncoder(w).Encode(errResp)
+	if err := json.NewEncoder(w).Encode(errResp); err != nil {
+		log.Printf("Failed to encode error response: %v", err)
+	}
 }
 
 // respondWithJSON はJSONレスポンスを返す
 func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

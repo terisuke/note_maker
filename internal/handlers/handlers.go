@@ -26,5 +26,8 @@ func ListModelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// レスポンスの返却
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models)
+	if err := json.NewEncoder(w).Encode(models); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
