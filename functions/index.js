@@ -27,7 +27,7 @@ const genAI = new GoogleGenerativeAI(
 
 // モデルの設定を更新
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-pro-preview-03-25",
+    model: "gemini-2.5-pro-preview-05-06",
     generationConfig: {
         temperature: 0.7,
         topP: 0.95,
