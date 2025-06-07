@@ -543,7 +543,7 @@ type ArticleGenerationInput struct {
 func GenerateArticleVertexAI(ctx context.Context, input ArticleGenerationInput) (string, error) {
 	projectID := os.Getenv("GOOGLE_PROJECT_ID")
 	location := os.Getenv("GOOGLE_LOCATION") // 例: "us-central1"
-	modelName := "gemini-2.5-pro-preview-03-25" // 使用するモデル
+	modelName := "gemini-2.5-pro-preview-06-05" // 使用するモデル
 
 	if projectID == "" || location == "" {
 		return "", fmt.Errorf("GOOGLE_PROJECT_ID and GOOGLE_LOCATION must be set")

@@ -26,14 +26,14 @@ const genAI = new GoogleGenerativeAI(
 );
 
 // モデルの設定を更新
-const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-pro-preview-05-06",
-    generationConfig: {
-        temperature: 0.7,
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 8192,
-    },
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.5-pro-preview-06-05",
+  generationConfig: {
+    temperature: 0.7,
+    topP: 0.95,
+    topK: 40,
+    maxOutputTokens: 8192,
+  },
 });
 
 exports.generateArticle = onRequest(async (request, response) => {
