@@ -27,12 +27,12 @@ const genAI = new GoogleGenerativeAI(
 
 // モデルの設定を更新
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro-preview-06-05",
+  model: "gemini-2.5-pro",
   generationConfig: {
     temperature: 0.7,
     topP: 0.95,
     topK: 40,
-    maxOutputTokens: 8192,
+    maxOutputTokens: 65536,
   },
 });
 

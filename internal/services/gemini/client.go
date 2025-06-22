@@ -45,7 +45,7 @@ func (c *Client) GenerateContent(prompt string) (string, error) {
 
 	result, err := c.client.Models.GenerateContent(
 		c.ctx,
-		"gemini-2.5-pro-preview-06-05",
+		"gemini-2.5-pro",
 		genai.Text(prompt),
 		&genai.GenerateContentConfig{
 			Temperature:     &temperature,
