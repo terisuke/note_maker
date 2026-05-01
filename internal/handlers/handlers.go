@@ -5,22 +5,20 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/teradakousuke/note_maker/internal/services/gemini"
+	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
 )
 
 // ListModelsHandler は利用可能なモデルのリストを返すハンドラー
 func ListModelsHandler(w http.ResponseWriter, r *http.Request) {
-	// Gemini APIクライアントの作成
-	client, err := gemini.NewClient()
+	client, err := llamacpp.NewClientFromEnv()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create Gemini client: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to create local LLM client: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// モデルの一覧を取得
-	models, err := client.ListModels()
+	models, err := client.ListModels(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list models: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to list local models: %v", err), http.StatusInternalServerError)
 		return
 	}
 

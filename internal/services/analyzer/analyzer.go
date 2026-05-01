@@ -4,17 +4,22 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/teradakousuke/note_maker/internal/services/note"
+	domain "github.com/teradakousuke/note_maker/internal/domain/article"
 )
+
+type SourceFetcher interface {
+	FetchArticle(ctx context.Context, articleURL string) (*domain.Article, error)
+	FetchUserLatestArticles(ctx context.Context, username string, limit int) ([]domain.Article, error)
+}
 
 // Analyzer は記事の文体分析を行うサービス
 type Analyzer struct {
-	fetcher       *note.Fetcher
+	fetcher       SourceFetcher
 	styleAnalyzer *StyleAnalyzer
 }
 
 // NewAnalyzer は新しいAnalyzerを作成
-func NewAnalyzer(fetcher *note.Fetcher) *Analyzer {
+func NewAnalyzer(fetcher SourceFetcher) *Analyzer {
 	return &Analyzer{
 		fetcher:       fetcher,
 		styleAnalyzer: NewStyleAnalyzer(),
@@ -23,7 +28,7 @@ func NewAnalyzer(fetcher *note.Fetcher) *Analyzer {
 
 // AnalyzeUserStyle はユーザーの文体を分析
 func (a *Analyzer) AnalyzeUserStyle(ctx context.Context, userID string) (*StyleAnalysis, error) {
-	articles, err := a.fetcher.FetchUserLatestArticles(userID, 5)
+	articles, err := a.fetcher.FetchUserLatestArticles(ctx, userID, 5)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +56,7 @@ func (a *Analyzer) AnalyzeUserStyle(ctx context.Context, userID string) (*StyleA
 
 // AnalyzeArticleStyle は記事の文体を分析
 func (a *Analyzer) AnalyzeArticleStyle(ctx context.Context, url string) (*StyleAnalysis, error) {
-	article, err := a.fetcher.FetchArticle(url)
+	article, err := a.fetcher.FetchArticle(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -71,17 +76,20 @@ func (a *Analyzer) AnalyzeArticleStyle(ctx context.Context, url string) (*StyleA
 
 // CompareStyles は2つの記事の文体を比較
 func (a *Analyzer) CompareStyles(ctx context.Context, url1, url2 string) (*StyleComparison, error) {
-	articles, err := a.fetcher.FetchMultipleArticles([]string{url1, url2})
+	article1, err := a.fetcher.FetchArticle(ctx, url1)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(articles) != 2 {
+	article2, err := a.fetcher.FetchArticle(ctx, url2)
+	if err != nil {
+		return nil, err
+	}
+	if article1 == nil || article2 == nil {
 		return nil, fmt.Errorf("2つの記事が必要です")
 	}
 
-	analysis1 := a.styleAnalyzer.AnalyzeWritingStyle([]string{articles[0].Content})
-	analysis2 := a.styleAnalyzer.AnalyzeWritingStyle([]string{articles[1].Content})
+	analysis1 := a.styleAnalyzer.AnalyzeWritingStyle([]string{article1.Content})
+	analysis2 := a.styleAnalyzer.AnalyzeWritingStyle([]string{article2.Content})
 
 	return &StyleComparison{
 		Article1: analysis1,

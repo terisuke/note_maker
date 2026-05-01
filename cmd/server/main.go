@@ -32,6 +32,12 @@ func main() {
 	// APIエンドポイントの設定
 	r.HandleFunc("/api/generate", handlers.GenerateArticleHandler).Methods("POST")
 	r.HandleFunc("/api/models", handlers.ListModelsHandler).Methods("GET")
+	r.HandleFunc("/api/author-style/analyze", handlers.AnalyzeAuthorStyleHandler).Methods("POST")
+	r.HandleFunc("/api/author-style/{id}", handlers.GetAuthorStyleHandler).Methods("GET")
+	r.HandleFunc("/api/brief-sessions", handlers.CreateBriefSessionHandler).Methods("POST")
+	r.HandleFunc("/api/brief-sessions/{id}", handlers.GetBriefSessionHandler).Methods("GET")
+	r.HandleFunc("/api/brief-sessions/{id}/answers", handlers.AnswerBriefSessionHandler).Methods("POST")
+	r.HandleFunc("/api/drafts", handlers.GenerateDraftHandler).Methods("POST")
 
 	// ルートパスへのアクセスはindex.htmlにリダイレクト
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
