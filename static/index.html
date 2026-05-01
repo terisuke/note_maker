@@ -1,140 +1,115 @@
-<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="ja">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Note記事下書きジェネレーター</title>
+  <title>Note Maker</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
 </head>
 
 <body>
-  <div class="container">
-    <header>
-      <h1>Note記事下書きジェネレーター</h1>
-      <p>Note記事URLまたはユーザー名と指示から、AIが新しい記事の下書きを生成します</p>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>Note Maker</h1>
+        <p>文体分析、取材、生成を分けて、ローカルLLMでNote下書きを作成します。</p>
+      </div>
+      <div id="model-status" class="status-pill">model: checking</div>
     </header>
 
-    <main>
-      <div class="input-section">
-        <div class="form-group">
-          <label for="note-url">参照するNote記事URL</label>
-          <input type="url" id="note-url" placeholder="https://note.com/...">
-          <p class="help-text">または、下のユーザー名を入力してください</p>
+    <main class="workflow">
+      <section class="panel" id="style-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">1</span>
+            <h2>文体分析</h2>
+          </div>
+          <p>Note記事を収集し、再利用できる文体ガイドを作ります。</p>
         </div>
 
-        <div class="form-group">
-          <label for="username">Noteユーザー名</label>
-          <input type="text" id="username" placeholder="例: username">
-          <p class="help-text">ユーザー名を入力すると、最新の3記事を参考にします</p>
+        <div class="field-row">
+          <label for="style-username">Noteユーザー名</label>
+          <input id="style-username" type="text" value="cor_instrument" autocomplete="off">
         </div>
-
-        <div class="form-group">
-          <label for="keywords">キーワード (カンマ区切り)</label>
-          <input type="text" id="keywords" placeholder="例: AI, 生産性向上, 未来">
-        </div>
-
-        <div class="form-group">
-          <label for="theme">主なテーマ・視点</label>
-          <input type="text" id="theme" placeholder="例: 中小企業におけるAI導入のメリット">
-        </div>
-
-        <div class="form-group">
-          <label for="target-audience">想定読者層</label>
-          <input type="text" id="target-audience" placeholder="例: 中小企業の経営者">
-        </div>
-
-        <div class="form-group">
-          <label for="exclusions">含めないでほしい内容</label>
-          <input type="text" id="exclusions" placeholder="例: 専門的すぎる技術詳細">
-        </div>
-
-        <div class="form-group">
-          <label for="article-purpose">記事の目的</label>
-          <select id="article-purpose">
-            <option value="情報提供">情報提供</option>
-            <option value="問題解決">問題解決</option>
-            <option value="啓蒙">啓蒙</option>
-            <option value="エンターテイメント">エンターテイメント</option>
-            <option value="商品・サービス紹介">商品・サービス紹介</option>
-            <option value="その他">その他</option>
+        <div class="field-row compact">
+          <label for="style-limit">取得記事数</label>
+          <select id="style-limit">
+            <option value="3">3</option>
+            <option value="5">5</option>
+            <option value="6" selected>6</option>
+            <option value="8">8</option>
           </select>
-          <input type="text" id="article-purpose-other" class="hidden" placeholder="具体的な目的を入力してください">
         </div>
+        <button id="analyze-style-btn" class="primary-btn">文体を分析</button>
 
-        <div class="form-group">
-          <label for="desired-content">記事に含めたい具体的な内容</label>
-          <textarea id="desired-content" rows="3" placeholder="例: 具体的な事例、データ、引用、インタビュー内容など"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label>記事の構成要素</label>
-          <div class="structure-inputs">
-            <div class="structure-input">
-              <label for="introduction-points">導入部分で触れるポイント</label>
-              <textarea id="introduction-points" rows="2" placeholder="例: 読者の課題、記事の重要性"></textarea>
+        <div id="style-result" class="result-box hidden">
+          <div class="result-grid">
+            <div>
+              <div class="meta-label">Profile ID</div>
+              <code id="profile-id"></code>
             </div>
-            <div class="structure-input">
-              <label for="main-points">本論で説明する項目</label>
-              <textarea id="main-points" rows="2" placeholder="例: 具体的な解決方法、実践的なステップ"></textarea>
+            <div>
+              <div class="meta-label">Guide ID</div>
+              <code id="guide-id"></code>
             </div>
-            <div class="structure-input">
-              <label for="conclusion-message">結論で強調したいメッセージ</label>
-              <textarea id="conclusion-message" rows="2" placeholder="例: 読者へのメッセージ、次のアクション"></textarea>
+            <div>
+              <div class="meta-label">Articles</div>
+              <code id="article-count"></code>
             </div>
           </div>
+          <h3>文体ガイド</h3>
+          <pre id="guide-preview"></pre>
+        </div>
+      </section>
+
+      <section class="panel" id="interview-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">2</span>
+            <h2>記事取材</h2>
+          </div>
+          <p>固定質問の後、重要な回答に深掘り質問を行います。</p>
         </div>
 
-        <div class="form-group-inline">
-          <div class="form-group">
-            <label for="style-choice">文体</label>
-            <select id="style-choice">
-              <option value="ですます調" selected>ですます調</option>
-              <option value="である調">である調</option>
-            </select>
+        <button id="start-interview-btn" class="secondary-btn" disabled>取材を開始</button>
+        <div id="interview-area" class="hidden">
+          <div id="question-log" class="question-log"></div>
+          <div class="field-row">
+            <label for="answer-input">回答</label>
+            <textarea id="answer-input" rows="4"></textarea>
           </div>
-          <div class="form-group">
-            <label for="tone-choice">トーン</label>
-            <select id="tone-choice">
-              <option value="客観的" selected>客観的</option>
-              <option value="情熱的">情熱的</option>
-              <option value="ユーモラス">ユーモラス</option>
-              <option value="前向き">前向き</option>
-              <option value="丁寧">丁寧</option>
-              <option value="具体的">具体的</option>
-              <option value="親しみやすい">親しみやすい</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="word-count">目標文字数</label>
-            <select id="word-count">
-              <option value="1000">短め (~1000字)</option>
-              <option value="1500" selected>中程度 (~1500字)</option>
-              <option value="2000">やや長め (~2000字)</option>
-              <option value="3000">長め (~3000字)</option>
-            </select>
+          <div class="button-row">
+            <button id="submit-answer-btn" class="primary-btn">回答を送信</button>
+            <button id="skip-deep-dive-btn" class="secondary-btn hidden">深掘りをスキップ</button>
           </div>
         </div>
 
-        <button id="generate-btn" class="primary-btn">記事下書きを生成</button>
-      </div>
+        <div id="brief-result" class="result-box hidden">
+          <h3>記事ブリーフ</h3>
+          <pre id="brief-preview"></pre>
+        </div>
+      </section>
 
-      <div id="loading" class="hidden">
-        <div class="spinner"></div>
-        <p>記事を生成中です…</p>
-        <p class="small">※AIモデルの処理には1分程度かかる場合があります</p>
-      </div>
-
-      <div id="result-section" class="hidden">
-        <h2>生成された下書き</h2>
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="preview">プレビュー</button>
-          <button class="tab-btn" data-tab="markdown">マークダウン</button>
+      <section class="panel" id="draft-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">3</span>
+            <h2>生成と評価</h2>
+          </div>
+          <p>文体ガイドと記事ブリーフだけを使って下書きを生成します。</p>
         </div>
 
-        <div class="tab-content">
+        <button id="generate-draft-btn" class="primary-btn" disabled>下書きを生成</button>
+        <div id="draft-status" class="status-line"></div>
+
+        <div id="draft-result" class="hidden">
+          <div id="evaluation-summary" class="evaluation"></div>
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="preview">プレビュー</button>
+            <button class="tab-btn" data-tab="markdown">Markdown</button>
+          </div>
           <div id="preview-tab" class="tab-pane active">
             <div id="preview-content"></div>
           </div>
@@ -143,14 +118,15 @@
             <button id="copy-btn" class="secondary-btn">コピー</button>
           </div>
         </div>
+      </section>
+
+      <div id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p id="loading-text">処理中です...</p>
       </div>
 
       <div id="error-message-area"></div>
     </main>
-
-    <footer>
-      <p>© 2025 Note記事下書きジェネレーター</p>
-    </footer>
   </div>
 
   <script src="/static/js/script.js"></script>

@@ -28,6 +28,7 @@ Thumbs.db
 bin/
 dist/
 tmp/
+server
 
 # ログ関連
 *.log
@@ -40,4 +41,4 @@ node_modules/
 # その他
 *.bak
 *.tmp
-*.temp 
+*.temp

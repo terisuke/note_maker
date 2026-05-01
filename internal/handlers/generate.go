@@ -1,31 +1,34 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/teradakousuke/note_maker/internal/services/gemini"
-	"github.com/teradakousuke/note_maker/internal/services/note"
+	articleapp "github.com/teradakousuke/note_maker/internal/application/article"
+	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
+	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
+	notenote "github.com/teradakousuke/note_maker/internal/infrastructure/note"
 )
 
 // GenerateRequest は記事生成のリクエストボディの構造体
 type GenerateRequest struct {
-	NoteURL            string   `json:"note_url"`
-	Username           string   `json:"username"`
-	Keywords           []string `json:"keywords"`
-	Theme              string   `json:"theme"`
-	TargetAudience     string   `json:"target_audience"`
-	Exclusions         string   `json:"exclusions"`
-	StyleChoice        string   `json:"style_choice"`
-	ToneChoice         string   `json:"tone_choice"`
-	WordCount          int      `json:"word_count"`
-	ArticlePurpose     string   `json:"article_purpose"`
-	DesiredContent     string   `json:"desired_content"`
-	IntroductionPoints string   `json:"introduction_points"`
-	MainPoints         string   `json:"main_points"`
-	ConclusionMessage  string   `json:"conclusion_message"`
+	NoteURL               string   `json:"note_url"`
+	Username              string   `json:"username"`
+	Keywords              []string `json:"keywords"`
+	Theme                 string   `json:"theme"`
+	TargetAudience        string   `json:"target_audience"`
+	Exclusions            string   `json:"exclusions"`
+	StyleChoice           string   `json:"style_choice"`
+	ToneChoice            string   `json:"tone_choice"`
+	WordCount             int      `json:"word_count"`
+	ReferenceArticleLimit int      `json:"reference_article_limit"`
+	ArticlePurpose        string   `json:"article_purpose"`
+	DesiredContent        string   `json:"desired_content"`
+	IntroductionPoints    string   `json:"introduction_points"`
+	MainPoints            string   `json:"main_points"`
+	ConclusionMessage     string   `json:"conclusion_message"`
 }
 
 // ErrorResponse はエラーレスポンスの構造体
@@ -42,8 +45,32 @@ type SuccessResponse struct {
 	Draft string `json:"draft"`
 }
 
+type articleService interface {
+	GenerateArticle(ctx context.Context, req articledomain.GenerationRequest) (string, error)
+}
+
 // GenerateArticleHandler は記事生成のハンドラー
 func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
+	service, err := newDefaultArticleService()
+	if err != nil {
+		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED",
+			"Failed to initialize local LLM client",
+			err.Error(),
+			http.StatusInternalServerError)
+		return
+	}
+	handleGenerateArticle(service, w, r)
+}
+
+func newDefaultArticleService() (articleService, error) {
+	generator, err := llamacpp.NewClientFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return articleapp.NewService(notenote.NewFetcher(), generator, nil), nil
+}
+
+func handleGenerateArticle(service articleService, w http.ResponseWriter, r *http.Request) {
 	var req GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
@@ -51,91 +78,29 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// 入力検証
-	if req.Theme == "" {
-		respondWithError(w, "MISSING_REQUIRED_FIELD", "theme is required", "", http.StatusBadRequest)
+	generationRequest := articledomain.GenerationRequest{
+		NoteURL:               req.NoteURL,
+		Username:              req.Username,
+		Keywords:              req.Keywords,
+		Theme:                 req.Theme,
+		TargetAudience:        req.TargetAudience,
+		Exclusions:            req.Exclusions,
+		StyleChoice:           req.StyleChoice,
+		ToneChoice:            req.ToneChoice,
+		WordCount:             req.WordCount,
+		ReferenceArticleLimit: req.ReferenceArticleLimit,
+		ArticlePurpose:        req.ArticlePurpose,
+		DesiredContent:        req.DesiredContent,
+		IntroductionPoints:    req.IntroductionPoints,
+		MainPoints:            req.MainPoints,
+		ConclusionMessage:     req.ConclusionMessage,
+	}
+	if err := generationRequest.Validate(); err != nil {
+		respondWithError(w, "MISSING_REQUIRED_FIELD", err.Error(), "", http.StatusBadRequest)
 		return
 	}
 
-	// デフォルト値設定
-	if req.StyleChoice == "" {
-		req.StyleChoice = "ですます調"
-	}
-	if req.ToneChoice == "" {
-		req.ToneChoice = "客観的"
-	}
-	if req.WordCount <= 0 {
-		req.WordCount = 1500
-	}
-
-	// Note記事取得サービスの初期化
-	fetcher := note.NewFetcher()
-
-	// 記事の取得
-	var referenceArticles []string
-	if req.Username != "" {
-		// ユーザー名から最新の記事を取得
-		articles, err := fetcher.FetchUserLatestArticles(req.Username, 3)
-		if err != nil {
-			respondWithError(w, "FETCH_ARTICLES_FAILED",
-				fmt.Sprintf("Failed to fetch articles for user %s", req.Username),
-				err.Error(),
-				http.StatusInternalServerError)
-			return
-		}
-		// 記事の内容を[]stringに変換
-		for _, article := range articles {
-			if article.Content != "" {
-				referenceArticles = append(referenceArticles, article.Content)
-			}
-		}
-	} else if req.NoteURL != "" {
-		// 単一の記事を取得
-		article, err := fetcher.FetchArticle(req.NoteURL)
-		if err != nil {
-			respondWithError(w, "FETCH_ARTICLE_FAILED",
-				fmt.Sprintf("Failed to fetch article from URL %s", req.NoteURL),
-				err.Error(),
-				http.StatusInternalServerError)
-			return
-		}
-		if article.Content != "" {
-			referenceArticles = append(referenceArticles, article.Content)
-		}
-	}
-
-	// 参照記事が取得できなかった場合のエラー処理
-	if len(referenceArticles) == 0 {
-		// エラーを返さず、空の参照記事で続行
-		log.Printf("No reference articles found, proceeding with empty references")
-	}
-
-	// Gemini APIを使用した記事生成サービスの初期化
-	generator, err := gemini.NewGenerator()
-	if err != nil {
-		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED",
-			"Failed to initialize article generator",
-			err.Error(),
-			http.StatusInternalServerError)
-		return
-	}
-
-	// 記事の生成
-	draft, err := generator.GenerateArticle(
-		referenceArticles,
-		req.Keywords,
-		req.Theme,
-		req.TargetAudience,
-		req.Exclusions,
-		req.StyleChoice,
-		req.ToneChoice,
-		req.WordCount,
-		req.ArticlePurpose,
-		req.DesiredContent,
-		req.IntroductionPoints,
-		req.MainPoints,
-		req.ConclusionMessage,
-	)
+	draft, err := service.GenerateArticle(r.Context(), generationRequest)
 	if err != nil {
 		respondWithError(w, "ARTICLE_GENERATION_FAILED",
 			"Failed to generate article",
