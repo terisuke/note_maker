@@ -205,14 +205,14 @@ Current implementation status as of 2026-05-02:
 - Final verification uses lightweight Gemma by default (`gemma4:latest`, currently the Evo X2 E4B-class Ollama model) to check brief coverage, style consistency, output-format notation, and unsupported factual assertions before the UI presents the final draft ([#47](https://github.com/terisuke/note_maker/issues/47)).
 - Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A started with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
 - Phase A2 is implemented and merged: `llamacpp.Client.GenerateStream`, streaming follow-up/draft service paths, `Accept: text/event-stream` handlers, browser Cancel controls, heartbeat events, and final runtime metrics ([#18](https://github.com/terisuke/note_maker/issues/18)).
-- Phase A1 is implemented in code: the interview surface now renders a chat-style transcript, answer bubbles can be edited inline, and edits create child sessions via fork-on-edit while retaining `parent_session_id` lineage ([#17](https://github.com/terisuke/note_maker/issues/17)).
+- Phase A1 is implemented and merged: the interview surface now renders a chat-style transcript, answer bubbles can be edited inline, and edits create child sessions via fork-on-edit while retaining `parent_session_id` lineage ([#17](https://github.com/terisuke/note_maker/issues/17)).
+- Phase A4 is implemented in code: follow-up prompts include parent question, parent answer, and active style guide context; rule-based fallback questions use the same quoted parent-answer prefix; the transcript labels the parent answer as the deep-dive rationale ([#20](https://github.com/terisuke/note_maker/issues/20)). Validation is recorded in [Issue 20 deep-dive rationale validation](../validation/issue-20-deep-dive-rationale-2026-05-02.md).
 
 Near-term execution order:
 
-1. Merge [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answer/fork UX, using the streaming primitives from #18.
-2. [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
-3. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.
-4. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts.
+1. Merge [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
+2. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.
+3. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts.
 
 ## Tracked issues
 

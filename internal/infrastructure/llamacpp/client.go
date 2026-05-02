@@ -240,7 +240,7 @@ func (c *Client) GenerateWithSystem(ctx context.Context, systemPrompt, prompt st
 
 	var response chatCompletionResponse
 	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
-		if c.fallback != nil {
+		if c.fallback != nil && ctx.Err() == nil {
 			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
 		}
 		return "", err
@@ -267,7 +267,7 @@ func (c *Client) GenerateWithSystem(ctx context.Context, systemPrompt, prompt st
 func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
 	content, err := c.generateStream(ctx, prompt, onChunk)
 	if err != nil {
-		if c.fallback != nil && strings.TrimSpace(content) == "" {
+		if c.fallback != nil && strings.TrimSpace(content) == "" && ctx.Err() == nil {
 			if streamingFallback, ok := any(c.fallback).(interface {
 				GenerateStream(context.Context, string, func(string) error) (string, error)
 			}); ok {
@@ -381,7 +381,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		if c.fallback != nil {
+		if c.fallback != nil && ctx.Err() == nil {
 			return c.fallback.ListModels(ctx)
 		}
 		return nil, fmt.Errorf("list llama.cpp models: %w", err)

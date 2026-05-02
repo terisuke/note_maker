@@ -213,6 +213,38 @@ func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
 	}
 }
 
+func TestGenerateDoesNotFallbackAfterContextDeadline(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Too Late"}}]}`))
+	}))
+	defer primaryServer.Close()
+	fallbackCalled := false
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalled = true
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Fallback Draft"}}]}`))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "remote")
+	t.Setenv("FALLBACK_LLM_BASE_URL", fallbackServer.URL+"/v1")
+	t.Setenv("FALLBACK_LLM_MODEL", "fallback")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	if _, err := client.Generate(ctx, "write"); err == nil {
+		t.Fatal("expected deadline error")
+	}
+	if fallbackCalled {
+		t.Fatal("fallback should not be called after context deadline")
+	}
+}
+
 func TestGenerateUsesOrderedFallbackChain(t *testing.T) {
 	firstFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "first fallback unavailable", http.StatusServiceUnavailable)

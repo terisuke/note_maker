@@ -581,7 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
     context.className = 'parent-context';
     const parentQuestion = state.questionTextById[targetQuestionId] || targetQuestionId;
     const parentContent = answerValue(parentAnswer, 'content', 'Content') || '';
-    context.textContent = `${parentQuestion}: ${truncate(parentContent, 140)}`;
+    context.textContent = `深掘りの根拠 - ${parentQuestion}: ${truncate(parentContent, 140)}`;
     return context;
   }
 

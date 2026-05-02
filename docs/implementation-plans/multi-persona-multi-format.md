@@ -42,8 +42,8 @@ Near-term implementation cut:
 | Order | Issue | Why now | Done when |
 |---|---|---|---|
 | 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Implemented and merged. |
-| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented in code: answers render as editable bubbles and edits fork the in-memory session. |
-| 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Every follow-up references the parent answer in prompt and UI. |
+| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented and merged: answers render as editable bubbles and edits fork the in-memory session. |
+| 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Implemented in code: every follow-up references the parent answer in prompt and UI, with validation recorded under `docs/validation/`. |
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
 | 5 | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers and draft versions need durable storage before broader persona library work. | SQLite stores sessions, answers, guides, articles, and draft versions. |
 
@@ -98,11 +98,14 @@ Acceptance:
 - Follow-up prompt (`internal/handlers/workflow.go:437-453`) gains the parent question text and the latest answer summary, plus the active style guide as context.
 - UI renders deep-dive bubbles with a quoted excerpt from the parent answer ("「〇〇」というご回答を踏まえて…").
 - Fallback (rule-based) text uses the same prefix to keep tone consistent.
+- Scenario harness records per-run medium, elapsed time, draft length, style score, and lightweight verification result so Phase A/B/C runs can build a cross-medium average over time.
 
 Acceptance:
 
 - Every deep-dive bubble in the transcript visibly references its parent answer.
 - Falling back to the rule-based path (LLM stub) still produces a contextual prefix.
+
+Implementation note as of 2026-05-02: #20 is implemented in code. Validation used a different medium from the prior note-oriented run: `terisuke` + `markdown_blog` + `cor_blog` brief. The draft-only rerun on Evo X2 Tailnet primary produced `elapsed_seconds=439.86`, `runes=3675`, `score=72.3`, and lightweight verification PASS. The strict note-style threshold of 82 was not met, which is expected signal that company-blog baselines need to be tracked separately from note-style baselines.
 
 ## Phase B — Persona + OutputFormat
 
@@ -310,4 +313,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18) is merged and [#17](https://github.com/terisuke/note_maker/issues/17) is implemented in code; after merging #17, continue with [#20](https://github.com/terisuke/note_maker/issues/20) so generated deep-dive questions expose their rationale inside the transcript.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18) and [#17](https://github.com/terisuke/note_maker/issues/17) are merged. [#20](https://github.com/terisuke/note_maker/issues/20) is implemented in code; after merging it, continue with [#19](https://github.com/terisuke/note_maker/issues/19) for editable drafts and per-section regeneration.
