@@ -1,8 +1,8 @@
 # Issue and ADR guardrails
 
-Date: 2026-05-01
+Date: 2026-05-01 (last updated 2026-05-02)
 
-This document maps GitHub issues to ADR 0001 and defines implementation guardrails.
+This document maps GitHub issues to [ADR 0001](../adrs/0001-three-phase-local-article-generation.md) and [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) and defines implementation guardrails.
 
 ## Issue Map
 
@@ -13,6 +13,15 @@ This document maps GitHub issues to ADR 0001 and defines implementation guardrai
 | [#9](https://github.com/terisuke/note_maker/issues/9) | Draft generation from style guide and brief | Draft Generation | Draft generation must not fetch Note articles; it only consumes `WritingStyleGuide + ArticleBrief`. |
 | [#10](https://github.com/terisuke/note_maker/issues/10) | API, UI, and scenario integration | API Direction / Testing Strategy | `go test ./...` stays offline; network/LLM scenarios require explicit env vars. |
 
+Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/0002-multi-persona-multi-format-extension.md#tracked-issues) for the new umbrella):
+
+| Issue | Scope | ADR Section | Guardrail |
+| --- | --- | --- | --- |
+| [#11](https://github.com/terisuke/note_maker/issues/11) | Strict style threshold tuning | ADR 0001 Draft Generation | Thresholds remain code-level; tuning may be revised once `first_person` density is computed per persona (ADR 0002 §Persona). |
+| [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E for model config and question CRUD | ADR 0002 §Testing Strategy | Phase D folds persona switch, format switch, edit-and-fork, streaming, regenerate-section into the E2E surface. |
+| [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
+| [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
+
 Closed historical issues:
 
 | Issue | Completed Scope | Relation to ADR 0001 |
@@ -21,6 +30,15 @@ Closed historical issues:
 | [#4](https://github.com/terisuke/note_maker/issues/4) | Resilient Note acquisition | Provides article acquisition adapter for author style analysis. |
 | [#5](https://github.com/terisuke/note_maker/issues/5) | DDD boundary split | Provides package boundary precedent. |
 | [#6](https://github.com/terisuke/note_maker/issues/6) | API contract alignment | Existing compatibility endpoint remains while new workflow is added. |
+
+## ADR 0002 Phase Map
+
+The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (A, B, C, D) are tracked as separate issues in the new tranche. Their guardrails extend the rules below:
+
+- Phase A (Conversation UX): no domain changes, only handler streaming + frontend rewrite. Must keep all existing `go test ./...` green without modification.
+- Phase B (Persona / OutputFormat): introduces `internal/domain/persona` and `internal/domain/format`. The note.com host check moves out of application services into `internal/infrastructure/source/note` only.
+- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store becomes import/export utility.
+- Phase D (Quality): handler tests are mandatory before any further endpoint additions land. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails
 
