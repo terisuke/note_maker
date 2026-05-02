@@ -12,11 +12,12 @@ import (
 type Kind string
 
 const (
-	KindNote  Kind = "note"
-	KindZenn  Kind = "zenn"
-	KindQiita Kind = "qiita"
-	KindRSS   Kind = "rss"
-	KindHTML  Kind = "html"
+	KindNote   Kind = "note"
+	KindZenn   Kind = "zenn"
+	KindQiita  Kind = "qiita"
+	KindRSS    Kind = "rss"
+	KindHTML   Kind = "html"
+	KindGitHub Kind = "github"
 )
 
 // Ref points to a public author, feed, or article.
@@ -29,7 +30,7 @@ type Ref struct {
 // Validate rejects empty or unknown references.
 func (r Ref) Validate() error {
 	switch r.Kind {
-	case KindNote, KindZenn, KindQiita:
+	case KindNote, KindZenn, KindQiita, KindGitHub:
 		if strings.TrimSpace(r.Ref) == "" && strings.TrimSpace(r.URL) == "" {
 			return fmt.Errorf("%s source requires ref or url", r.Kind)
 		}

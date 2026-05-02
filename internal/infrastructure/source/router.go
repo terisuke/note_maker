@@ -15,11 +15,12 @@ import (
 
 // Router dispatches public source refs to concrete fetchers.
 type Router struct {
-	note  *notenote.Fetcher
-	zenn  *ZennFetcher
-	qiita *QiitaFetcher
-	rss   *RSSFetcher
-	html  *HTMLFetcher
+	note   *notenote.Fetcher
+	zenn   *ZennFetcher
+	qiita  *QiitaFetcher
+	rss    *RSSFetcher
+	html   *HTMLFetcher
+	github *GitHubMarkdownFetcher
 }
 
 // NewRouter creates a source router with shared HTTP settings.
@@ -33,11 +34,12 @@ func NewRouterWithClient(client *http.Client) *Router {
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
 	return &Router{
-		note:  notenote.NewFetcherWithClient(client),
-		zenn:  NewZennFetcher(client),
-		qiita: NewQiitaFetcher(client),
-		rss:   NewRSSFetcher(client),
-		html:  NewHTMLFetcher(client),
+		note:   notenote.NewFetcherWithClient(client),
+		zenn:   NewZennFetcher(client),
+		qiita:  NewQiitaFetcher(client),
+		rss:    NewRSSFetcher(client),
+		html:   NewHTMLFetcher(client),
+		github: NewGitHubMarkdownFetcher(client),
 	}
 }
 
@@ -56,6 +58,8 @@ func (r *Router) FetchList(ctx context.Context, ref sourcedomain.Ref, limit int)
 		return r.rss.FetchList(ctx, ref, limit)
 	case sourcedomain.KindHTML:
 		return r.html.FetchList(ctx, ref, limit)
+	case sourcedomain.KindGitHub:
+		return r.github.FetchList(ctx, ref, limit)
 	default:
 		return nil, fmt.Errorf("unsupported source kind %q", ref.Kind)
 	}
@@ -80,6 +84,8 @@ func (r *Router) FetchArticle(ctx context.Context, ref sourcedomain.Ref) (*sourc
 		return r.rss.FetchArticle(ctx, ref)
 	case sourcedomain.KindHTML:
 		return r.html.FetchArticle(ctx, ref)
+	case sourcedomain.KindGitHub:
+		return r.github.FetchArticle(ctx, ref)
 	default:
 		return nil, fmt.Errorf("unsupported source kind %q", ref.Kind)
 	}
@@ -111,7 +117,8 @@ func (f *AuthorStyleFetcher) FetchArticle(ctx context.Context, articleURL string
 }
 
 // FetchUserLatestArticles supports explicit refs such as zenn:cloudia,
-// qiita:Cloudia_Cor_Inc, rss:https://example.com/feed.xml, and legacy note usernames.
+// qiita:Cloudia_Cor_Inc, rss:https://example.com/feed.xml,
+// github:owner/repo/path, and legacy note usernames.
 func (f *AuthorStyleFetcher) FetchUserLatestArticles(ctx context.Context, username string, limit int) ([]articledomain.Article, error) {
 	snapshots, err := f.router.FetchList(ctx, RefFromSelector(username), limit)
 	if err != nil {
@@ -147,6 +154,8 @@ func RefFromURL(rawURL string) sourcedomain.Ref {
 		return sourcedomain.Ref{Kind: sourcedomain.KindZenn, URL: rawURL}
 	case host == "qiita.com" || strings.HasSuffix(host, ".qiita.com"):
 		return sourcedomain.Ref{Kind: sourcedomain.KindQiita, URL: rawURL}
+	case host == "github.com" || strings.HasSuffix(host, ".github.com") || host == "raw.githubusercontent.com":
+		return sourcedomain.Ref{Kind: sourcedomain.KindGitHub, URL: rawURL}
 	case strings.Contains(strings.ToLower(parsed.Path), "rss") || strings.Contains(strings.ToLower(parsed.Path), "feed") || strings.HasSuffix(strings.ToLower(parsed.Path), ".xml"):
 		return sourcedomain.Ref{Kind: sourcedomain.KindRSS, URL: rawURL}
 	default:
@@ -181,6 +190,8 @@ func parseKindSelector(selector string) (sourcedomain.Ref, bool) {
 		return sourcedomain.Ref{Kind: sourcedomain.KindRSS, URL: value}, true
 	case "html":
 		return sourcedomain.Ref{Kind: sourcedomain.KindHTML, URL: value}, true
+	case "github":
+		return sourcedomain.Ref{Kind: sourcedomain.KindGitHub, Ref: strings.Trim(value, "/")}, true
 	default:
 		return sourcedomain.Ref{}, false
 	}
