@@ -60,6 +60,49 @@ func (s *ArticleBriefSession) RecordAnswer(content string) (ArticleQuestion, err
 	return question, nil
 }
 
+// ForkWithEditedAnswer creates a child session whose history is rewritten from one answer.
+func (s ArticleBriefSession) ForkWithEditedAnswer(newID, answerID, content string) (ArticleBriefSession, error) {
+	newID = strings.TrimSpace(newID)
+	answerID = strings.TrimSpace(answerID)
+	if newID == "" {
+		return ArticleBriefSession{}, fmt.Errorf("new session id is required")
+	}
+	if answerID == "" {
+		return ArticleBriefSession{}, fmt.Errorf("answer id is required")
+	}
+	answerIndex := -1
+	for i, answer := range s.Answers {
+		if answer.QuestionID == answerID {
+			answerIndex = i
+			break
+		}
+	}
+	if answerIndex < 0 {
+		return ArticleBriefSession{}, fmt.Errorf("answer %q was not found", answerID)
+	}
+	question, ok := s.questionForAnswer(s.Answers[answerIndex])
+	if !ok {
+		return ArticleBriefSession{}, fmt.Errorf("question metadata for answer %q was not found", answerID)
+	}
+	edited, err := NewBriefAnswer(question, content)
+	if err != nil {
+		return ArticleBriefSession{}, err
+	}
+
+	answers := make([]BriefAnswer, 0, answerIndex+1)
+	answers = append(answers, s.Answers[:answerIndex]...)
+	answers = append(answers, edited)
+
+	fork := s
+	fork.ID = newID
+	fork.ParentSessionID = s.ID
+	fork.Answers = answers
+	fork.Completed = false
+	fork.DeepDiveSkipped = false
+	fork.refreshPhase()
+	return fork, nil
+}
+
 // NewBriefAnswer normalizes answer content and copies question metadata onto the answer.
 func NewBriefAnswer(question ArticleQuestion, content string) (BriefAnswer, error) {
 	content = strings.TrimSpace(content)
@@ -366,6 +409,36 @@ func questionByID(questions []ArticleQuestion) map[string]ArticleQuestion {
 		result[question.ID] = question
 	}
 	return result
+}
+
+func (s ArticleBriefSession) questionForAnswer(answer BriefAnswer) (ArticleQuestion, bool) {
+	if answer.FlowType == QuestionFlowMain {
+		for _, question := range s.Questions {
+			if question.ID == answer.QuestionID {
+				return question, true
+			}
+		}
+		return ArticleQuestion{}, false
+	}
+	if answer.FlowType == QuestionFlowDeepDiveFollowUp {
+		targetField := "custom"
+		for _, question := range s.Questions {
+			if question.ID == answer.TargetQuestionID {
+				targetField = question.TargetField
+				break
+			}
+		}
+		return ArticleQuestion{
+			ID:               answer.QuestionID,
+			Text:             "Edited deep-dive answer",
+			FlowType:         QuestionFlowDeepDiveFollowUp,
+			Required:         true,
+			TargetField:      targetField,
+			TargetQuestionID: answer.TargetQuestionID,
+			FollowUpIndex:    answer.FollowUpIndex,
+		}, true
+	}
+	return ArticleQuestion{}, false
 }
 
 func isDeepDiveCandidate(content string) bool {

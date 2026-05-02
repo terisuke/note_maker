@@ -74,6 +74,18 @@ func (s *InterviewService) AnswerStream(ctx context.Context, session domain.Arti
 	return s.answer(ctx, session, content, events)
 }
 
+// ForkAnswer edits an existing answer by creating a child session at that point.
+func (s *InterviewService) ForkAnswer(ctx context.Context, session domain.ArticleBriefSession, newSessionID, answerID, content string) (InterviewResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fork, err := session.ForkWithEditedAnswer(newSessionID, answerID, content)
+	if err != nil {
+		return InterviewResult{}, err
+	}
+	return s.buildResultWithEvents(ctx, fork, StreamEvents{})
+}
+
 func (s *InterviewService) answer(ctx context.Context, session domain.ArticleBriefSession, content string, events StreamEvents) (InterviewResult, error) {
 	if ctx == nil {
 		ctx = context.Background()

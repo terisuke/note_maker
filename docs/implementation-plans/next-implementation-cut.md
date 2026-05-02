@@ -22,7 +22,7 @@ Open and active:
 
 ## Next target
 
-Start with [#18](https://github.com/terisuke/note_maker/issues/18), not [#17](https://github.com/terisuke/note_maker/issues/17).
+The ordering correction is now applied: [#18](https://github.com/terisuke/note_maker/issues/18) landed first, then [#17](https://github.com/terisuke/note_maker/issues/17) is being implemented on top of those streaming primitives.
 
 Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `1396.80s` and still missed quality gates. A spinner-only UI is not usable at that latency. Streaming, heartbeat, cancellation, and partial-result retention are the highest-leverage improvement before reshaping the transcript.
 
@@ -33,12 +33,13 @@ Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `13
    - Add status, heartbeat, token, done, and error event types.
    - Support cancellation from browser disconnect and explicit Cancel.
    - Keep non-streaming generation for tests and compatibility.
-   - Status: implemented in the current feature branch; close only after Tailnet Evo X2 OpenAI-compatible API validation and PR merge.
+   - Status: implemented and merged.
 
 2. **[#17] Chat transcript and editable answers**
    - Replace the bounded log with a transcript surface.
    - Render existing fixed and deep-dive answers as bubbles.
    - Add in-memory fork-on-edit endpoint first; persistence follows in Phase C.
+   - Status: implemented in code; merge before moving to #20.
 
 3. **[#20] Deep-dive rationale in transcript**
    - Add parent-answer excerpts to prompt and UI.
