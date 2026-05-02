@@ -55,6 +55,26 @@
             <select id="verify-model"></select>
           </div>
         </div>
+        <div class="storage-config">
+          <div class="section-heading">
+            <h3>保存方式</h3>
+            <button id="save-storage-btn" class="secondary-btn" type="button">保存方式を保存</button>
+          </div>
+          <div class="config-grid">
+            <div class="field-row">
+              <label for="storage-driver">保存先</label>
+              <select id="storage-driver">
+                <option value="json">JSONファイル</option>
+                <option value="sqlite">SQLite</option>
+              </select>
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="storage-path">保存パス</label>
+              <input id="storage-path" type="text" autocomplete="off">
+            </div>
+          </div>
+          <div id="storage-summary" class="storage-summary" aria-live="polite"></div>
+        </div>
         <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
 
         <div class="question-config">

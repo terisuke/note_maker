@@ -87,7 +87,9 @@ mise run evo-x2
 
 文体分析結果、取材セッションの回答、完成ブリーフは `WORKFLOW_STORE_PATH` にJSONとして永続化されます。既定値は `data/workflow_store.json` です。
 
-SQLiteを試す場合は `WORKFLOW_STORE_DRIVER=sqlite` を指定します。既定パスは `data/workflow_store.db` で、`WORKFLOW_STORE_PATH` で変更できます。JSON store は互換性のため既定のまま残しています。
+保存方式は設定画面の「保存方式」から選べます。UIで変更した内容は `data/app_config.json` に保存され、サーバー再起動後に反映されます。SQLiteを選んだ場合の既定パスは `data/workflow_store.db` です。JSON store は互換性のため既定のまま残しています。
+
+開発・検証で強制したい場合は `WORKFLOW_STORE_DRIVER=sqlite` を指定できます。この環境変数がある場合、設定画面では保存方式がロック表示になります。
 
 フェーズ別モデルの目安:
 
