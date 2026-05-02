@@ -217,13 +217,15 @@ Current implementation status as of 2026-05-03:
 - The 2026-05-03 browser 500 analysis showed an implementation drift: plain web-app startup still defaulted to workstation-local `127.0.0.1:8081`, while this ADR requires Evo X2 Tailnet as primary. Issue [#63](https://github.com/terisuke/note_maker/issues/63) restores the default order to Evo X2 Ollama over Tailnet → Evo X2 llama.cpp → workstation-local llama.cpp and makes the UI show the actual endpoint/model reported by SSE.
 - The interview question set was simplified before the next Evo X2 run ([#66](https://github.com/terisuke/note_maker/issues/66)): broad editorial questions are now split into smaller plain-Japanese prompts, medium-specific prompts cover note/Zenn/Qiita/Cor blog needs, and optional questions can be advanced as `未定`. Validation is recorded in [Issue 66 plain brief questions validation](../validation/issue-66-plain-brief-questions-2026-05-03.md).
 - Style analysis is now persona/format-aware ([#68](https://github.com/terisuke/note_maker/issues/68)): the web UI shows a general `文体ソース` selector instead of `Noteユーザー名`, defaults it to note/Zenn/Qiita/Cor GitHub Markdown based on the selected mode, and makes persona presets include output-format notes. Validation is recorded in [Issue 68 media-aware style source validation](../validation/issue-68-media-aware-style-source-2026-05-03.md).
+- The 2026-05-03 full Tailnet Evo X2 media-matrix run proved that the runtime path works but also proved that the current scenario is not sufficient as an interview-template acceptance test: only `terisuke_note_essay` passed, Cor blog failed on assistant preamble leakage, Zenn/Qiita failed on cross-format notation leakage, and homepage failed long-form gates despite being a short HTML section. Runtime stabilization is therefore decomposed under epic [#40](https://github.com/terisuke/note_maker/issues/40) into [#70](https://github.com/terisuke/note_maker/issues/70) template/brief scenario coverage, [#71](https://github.com/terisuke/note_maker/issues/71) failed draft artifacts, [#72](https://github.com/terisuke/note_maker/issues/72) bounded format repair, [#73](https://github.com/terisuke/note_maker/issues/73) output-format-specific gates, and [#74](https://github.com/terisuke/note_maker/issues/74) staged Evo X2 reruns.
 
 Near-term execution order:
 
-1. Browser sanity check for the #66/#68 setup — confirm both the smaller questions and the style source change when switching note/Zenn/Qiita/Cor blog modes.
-2. Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) — expose persisted sessions, guides, briefs, drafts, and verification artifacts in the web app.
-3. Runtime stabilization ([#40](https://github.com/terisuke/note_maker/issues/40)) — first run one bounded media-matrix case through `cmd/scenario/live_media_matrix`, then run the full Note/Qiita/Zenn/Cor blog Evo X2 comparison once the UI can reuse the stored outputs.
-4. Browser E2E ([#13](https://github.com/terisuke/note_maker/issues/13)) — cover persona/format switching, edit/fork, streaming, section regeneration, and persisted-history recovery after C2/C3 has visible browser surface.
+1. Add an interview-template scenario ([#70](https://github.com/terisuke/note_maker/issues/70)) before spending more Evo X2 runtime. It must prove that the simplified questions are small, medium-specific, and able to produce distinct `ArticleBrief` outputs for note, Cor blog, Zenn, Qiita, and homepage.
+2. Make failed generation diagnosable ([#71](https://github.com/terisuke/note_maker/issues/71)) and recoverable when the issue is format-only ([#72](https://github.com/terisuke/note_maker/issues/72)).
+3. Split scenario gates by output format ([#73](https://github.com/terisuke/note_maker/issues/73)) so homepage HTML is not judged as a long article while note/Zenn/Qiita/Cor blog remain strict.
+4. Re-run Evo X2 in stages ([#74](https://github.com/terisuke/note_maker/issues/74)): template scenario, offline media matrix, one previously failing live case, then the full note/Qiita/Zenn/Cor blog comparison.
+5. Continue Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) and Browser E2E ([#13](https://github.com/terisuke/note_maker/issues/13)) in parallel where write scopes do not conflict.
 
 ## Tracked issues
 
@@ -243,6 +245,7 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards
 - D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` — implemented in the current cut with 80.0% handler package coverage.
 - Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40) — implemented in the current cut.
+- Runtime stabilization epic — [#40](https://github.com/terisuke/note_maker/issues/40) Stabilize Tailnet Evo X2 draft quality and runtime metrics. Sub-issues: [#70](https://github.com/terisuke/note_maker/issues/70), [#71](https://github.com/terisuke/note_maker/issues/71), [#72](https://github.com/terisuke/note_maker/issues/72), [#73](https://github.com/terisuke/note_maker/issues/73), [#74](https://github.com/terisuke/note_maker/issues/74).
 
 ## Consequences
 
