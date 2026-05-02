@@ -97,7 +97,8 @@ Adapters remain outside the domain:
   - note.com JSON APIs may be used in local scenario tests and compatibility adapters where the user explicitly requests them.
 
 - LLM runtime:
-  - The preferred heavy inference path is Evo X2 over a Tailscale SSH tunnel, exposed locally as `http://127.0.0.1:21434/v1`.
+  - The preferred heavy inference path is Evo X2's OpenAI-compatible API over Tailscale VPN/MagicDNS, normally `http://evo-x2:11434/v1`.
+  - SSH port forwarding is a developer diagnostic path only. It must not be the product default because it depends on per-device SSH configuration and prevents other authorized Tailnet devices from using the shared Evo X2 endpoint.
   - `llama.cpp` `llama-server` remains the documented local fallback target at `http://127.0.0.1:8081/v1`.
   - Direct local Ollama on `127.0.0.1:11434` must not be used as the default verification path; it is only acceptable when explicitly selected for a one-off diagnostic.
   - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
