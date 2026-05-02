@@ -41,6 +41,7 @@ func main() {
 
 	baseURL := envFirst("http://127.0.0.1:8081/v1", "LLM_BASE_URL", "LLAMACPP_BASE_URL")
 	model := envFirst("gemma4:31b", "DRAFT_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
+	verifyModel := envFirst("gemma4:latest", "VERIFY_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
 	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
 	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
 	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
@@ -49,7 +50,11 @@ func main() {
 	if err != nil {
 		fatalf("create local llm client: %v", err)
 	}
-	service := draftapp.NewService(client)
+	verifyClient, err := llamacpp.NewClientFromEnvForPurpose("VERIFY")
+	if err != nil {
+		fatalf("create verification llm client: %v", err)
+	}
+	service := draftapp.NewServiceWithVerifier(client, draftapp.NewLightweightVerifier(verifyClient))
 
 	var result draftapp.GenerateResult
 	var finalElapsed time.Duration
@@ -88,6 +93,7 @@ func main() {
 		finalChunks = chunkCount
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
+		writeJSON(filepath.Join(outputDir, fmt.Sprintf("verification_attempt_%d.json", attempt)), result.Verification)
 		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes {
 			break
 		}
@@ -95,6 +101,7 @@ func main() {
 
 	writeFile(filepath.Join(outputDir, "draft.md"), result.Draft.Markdown()+"\n")
 	writeJSON(filepath.Join(outputDir, "evaluation.json"), result.Evaluation)
+	writeJSON(filepath.Join(outputDir, "verification.json"), result.Verification)
 	if result.Evaluation.Comparison.Score < minStyleScore {
 		fatalf("style score %.1f below scenario minimum %.1f", result.Evaluation.Comparison.Score, minStyleScore)
 	}
@@ -106,6 +113,9 @@ func main() {
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
 	fmt.Printf("runes=%d\n", len([]rune(result.Draft.Markdown())))
+	fmt.Printf("verification_performed=%v\n", result.Verification.Performed)
+	fmt.Printf("verification_passed=%v\n", result.Verification.Passed)
+	fmt.Printf("verification_summary=%s\n", result.Verification.Summary)
 	fmt.Printf("elapsed_seconds=%.2f\n", finalElapsed.Seconds())
 	fmt.Printf("streaming=%v\n", streamDraft)
 	if streamDraft {
@@ -114,8 +124,10 @@ func main() {
 	}
 	fmt.Printf("llm_base_url=%s\n", baseURL)
 	fmt.Printf("llm_model=%s\n", model)
+	fmt.Printf("verify_model=%s\n", verifyModel)
 	fmt.Printf("draft=%s\n", filepath.Join(outputDir, "draft.md"))
 	fmt.Printf("evaluation=%s\n", filepath.Join(outputDir, "evaluation.json"))
+	fmt.Printf("verification=%s\n", filepath.Join(outputDir, "verification.json"))
 }
 
 func readJSON(path string, out any) {

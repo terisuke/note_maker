@@ -231,25 +231,30 @@ func (c *Client) Model() string {
 
 // Generate sends a prompt to /v1/chat/completions and returns the first text response.
 func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
-	body := c.chatCompletionRequest(prompt, false)
+	return c.GenerateWithSystem(ctx, defaultSystemPrompt, prompt)
+}
+
+// GenerateWithSystem sends a non-streaming chat completion with a caller-provided system prompt.
+func (c *Client) GenerateWithSystem(ctx context.Context, systemPrompt, prompt string) (string, error) {
+	body := c.chatCompletionRequest(systemPrompt, prompt, false)
 
 	var response chatCompletionResponse
 	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
 		if c.fallback != nil {
-			return c.fallback.Generate(ctx, prompt)
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
 		}
 		return "", err
 	}
 	if len(response.Choices) == 0 {
 		if c.fallback != nil {
-			return c.fallback.Generate(ctx, prompt)
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
 		}
 		return "", fmt.Errorf("llama.cpp response had no choices")
 	}
 	content := strings.TrimSpace(response.Choices[0].Message.Content)
 	if content == "" {
 		if c.fallback != nil {
-			return c.fallback.Generate(ctx, prompt)
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
 		}
 		return "", fmt.Errorf("llama.cpp response choice was empty")
 	}
@@ -275,13 +280,19 @@ func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func
 	return content, nil
 }
 
-func (c *Client) chatCompletionRequest(prompt string, stream bool) chatCompletionRequest {
+const defaultSystemPrompt = "You are a careful Japanese editor. Return only a paste-ready Markdown article. Do not include reasoning, preambles, or code fences."
+
+func (c *Client) chatCompletionRequest(systemPrompt, prompt string, stream bool) chatCompletionRequest {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = defaultSystemPrompt
+	}
 	body := chatCompletionRequest{
 		Model: c.model,
 		Messages: []message{
 			{
 				Role:    "system",
-				Content: "You are a careful Japanese editor. Return only a paste-ready Markdown article. Do not include reasoning, preambles, or code fences.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -297,7 +308,7 @@ func (c *Client) chatCompletionRequest(prompt string, stream bool) chatCompletio
 }
 
 func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
-	encoded, err := json.Marshal(c.chatCompletionRequest(prompt, true))
+	encoded, err := json.Marshal(c.chatCompletionRequest(defaultSystemPrompt, prompt, true))
 	if err != nil {
 		return "", fmt.Errorf("encode llama.cpp request: %w", err)
 	}

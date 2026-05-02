@@ -44,6 +44,7 @@ Note Maker will move from a single `POST /api/generate` flow to a three-phase wo
    - Generate a draft from `WritingStyleGuide + ArticleBrief`.
    - Do not fetch Note articles during draft generation.
    - Validate the draft as paste-ready Markdown and compare it against the author style profile.
+   - Run a final lightweight-model consistency check against the draft, brief, style guide, and target output format before returning the result.
 
 These phases are orchestrated by application services, not autonomous background agents. The word "agent" may be used in product language, but the implementation should use deterministic workflow boundaries first.
 
@@ -83,7 +84,7 @@ Planned services:
 
 - `GenerateDraftService`
   - input: `WritingStyleGuide`, `ArticleBrief`.
-  - output: validated `Draft`, comparison report.
+  - output: validated `Draft`, comparison report, and lightweight final verification report.
 
 - `ArticleWorkflowService`
   - optional facade for UI/API flows that need to coordinate the three services.

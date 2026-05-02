@@ -105,11 +105,13 @@ type generateDraftRequest struct {
 	PersonaID      string `json:"persona_id"`
 	OutputFormatID string `json:"output_format_id"`
 	DraftModel     string `json:"draft_model"`
+	VerifyModel    string `json:"verify_model"`
 }
 
 type generateDraftResponse struct {
-	Draft      string                   `json:"draft"`
-	Evaluation draftapp.StyleEvaluation `json:"evaluation"`
+	Draft        string                     `json:"draft"`
+	Evaluation   draftapp.StyleEvaluation   `json:"evaluation"`
+	Verification draftapp.FinalVerification `json:"verification"`
 }
 
 // ListPersonasHandler returns built-in writing personas.
@@ -491,7 +493,11 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED", "Failed to initialize local LLM client", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	service := draftapp.NewService(generator)
+	service, err := newDraftServiceWithVerifier(generator, req.VerifyModel)
+	if err != nil {
+		respondWithError(w, "VERIFIER_INITIALIZATION_FAILED", "Failed to initialize verification LLM client", err.Error(), http.StatusInternalServerError)
+		return
+	}
 	result, err := service.Generate(r.Context(), draftapp.GenerateRequest{
 		StyleGuide:    guide,
 		Brief:         articleBrief,
@@ -504,8 +510,9 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithJSON(w, http.StatusOK, generateDraftResponse{
-		Draft:      result.Draft.Markdown(),
-		Evaluation: result.Evaluation,
+		Draft:        result.Draft.Markdown(),
+		Evaluation:   result.Evaluation,
+		Verification: result.Verification,
 	})
 }
 
@@ -525,7 +532,11 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 	_ = stream.Send("status", streamStatus{Status: "runtime_connected", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS()})
 	stopHeartbeat := stream.StartHeartbeat(r.Context(), "draft", endpoint, model, 10*time.Second)
 	defer stopHeartbeat()
-	service := draftapp.NewService(generator)
+	service, err := newDraftServiceWithVerifier(generator, req.VerifyModel)
+	if err != nil {
+		_ = stream.Send("error", streamError{Code: "VERIFIER_INITIALIZATION_FAILED", Message: "Failed to initialize verification LLM client", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+		return
+	}
 	result, err := service.GenerateStream(r.Context(), draftapp.GenerateRequest{
 		StyleGuide:    guide,
 		Brief:         articleBrief,
@@ -545,10 +556,19 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 		return
 	}
 	_ = stream.Send("result", generateDraftResponse{
-		Draft:      result.Draft.Markdown(),
-		Evaluation: result.Evaluation,
+		Draft:        result.Draft.Markdown(),
+		Evaluation:   result.Evaluation,
+		Verification: result.Verification,
 	})
 	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
+}
+
+func newDraftServiceWithVerifier(generator draftapp.TextGenerator, model string) (*draftapp.Service, error) {
+	verifierClient, err := llamacpp.NewClientFromEnvForPurposeWithModel("VERIFY", model)
+	if err != nil {
+		return nil, err
+	}
+	return draftapp.NewServiceWithVerifier(generator, draftapp.NewLightweightVerifier(verifierClient)), nil
 }
 
 func decodeJSONRequest(r *http.Request, out any) error {

@@ -158,6 +158,34 @@ func TestGenerateStreamEmitsStatusAndChunks(t *testing.T) {
 	}
 }
 
+func TestGenerateRunsLightweightVerification(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	generator := &fakeGenerator{draft: matchingDraft()}
+	verifierModel := &fakeGenerator{draft: "PASS\nSummary: ブリーフと文体に沿っています"}
+
+	result, err := NewServiceWithVerifier(generator, NewLightweightVerifier(verifierModel)).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			Theme:          "最終検証する",
+			Reader:         "AIで記事を書く人",
+			MustInclude:    "軽量モデルで検証する",
+		},
+		AuthorProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("generate with verification: %v", err)
+	}
+	if !result.Verification.Performed || !result.Verification.Passed {
+		t.Fatalf("unexpected verification: %#v", result.Verification)
+	}
+	for _, want := range []string{"最終検証者", "最終検証する", "軽量モデルで検証する", matchingDraft()[:30]} {
+		if !strings.Contains(verifierModel.prompt, want) {
+			t.Fatalf("verification prompt missing %q:\n%s", want, verifierModel.prompt)
+		}
+	}
+}
+
 func TestGenerateUsesPersonaAndOutputFormat(t *testing.T) {
 	zennDraft := "---\ntitle: \"Goで検証する\"\nemoji: \"🧪\"\ntype: \"tech\"\ntopics: [\"go\", \"test\"]\npublished: false\n---\n\n## 実装\n\n```go\nfmt.Println(\"ok\")\n```"
 	generator := &fakeGenerator{draft: zennDraft}

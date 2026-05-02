@@ -81,7 +81,7 @@ mise trust
 mise run evo-x2
 ```
 
-既定では Tailnet 上の `http://evo-x2.tailb30e58.ts.net/v1` に接続します。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`STYLE_LLM_MODEL`、`BRIEF_LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
+既定では Tailnet 上の `http://evo-x2.tailb30e58.ts.net/v1` に接続します。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`STYLE_LLM_MODEL`、`BRIEF_LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL`、`VERIFY_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
 
 画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は初期テンプレートを編集でき、追加質問も下書き生成のブリーフに含まれます。
 
@@ -93,6 +93,7 @@ mise run evo-x2
 - `BRIEF_LLM_MODEL`: 深掘り質問生成用。既定は推論力重視の `qwen3.6:27b`。
 - `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。既定は軽量な `gemma4:e2b`。
 - `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。既定は日本語下書き品質重視の `gemma4:31b`。
+- `VERIFY_LLM_MODEL`: 下書き後の最終一貫性チェック用。既定は軽量な `gemma4:latest`。
 - `EVO_X2_TAILNET_HOST`: Tailnet/MagicDNS 上の Evo X2 ホスト名です。既定値は `evo-x2.tailb30e58.ts.net`。
 - `EVO_X2_LLM_BASE_URL`: Evo X2 Ollama primary の OpenAI互換APIです。既定値は `http://evo-x2.tailb30e58.ts.net/v1`。
 - `LLM_FALLBACK_BASE_URLS`: カンマ区切りの fallback chain です。既定は Evo X2 llama.cpp、最後にローカル llama.cpp。

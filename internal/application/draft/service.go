@@ -20,6 +20,22 @@ type StreamingTextGenerator interface {
 	GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error)
 }
 
+// DraftVerifier checks the final draft with a separate lightweight model.
+type DraftVerifier interface {
+	VerifyDraft(ctx context.Context, req VerificationRequest) (FinalVerification, error)
+}
+
+// VerificationRequest contains all inputs needed for final consistency review.
+type VerificationRequest struct {
+	StyleGuide    WritingStyleGuide
+	Brief         ArticleBrief
+	AuthorProfile AuthorStyleProfile
+	Persona       personadomain.Persona
+	OutputFormat  outputformat.OutputFormat
+	DraftMarkdown string
+	Evaluation    StyleEvaluation
+}
+
 // StreamEvents receives long-running draft generation progress.
 type StreamEvents struct {
 	OnStatus func(string) error
@@ -29,11 +45,17 @@ type StreamEvents struct {
 // Service coordinates prompt building, generation, Markdown validation, and style evaluation.
 type Service struct {
 	generator TextGenerator
+	verifier  DraftVerifier
 }
 
 // NewService creates a draft generation service.
 func NewService(generator TextGenerator) *Service {
 	return &Service{generator: generator}
+}
+
+// NewServiceWithVerifier creates a draft service with a final lightweight verification step.
+func NewServiceWithVerifier(generator TextGenerator, verifier DraftVerifier) *Service {
+	return &Service{generator: generator, verifier: verifier}
 }
 
 // Generate builds a prompt from the style guide and brief, validates the generated Markdown,
@@ -94,11 +116,42 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 			evaluation = revisedEvaluation
 		}
 	}
+	verification := s.verifyFinalDraft(ctx, VerificationRequest{
+		StyleGuide:    req.StyleGuide,
+		Brief:         req.Brief,
+		AuthorProfile: req.AuthorProfile,
+		Persona:       persona,
+		OutputFormat:  format,
+		DraftMarkdown: articleDraft.Markdown(),
+		Evaluation:    evaluation,
+	}, events)
 
 	return GenerateResult{
-		Draft:      articleDraft,
-		Evaluation: evaluation,
+		Draft:        articleDraft,
+		Evaluation:   evaluation,
+		Verification: verification,
 	}, nil
+}
+
+func (s *Service) verifyFinalDraft(ctx context.Context, req VerificationRequest, events StreamEvents) FinalVerification {
+	if s.verifier == nil {
+		return FinalVerification{}
+	}
+	if err := emitStatus(events, "draft_lightweight_verification_started"); err != nil {
+		return FinalVerification{Performed: true, Passed: false, Summary: "final verification was interrupted", Report: err.Error(), Failures: []string{err.Error()}}
+	}
+	verification, err := s.verifier.VerifyDraft(ctx, req)
+	if err != nil {
+		return FinalVerification{
+			Performed: true,
+			Passed:    false,
+			Summary:   "final verification failed",
+			Report:    err.Error(),
+			Failures:  []string{err.Error()},
+		}
+	}
+	verification.Performed = true
+	return verification
 }
 
 func (s *Service) generateRaw(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
