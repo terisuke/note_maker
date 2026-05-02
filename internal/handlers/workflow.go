@@ -22,8 +22,8 @@ import (
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
-	notenote "github.com/teradakousuke/note_maker/internal/infrastructure/note"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/repository/memory"
+	sourcefetch "github.com/teradakousuke/note_maker/internal/infrastructure/source"
 )
 
 var workflowStore = newWorkflowStore()
@@ -177,7 +177,7 @@ func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	service := authorstyleapp.NewAnalyzeAuthorStyleService(notenote.NewFetcher(), nil)
+	service := authorstyleapp.NewAnalyzeAuthorStyleService(sourcefetch.NewAuthorStyleFetcher(), nil)
 	result, err := service.Analyze(r.Context(), authorstyleapp.AnalyzeRequest{
 		Username:    req.Username,
 		ArticleURLs: req.ArticleURLs,
