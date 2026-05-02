@@ -97,9 +97,14 @@ Adapters remain outside the domain:
   - note.com JSON APIs may be used in local scenario tests and compatibility adapters where the user explicitly requests them.
 
 - LLM runtime:
-  - The preferred heavy inference path is Evo X2's OpenAI-compatible API over Tailscale VPN/MagicDNS, normally `http://evo-x2:11434/v1`.
+  - The preferred heavy inference path is Evo X2's Ollama OpenAI-compatible API over Tailscale VPN/MagicDNS, normally `http://evo-x2.tailb30e58.ts.net/v1`.
+  - Ollama is the primary runtime because it supports OpenAI-compatible chat completions with streaming and lets the app select a different installed model per request. This is needed for phase-specific routing: lightweight Gemma for source/style summarization, Qwen for deeper interview questions, and Gemma 31B for final Japanese drafts.
+  - The ordered fallback chain is:
+    1. Evo X2 Ollama OpenAI-compatible API.
+    2. Evo X2 `llama.cpp` / `llama-server` OpenAI-compatible API, normally `http://evo-x2.tailb30e58.ts.net/llama/v1`.
+    3. Workstation-local `llama.cpp`, normally `http://127.0.0.1:8081/v1`, as the last resort only.
   - SSH port forwarding is a developer diagnostic path only. It must not be the product default because it depends on per-device SSH configuration and prevents other authorized Tailnet devices from using the shared Evo X2 endpoint.
-  - `llama.cpp` `llama-server` remains the documented local fallback target at `http://127.0.0.1:8081/v1`.
+  - `llama.cpp` model swapping remains a later operational hardening item tracked by Issue [#45](https://github.com/terisuke/note_maker/issues/45). Until model swap/restart orchestration is reliable, `llama-server` is a fallback route rather than the primary multi-model route.
   - Direct local Ollama on `127.0.0.1:11434` must not be used as the default verification path; it is only acceptable when explicitly selected for a one-off diagnostic.
   - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
 

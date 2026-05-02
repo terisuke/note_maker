@@ -65,7 +65,7 @@ func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
-	fallback, err := fallbackClientFromEnv(purpose, model)
+	fallback, err := fallbackChainFromEnv(purpose, model)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func firstEnv(names ...string) string {
 	return ""
 }
 
-func fallbackClientFromEnv(purpose, primaryModel string) (*Client, error) {
+func fallbackChainFromEnv(purpose, primaryModel string) (*Client, error) {
 	purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	keys := func(suffix string) []string {
 		if purpose == "" {
@@ -112,24 +112,89 @@ func fallbackClientFromEnv(purpose, primaryModel string) (*Client, error) {
 		}
 		return []string{purpose + "_FALLBACK_" + suffix, "FALLBACK_" + suffix}
 	}
-	baseURL := firstEnv(keys("LLM_BASE_URL")...)
-	if baseURL == "" {
-		baseURL = firstEnv("FALLBACK_LLAMACPP_BASE_URL")
+	listKeys := func(suffix string) []string {
+		if purpose == "" {
+			return []string{"LLM_FALLBACK_" + suffix, "FALLBACK_LLM_" + suffix}
+		}
+		return []string{
+			purpose + "_LLM_FALLBACK_" + suffix,
+			purpose + "_FALLBACK_LLM_" + suffix,
+			"LLM_FALLBACK_" + suffix,
+			"FALLBACK_LLM_" + suffix,
+		}
 	}
-	model := firstEnv(keys("LLM_MODEL")...)
-	if model == "" && purpose == "" {
-		model = firstEnv("FALLBACK_LLM_MODEL", "FALLBACK_LLAMACPP_MODEL")
+
+	baseURLs := splitEnvList(firstEnv(listKeys("BASE_URLS")...))
+	if len(baseURLs) == 0 {
+		baseURL := firstEnv(keys("LLM_BASE_URL")...)
+		if baseURL == "" {
+			baseURL = firstEnv("FALLBACK_LLAMACPP_BASE_URL")
+		}
+		if baseURL != "" {
+			baseURLs = []string{baseURL}
+		}
 	}
-	if baseURL == "" && model == "" {
+	models := splitEnvList(firstEnv(listKeys("MODELS")...))
+	if len(models) == 0 {
+		model := firstEnv(keys("LLM_MODEL")...)
+		if model == "" && purpose == "" {
+			model = firstEnv("FALLBACK_LLM_MODEL", "FALLBACK_LLAMACPP_MODEL")
+		}
+		if model != "" {
+			models = []string{model}
+		}
+	}
+	if len(baseURLs) == 0 && len(models) == 0 {
 		return nil, nil
 	}
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	if len(baseURLs) == 0 {
+		baseURLs = []string{defaultBaseURL}
 	}
-	if model == "" {
-		model = primaryModel
+
+	var head *Client
+	var previous *Client
+	for index, baseURL := range baseURLs {
+		model := fallbackModelForIndex(models, index, primaryModel)
+		client, err := NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
+		if err != nil {
+			return nil, err
+		}
+		if head == nil {
+			head = client
+		}
+		if previous != nil {
+			previous.fallback = client
+		}
+		previous = client
 	}
-	return NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
+	return head, nil
+}
+
+func splitEnvList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if cleaned := strings.TrimSpace(part); cleaned != "" {
+			values = append(values, cleaned)
+		}
+	}
+	return values
+}
+
+func fallbackModelForIndex(models []string, index int, primaryModel string) string {
+	if len(models) == 0 {
+		return primaryModel
+	}
+	if index < len(models) {
+		return models[index]
+	}
+	if len(models) == 1 {
+		return models[0]
+	}
+	return primaryModel
 }
 
 // NewClient creates a llama.cpp client.
@@ -176,10 +241,16 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 		return "", err
 	}
 	if len(response.Choices) == 0 {
+		if c.fallback != nil {
+			return c.fallback.Generate(ctx, prompt)
+		}
 		return "", fmt.Errorf("llama.cpp response had no choices")
 	}
 	content := strings.TrimSpace(response.Choices[0].Message.Content)
 	if content == "" {
+		if c.fallback != nil {
+			return c.fallback.Generate(ctx, prompt)
+		}
 		return "", fmt.Errorf("llama.cpp response choice was empty")
 	}
 	return content, nil
