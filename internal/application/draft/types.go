@@ -31,8 +31,18 @@ type GenerateRequest struct {
 
 // GenerateResult returns the validated draft and its strict style evaluation.
 type GenerateResult struct {
-	Draft      articledomain.Draft
-	Evaluation StyleEvaluation
+	Draft        articledomain.Draft
+	Evaluation   StyleEvaluation
+	Verification FinalVerification
+}
+
+// FinalVerification reports the lightweight model's final consistency review.
+type FinalVerification struct {
+	Performed bool     `json:"performed"`
+	Passed    bool     `json:"passed"`
+	Summary   string   `json:"summary"`
+	Report    string   `json:"report"`
+	Failures  []string `json:"failures,omitempty"`
 }
 
 // StyleThresholds are the strict draft acceptance thresholds from the implementation plan.

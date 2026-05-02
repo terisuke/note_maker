@@ -141,7 +141,7 @@ New domain types under `internal/domain`:
 
 - `AnalyzeAuthorStyleService` accepts a `persona_id` and persists the resulting guide as a new version under that persona; previous versions are preserved.
 - `InterviewService` consults the active persona and format to assemble the question list before the first question.
-- `GenerateDraftService` resolves the prompt template fragment from the format's strategy, injects the active format's embedded Markdown guide, and merges persona-specific tone hints.
+- `GenerateDraftService` resolves the prompt template fragment from the format's strategy, injects the active format's embedded Markdown guide, merges persona-specific tone hints, and runs a lightweight final verification step after the 31B draft is validated.
 - New `RegenerateSectionService` accepts a draft id, a section selector (heading anchor or character range), the brief, and the persona+format; returns a candidate replacement for human review.
 - New `StreamingDraftService` produces SSE chunks for the draft phase.
 
@@ -202,6 +202,7 @@ Current implementation status as of 2026-05-02:
 - Phase B1 is complete ahead of the original order: `Persona` and `OutputFormat` concepts, prompt dispatch, and format validators are in place ([#21](https://github.com/terisuke/note_maker/issues/21)). The remaining Phase B work stays deferred until after Phase A/C foundations.
 - Evo X2 Ollama is the primary heavy-inference runtime through the Tailnet OpenAI-compatible API (`http://evo-x2.tailb30e58.ts.net/v1`). The runtime fallback chain is Evo X2 Ollama → Evo X2 llama.cpp (`/llama/v1`) → workstation-local llama.cpp. SSH tunnel access is an explicit developer diagnostic only.
 - Phase model defaults are intentionally split: lightweight `gemma4:e2b` for source/style summarization, `qwen3.6:27b` for deeper interview questions, and `gemma4:31b` for final Japanese draft generation. This is an operational default, not a hard domain rule; users can override it per phase.
+- Final verification uses lightweight Gemma by default (`gemma4:latest`, currently the Evo X2 E4B-class Ollama model) to check brief coverage, style consistency, output-format notation, and unsupported factual assertions before the UI presents the final draft ([#47](https://github.com/terisuke/note_maker/issues/47)).
 - Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A started with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
 - Phase A2 is implemented in code: `llamacpp.Client.GenerateStream`, streaming follow-up/draft service paths, `Accept: text/event-stream` handlers, browser Cancel controls, heartbeat events, and final runtime metrics. It still requires real Tailnet Evo X2 validation before closing the issue.
 

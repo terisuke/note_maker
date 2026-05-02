@@ -50,6 +50,10 @@
             <label for="draft-model">下書き生成モデル</label>
             <select id="draft-model"></select>
           </div>
+          <div class="field-row">
+            <label for="verify-model">最終検証モデル</label>
+            <select id="verify-model"></select>
+          </div>
         </div>
         <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
 
@@ -158,6 +162,7 @@
 
         <div id="draft-result" class="hidden">
           <div id="evaluation-summary" class="evaluation"></div>
+          <div id="verification-summary" class="evaluation"></div>
           <div class="tabs">
             <button class="tab-btn active" data-tab="preview">プレビュー</button>
             <button class="tab-btn" data-tab="markdown">Markdown</button>

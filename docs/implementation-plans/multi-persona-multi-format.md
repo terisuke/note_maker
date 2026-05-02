@@ -288,6 +288,8 @@ Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold t
 
 Runtime validation treats Evo X2 Ollama's OpenAI-compatible API over Tailscale VPN/MagicDNS as the primary heavy-inference path. SSH tunnels are explicit developer diagnostics only. The fallback chain is Evo X2 Ollama → Evo X2 llama.cpp → workstation-local llama.cpp. Scenario reports must include base URL, model, elapsed time, score, and draft length to prevent accidental local-runtime validation. The 2026-05-02 validation passed on Evo X2 and found local fallback quality/model-compatibility gaps; fallback hardening is tracked in Issue [#36](https://github.com/terisuke/note_maker/issues/36). Future llama.cpp model swap orchestration is tracked in Issue [#45](https://github.com/terisuke/note_maker/issues/45).
 
+Draft generation now includes a lightweight final verification pass before returning the final result. The default operational model split is: `gemma4:e2b` for source/style summarization, `qwen3.6:27b` for follow-up question generation, `gemma4:31b` for Japanese draft generation, and `gemma4:latest` for final consistency verification. The verification step reports PASS/NEEDS_REVIEW plus concrete issues; automatic rewrite from the verification report is deferred until section regeneration and draft versioning are in place.
+
 ## Risk register
 
 | Risk | Mitigation |

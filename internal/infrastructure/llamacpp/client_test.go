@@ -106,6 +106,32 @@ func TestGenerateStreamCallsChatCompletionsAndAssemblesChunks(t *testing.T) {
 	}
 }
 
+func TestGenerateWithSystemUsesCallerPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Messages[0].Content != "<|nothink|>\nverify only" {
+			t.Fatalf("unexpected system prompt: %q", request.Messages[0].Content)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"PASS\nSummary: OK"}}]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL+"/v1", "gemma4:latest", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	report, err := client.GenerateWithSystem(context.Background(), "<|nothink|>\nverify only", "check")
+	if err != nil {
+		t.Fatalf("generate with system: %v", err)
+	}
+	if report != "PASS\nSummary: OK" {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
 func TestNewClientFromEnvUsesGenericLLMSettings(t *testing.T) {
 	t.Setenv("LLM_BASE_URL", "http://example.test/v1")
 	t.Setenv("LLM_MODEL", "gemma4:e2b")

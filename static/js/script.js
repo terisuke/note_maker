@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     styleModel: document.getElementById('style-model'),
     briefModel: document.getElementById('brief-model'),
     draftModel: document.getElementById('draft-model'),
+    verifyModel: document.getElementById('verify-model'),
     questionConfigList: document.getElementById('question-config-list'),
     addQuestion: document.getElementById('add-question-btn'),
     resetQuestions: document.getElementById('reset-questions-btn'),
@@ -58,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
     draftStatus: document.getElementById('draft-status'),
     draftResult: document.getElementById('draft-result'),
     evaluationSummary: document.getElementById('evaluation-summary'),
+    verificationSummary: document.getElementById('verification-summary'),
     previewContent: document.getElementById('preview-content'),
     markdownOutput: document.getElementById('markdown-output'),
     copy: document.getElementById('copy-btn'),
@@ -75,6 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el.styleModel.addEventListener('change', saveModelConfig);
   el.briefModel.addEventListener('change', saveModelConfig);
   el.draftModel.addEventListener('change', saveModelConfig);
+  el.verifyModel.addEventListener('change', saveModelConfig);
   el.addQuestion.addEventListener('click', addQuestion);
   el.resetQuestions.addEventListener('click', resetQuestions);
   el.analyzeStyle.addEventListener('click', analyzeStyle);
@@ -320,6 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.markdownOutput.value = '';
     el.previewContent.innerHTML = '';
     el.evaluationSummary.textContent = '';
+    el.verificationSummary.textContent = '';
     el.draftResult.classList.remove('hidden');
     setActiveTab('markdown');
     try {
@@ -331,6 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
           persona_id: currentPersonaId(),
           output_format_id: currentFormatId(),
           draft_model: el.draftModel.value,
+          verify_model: el.verifyModel.value,
         },
         signal: state.draftAbortController.signal,
         onEvent(event, data) {
@@ -386,10 +391,12 @@ document.addEventListener('DOMContentLoaded', () => {
       style: config.models.style || 'gemma4:latest',
       brief: config.models.brief || 'gemma4:e2b',
       draft: config.models.draft || 'gemma4:31b',
+      verify: config.models.verify || 'gemma4:latest',
     };
     setOptions(el.styleModel, available, defaults.style);
     setOptions(el.briefModel, available, defaults.brief);
     setOptions(el.draftModel, available, defaults.draft);
+    setOptions(el.verifyModel, available, defaults.verify);
     saveModelConfig();
   }
 
@@ -481,6 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
       style: el.styleModel.value,
       brief: el.briefModel.value,
       draft: el.draftModel.value,
+      verify: el.verifyModel.value,
     };
     saveConfig();
   }
@@ -594,7 +602,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadConfig() {
     const fallback = {
       mode: { persona: 'terisuke', format: 'note_article' },
-      models: { style: 'gemma4:latest', brief: 'gemma4:e2b', draft: 'gemma4:31b' },
+      models: { style: 'gemma4:e2b', brief: 'qwen3.6:27b', draft: 'gemma4:31b', verify: 'gemma4:latest' },
       questions: cloneQuestions(defaultQuestions),
     };
     try {
@@ -650,10 +658,30 @@ document.addEventListener('DOMContentLoaded', () => {
       <span>style score: ${Number(score).toFixed(1)}</span>
       ${failures.length ? `<p>${failures.join('<br>')}</p>` : ''}
     `;
+    renderVerification(data.verification);
     el.markdownOutput.value = data.draft;
     el.previewContent.innerHTML = marked.parse(data.draft);
     el.draftResult.classList.remove('hidden');
     setActiveTab('preview');
+  }
+
+  function renderVerification(verification) {
+    if (!verification || !(verification.performed ?? verification.Performed)) {
+      el.verificationSummary.className = 'evaluation';
+      el.verificationSummary.textContent = 'final verification: not run';
+      return;
+    }
+    const passed = verification.passed ?? verification.Passed;
+    const summary = verification.summary ?? verification.Summary ?? '';
+    const report = verification.report ?? verification.Report ?? '';
+    const failures = verification.failures ?? verification.Failures ?? [];
+    el.verificationSummary.className = `evaluation ${passed ? 'passed' : 'failed'}`;
+    el.verificationSummary.innerHTML = `
+      <strong>VERIFY ${passed ? 'PASS' : 'NEEDS REVIEW'}</strong>
+      ${summary ? `<span>${escapeHTML(summary)}</span>` : ''}
+      ${failures.length ? `<p>${failures.map(escapeHTML).join('<br>')}</p>` : ''}
+      ${report ? `<pre>${escapeHTML(report)}</pre>` : ''}
+    `;
   }
 
   async function requestJSON(url, options = {}) {
@@ -733,6 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
       draft_generation_started: '本文を生成しています',
       draft_validation_started: 'Markdownと文体を検証しています',
       style_revision_started: '文体スコアを上げるために一度だけ修正しています',
+      draft_lightweight_verification_started: '軽量モデルで最終検証しています',
       runtime_connected: '推論エンドポイントに接続しました',
       running: '生成を継続しています',
       completed: '生成が完了しました',
