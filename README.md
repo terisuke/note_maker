@@ -83,9 +83,11 @@ mise run evo-x2
 
 既定では Tailnet 上の `http://evo-x2.tailb30e58.ts.net/v1` に接続します。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`STYLE_LLM_MODEL`、`BRIEF_LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL`、`VERIFY_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
 
-画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は初期テンプレートを編集でき、追加質問も下書き生成のブリーフに含まれます。
+画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は選択したペルソナと出力形式に応じた固定テンプレートが表示され、追加質問も下書き生成のブリーフに含まれます。
 
 文体分析結果、取材セッションの回答、完成ブリーフは `WORKFLOW_STORE_PATH` にJSONとして永続化されます。既定値は `data/workflow_store.json` です。
+
+SQLiteを試す場合は `WORKFLOW_STORE_DRIVER=sqlite` を指定します。既定パスは `data/workflow_store.db` で、`WORKFLOW_STORE_PATH` で変更できます。JSON store は互換性のため既定のまま残しています。
 
 フェーズ別モデルの目安:
 

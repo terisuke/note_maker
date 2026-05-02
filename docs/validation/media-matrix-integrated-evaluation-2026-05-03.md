@@ -101,7 +101,26 @@ First generate the offline matrix so the brief files exist:
 SCENARIO_OUTPUT_DIR=tmp/media_matrix go run ./cmd/scenario/media_matrix
 ```
 
-Then run draft generation for one case at a time with an available local LLM and style artifacts. Example:
+Then run the aggregate live runner in planned mode first. This confirms the matrix can be read without calling an LLM:
+
+```sh
+SCENARIO_OUTPUT_DIR=tmp/media_matrix go run ./cmd/scenario/live_media_matrix
+```
+
+Expected planned-mode artifacts:
+
+- `tmp/media_matrix/live/aggregate.json`
+- `tmp/media_matrix/live/aggregate.md`
+
+To execute all cases against the configured Evo X2 Tailnet OpenAI-compatible API, use:
+
+```sh
+make scenario-media-matrix-live
+```
+
+The live runner executes `cmd/scenario/draft_generation` once per matrix case, records stdout/stderr per case, and writes the aggregate result table. Limit the run while debugging with `LIVE_MEDIA_MATRIX_CASES=cloudia_zenn_tutorial,cloudia_qiita_how_to`.
+
+For a single manual case, run draft generation directly with an available local LLM and style artifacts. Example:
 
 ```sh
 RUN_LOCAL_LLM_SCENARIO=1 \

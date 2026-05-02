@@ -85,6 +85,63 @@ func TestGetBriefSessionTemplateHandlerReturnsComposedQuestions(t *testing.T) {
 	}
 }
 
+func TestGetBriefSessionTemplateHandlerDefaultsPersonaFormat(t *testing.T) {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/brief-sessions/templates?persona_id=cloudia", nil)
+
+	GetBriefSessionTemplateHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	var payload briefSessionTemplateResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode template: %v", err)
+	}
+	if payload.PersonaID != personadomain.IDCloudia || payload.OutputFormatID != outputformat.IDZennArticle {
+		t.Fatalf("unexpected defaulted template identity: %#v", payload)
+	}
+	if !hasQuestionJSON(payload.Questions, briefdomain.QuestionIDTargetStack) {
+		t.Fatalf("default cloudia format did not include technical questions: %#v", payload.Questions)
+	}
+	if !hasQuestionJSON(payload.Questions, briefdomain.QuestionIDCloudiaViewpoint) {
+		t.Fatalf("default cloudia template missing persona extension: %#v", payload.Questions)
+	}
+}
+
+func TestGetBriefSessionTemplateHandlerValidatesInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		status int
+		code   string
+	}{
+		{
+			name:   "unknown persona",
+			target: "/api/brief-sessions/templates?persona_id=missing",
+			status: http.StatusBadRequest,
+			code:   "UNKNOWN_PERSONA",
+		},
+		{
+			name:   "unknown output format",
+			target: "/api/brief-sessions/templates?persona_id=terisuke&format_id=missing",
+			status: http.StatusBadRequest,
+			code:   "UNKNOWN_OUTPUT_FORMAT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, tt.target, nil)
+
+			GetBriefSessionTemplateHandler(response, request)
+
+			assertErrorResponse(t, response, tt.status, tt.code)
+		})
+	}
+}
+
 func hasQuestionJSON(questions []articleQuestionJSON, id string) bool {
 	for _, question := range questions {
 		if question.ID == id {

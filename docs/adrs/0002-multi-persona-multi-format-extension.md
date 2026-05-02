@@ -195,7 +195,7 @@ The full work is broken into four phases tracked by issues. Each phase is indepe
   - Handler test coverage, Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold), Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright), Issue [#15](https://github.com/terisuke/note_maker/issues/15) (desktop packaging) follow-up.
   - Issue: [#29](https://github.com/terisuke/note_maker/issues/29).
 
-Original recommended order was A → C → B → D. Implementation intentionally pulled the minimum B work forward because source acquisition, format validation, persona seeds, and question templates were required before a realistic cross-media evaluation could be defined. With Phases A and B now implemented, the next order is C1 + D1 in parallel, then C2/C3, then the full Evo X2 media-matrix evaluation under #40.
+Original recommended order was A → C → B → D. Implementation intentionally pulled the minimum B work forward because source acquisition, format validation, persona seeds, and question templates were required before a realistic cross-media evaluation could be defined. With Phases A and B now implemented, the 2026-05-03 implementation cut lands C1, D1, and the #57 runner foundation in parallel. The next order is C2/C3, one bounded Evo X2 runner validation, then the full Evo X2 media-matrix evaluation under #40.
 
 Current implementation status as of 2026-05-03:
 
@@ -211,12 +211,15 @@ Current implementation status as of 2026-05-03:
 - Phase A3 is implemented in code: the generated Markdown textarea is editable, preview rendering live-syncs through `marked`, both preview and Markdown tabs can copy content, and `POST /api/drafts/{id}/regenerate-section` rewrites exactly one `## ` subtree while preserving the rest of the draft byte-for-byte ([#19](https://github.com/terisuke/note_maker/issues/19)). Validation is recorded in [Issue 19 section regeneration validation](../validation/issue-19-section-regeneration-2026-05-02.md).
 - Phase B2/B3/B4 are implemented: historical source acquisition works for note, Zenn, Qiita, Cor RSS, and Cor GitHub Markdown; all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Validation is recorded in [Issue 22 source fetcher validation](../validation/issue-22-source-fetchers-2026-05-02.md) and [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md).
 - Phase B5 is implemented: fixed interview questions are composed server-side by `persona_id × output_format_id`, Cloudia technical modes include extra viewpoint/context prompts, the frontend reads `GET /api/brief-sessions/templates`, and `cmd/scenario/media_matrix` produces a six-case cross-media evaluation matrix for note, Cor blog, Zenn, Qiita, and homepage output ([#25](https://github.com/terisuke/note_maker/issues/25)).
+- Phase C1 is implemented in the current cut: `internal/infrastructure/repository/sqlite` adds migrations and storage for author styles, sessions, briefs, projects, articles, source snapshots, draft versions, final verification, and section-regeneration versions. The web app can opt in with `WORKFLOW_STORE_DRIVER=sqlite`; the JSON store remains the default compatibility path ([#26](https://github.com/terisuke/note_maker/issues/26)).
+- Phase D1 is implemented in the current cut: handler tests now cover template selection, edit/fork errors, SSE follow-up and draft paths, completed-session draft fallback, regenerate-section context recovery, Analyze/Generate compatibility handlers, and SQLite driver selection. `go test ./internal/handlers -cover` reports 80.0% statement coverage ([#29](https://github.com/terisuke/note_maker/issues/29)).
+- Runtime runner support is implemented in the current cut: `cmd/scenario/live_media_matrix` reads the offline matrix, emits planned aggregate JSON/Markdown by default, and executes live Evo X2 draft runs only when `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` is used ([#57](https://github.com/terisuke/note_maker/issues/57)).
 
 Near-term execution order:
 
-1. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks, source-derived guides, media-matrix briefs, draft versions, and evaluation records survive restarts.
-2. Phase D1 ([#29](https://github.com/terisuke/note_maker/issues/29)) in parallel with C1 — raise `workflow.go` handler coverage before more endpoint-heavy UI work lands.
-3. Runtime stabilization ([#40](https://github.com/terisuke/note_maker/issues/40), with runner implementation in [#57](https://github.com/terisuke/note_maker/issues/57)) — use `cmd/scenario/media_matrix` to run varied Note/Qiita/Zenn/Cor blog Evo X2 cases and record endpoint/model/elapsed/score/runes/verification. Full multi-case runs should happen after C1 unless the user explicitly wants one-off artifact files.
+1. Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) — expose persisted sessions, guides, briefs, drafts, and verification artifacts in the web app.
+2. Runtime stabilization ([#40](https://github.com/terisuke/note_maker/issues/40)) — first run one bounded media-matrix case through `cmd/scenario/live_media_matrix`, then run the full Note/Qiita/Zenn/Cor blog Evo X2 comparison once the UI can reuse the stored outputs.
+3. Browser E2E ([#13](https://github.com/terisuke/note_maker/issues/13)) — cover persona/format switching, edit/fork, streaming, section regeneration, and persisted-history recovery after C2/C3 has visible browser surface.
 
 ## Tracked issues
 
@@ -231,11 +234,11 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - B3 — [#23](https://github.com/terisuke/note_maker/issues/23) Format-specific prompt templates and draft validators (note / markdown_blog / zenn / qiita / homepage_section). Implemented: validators, embedded format guides, prompt injection, and deterministic scenario samples exist.
 - B4 — [#24](https://github.com/terisuke/note_maker/issues/24) Seed persona library with `terisuke` and `cloudia` profiles. Implemented for the built-in registry: seeds include sources, default formats, and voice notes; live source re-analysis remains under [#22](https://github.com/terisuke/note_maker/issues/22).
 - B5 — [#25](https://github.com/terisuke/note_maker/issues/25) Format- and persona-aware fixed question sets
-- C1 — [#26](https://github.com/terisuke/note_maker/issues/26) Replace JSON store with SQLite-backed schema (extends [#14](https://github.com/terisuke/note_maker/issues/14))
+- C1 — [#26](https://github.com/terisuke/note_maker/issues/26) Replace JSON store with SQLite-backed schema (extends [#14](https://github.com/terisuke/note_maker/issues/14)) — implemented in the current cut as an opt-in SQLite workflow store.
 - C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI
 - C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards
-- D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` (currently 0% coverage)
-- Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40)
+- D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` — implemented in the current cut with 80.0% handler package coverage.
+- Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40) — implemented in the current cut.
 
 ## Consequences
 

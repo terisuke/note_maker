@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -55,6 +56,25 @@ func TestHandleGenerateArticleValidatesContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleGenerateArticleReportsServiceFailure(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/generate", bytes.NewBufferString(`{"note_url":"https://note.com/u/n/n1","theme":"theme"}`))
+	response := httptest.NewRecorder()
+
+	handleGenerateArticle(&fakeArticleService{err: errors.New("llm unavailable")}, response, request)
+
+	assertErrorResponse(t, response, http.StatusInternalServerError, "ARTICLE_GENERATION_FAILED")
+}
+
+func TestGenerateArticleHandlerReportsInvalidRuntimeConfig(t *testing.T) {
+	t.Setenv("LLM_BASE_URL", "://bad-url")
+	request := httptest.NewRequest(http.MethodPost, "/api/generate", bytes.NewBufferString(`{"note_url":"https://note.com/u/n/n1","theme":"theme"}`))
+	response := httptest.NewRecorder()
+
+	GenerateArticleHandler(response, request)
+
+	assertErrorResponse(t, response, http.StatusInternalServerError, "GENERATOR_INITIALIZATION_FAILED")
 }
 
 type fakeArticleService struct {
