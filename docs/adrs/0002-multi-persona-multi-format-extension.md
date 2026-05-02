@@ -194,14 +194,29 @@ The full work is broken into four phases tracked by issues. Each phase is indepe
   - Handler test coverage, Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold), Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright), Issue [#15](https://github.com/terisuke/note_maker/issues/15) (desktop packaging) follow-up.
   - Issue: [#29](https://github.com/terisuke/note_maker/issues/29).
 
-Recommended order: A → C → B → D. Phase C is sequenced before B because the persona registry needs durable storage to be useful; running B on the JSON store would force a second migration.
+Recommended order: A → C → B → D. Phase C is sequenced before the remaining B work because the persona registry needs durable storage to be useful; running the full persona library on the JSON store would force a second migration.
+
+Current implementation status as of 2026-05-02:
+
+- ADR 0001's strict Terisuke style threshold work is complete ([#11](https://github.com/terisuke/note_maker/issues/11)).
+- Phase B1 is complete ahead of the original order: `Persona` and `OutputFormat` concepts, prompt dispatch, and format validators are in place ([#21](https://github.com/terisuke/note_maker/issues/21)). The remaining Phase B work stays deferred until after Phase A/C foundations.
+- Evo X2 is the primary heavy-inference runtime through the Tailnet OpenAI-compatible API (`http://evo-x2:11434/v1`). SSH tunnel access is an explicit developer diagnostic only.
+- Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A should start with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
+
+Near-term execution order:
+
+1. [#18](https://github.com/terisuke/note_maker/issues/18) — streaming LLM responses, progress events, and cancellation for Tailnet Evo X2.
+2. [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answer/fork UX, using the streaming primitives from #18.
+3. [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
+4. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.
+5. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts.
 
 ## Tracked issues
 
 Filed 2026-05-02 as part of the PR that introduced this ADR.
 
 - A1 — [#17](https://github.com/terisuke/note_maker/issues/17) Refactor interview UI to chat-style transcript with editable past answers
-- A2 — [#18](https://github.com/terisuke/note_maker/issues/18) Stream LLM responses via SSE for follow-up and draft generation
+- A2 — [#18](https://github.com/terisuke/note_maker/issues/18) Stream LLM responses via SSE for follow-up and draft generation. Promoted to the immediate next implementation target because Tailnet Evo X2 generation is too slow for a spinner-only UX.
 - A3 — [#19](https://github.com/terisuke/note_maker/issues/19) Editable draft Markdown + per-section regenerate API
 - A4 — [#20](https://github.com/terisuke/note_maker/issues/20) Surface deep-dive question rationale in prompt and UI
 - B1 — [#21](https://github.com/terisuke/note_maker/issues/21) Introduce Persona and OutputFormat domain concepts (registry + strategy). Implemented by the first Phase B PR: `internal/domain/persona`, `internal/domain/format`, API selectors, prompt dispatch, and format-aware draft validation.

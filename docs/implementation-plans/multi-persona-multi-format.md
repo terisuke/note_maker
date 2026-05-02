@@ -28,6 +28,25 @@ The four phases below match ADR 0002. Each is independently shippable.
 
 Recommended order: **A → C → B → D**. Phase B benefits from durable storage (Phase C) being in place first, otherwise the JSON store becomes a temporary obstacle for the persona registry.
 
+Current status after the 2026-05-02 merges:
+
+- [#11](https://github.com/terisuke/note_maker/issues/11) strict Terisuke style tuning is closed.
+- [#21](https://github.com/terisuke/note_maker/issues/21) B1 landed early: persona/format domain concepts, prompt dispatch, selectors, and validators exist.
+- [#38](https://github.com/terisuke/note_maker/issues/38) Tailnet OpenAI-compatible API is now the Evo X2 primary path. SSH tunnel access is diagnostic-only.
+- [#36](https://github.com/terisuke/note_maker/issues/36) remains open for local llama.cpp fallback quality; it does not block Phase A work.
+- [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization.
+- A Tailnet full-workflow run reached the correct Evo X2 endpoint but took `1396.80s` and failed the quality gate (`score=82.0`, `2653` runes, `first_person=49`). This is the practical reason to start with streaming/cancellation rather than more prompt-only tuning.
+
+Near-term implementation cut:
+
+| Order | Issue | Why now | Done when |
+|---|---|---|---|
+| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Draft generation streams to the UI, can be cancelled, and reports endpoint/model/elapsed time. |
+| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Answers render as editable bubbles and edits fork the in-memory session. |
+| 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Every follow-up references the parent answer in prompt and UI. |
+| 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
+| 5 | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers and draft versions need durable storage before broader persona library work. | SQLite stores sessions, answers, guides, articles, and draft versions. |
+
 ## Phase A — Conversation UX
 
 ### A1 — Chat-style transcript with editable past answers
@@ -48,11 +67,16 @@ Acceptance:
 - Add SSE support to `internal/infrastructure/llamacpp/client.go` (OpenAI-compatible `stream: true`).
 - Wire streaming through the application services for `follow-up generation` and `draft generation`. Style analysis can stay non-streaming (single short call).
 - Frontend: replace global spinner with token-by-token append into the transcript (for follow-up) or into the draft preview (for draft).
+- Tailnet runtime: stream status events before first token (`endpoint`, `model`, `phase`, `started_at`), heartbeat events every 10 seconds, and final metrics (`elapsed_ms`, `runes`, `score` when available).
+- Cancellation: closing the browser request or pressing Cancel must cancel the server context and the upstream OpenAI-compatible request.
+- Failure mode: if the stream ends because the model times out or quality validation fails, keep the partial draft and surface the evaluation instead of losing the work.
 
 Acceptance:
 
-- A 3000-character draft visibly streams; first token < 3s on `gemma4:31b` warm.
+- A 3000-character draft visibly streams; a status event appears immediately and content chunks append incrementally once the model responds.
 - Network tab shows `text/event-stream` content type with incremental chunks.
+- Cancelling during a Tailnet Evo X2 run stops the server-side request and leaves the UI in a recoverable state.
+- Scenario/validation output records base URL, model, elapsed time, draft length, and score.
 
 ### A3 — Editable draft + per-section regenerate
 
@@ -280,4 +304,4 @@ Runtime validation treats Evo X2's OpenAI-compatible API over Tailscale VPN/Magi
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. Start with **[#17](https://github.com/terisuke/note_maker/issues/17)** (chat transcript) on a feature branch off `develop`.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. Start with **[#18](https://github.com/terisuke/note_maker/issues/18)** (SSE streaming, progress, and cancellation) on a feature branch off `develop`, then fold the transcript work from [#17](https://github.com/terisuke/note_maker/issues/17) on top of those streaming primitives.
