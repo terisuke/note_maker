@@ -96,9 +96,11 @@ Adapters remain outside the domain:
   - public page and RSS remain preferred for the product path.
   - note.com JSON APIs may be used in local scenario tests and compatibility adapters where the user explicitly requests them.
 
-- Local LLM:
-  - `llama.cpp` `llama-server` remains the documented target.
-  - Any OpenAI-compatible local endpoint, including Ollama, can be used for local verification if it exposes the required model alias.
+- LLM runtime:
+  - The preferred heavy inference path is Evo X2 over a Tailscale SSH tunnel, exposed locally as `http://127.0.0.1:21434/v1`.
+  - `llama.cpp` `llama-server` remains the documented local fallback target at `http://127.0.0.1:8081/v1`.
+  - Direct local Ollama on `127.0.0.1:11434` must not be used as the default verification path; it is only acceptable when explicitly selected for a one-off diagnostic.
+  - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
 
 - Storage:
   - initial implementation can use in-memory repositories and JSON file fixtures.

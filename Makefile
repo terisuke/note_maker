@@ -9,7 +9,10 @@ PORT ?= 8080
 LLM_RUNTIME ?= local
 LLM_BASE_URL ?= http://$(LLAMACPP_HOST):$(LLAMACPP_PORT)/v1
 LLM_MODEL ?= gemma4:31b
-EVO_X2_LLM_BASE_URL ?= http://evo-x2:11434/v1
+EVO_X2_SSH_HOST ?= evo-x2
+EVO_X2_SSH_LOCAL_PORT ?= 21434
+EVO_X2_LLM_BASE_URL ?= http://127.0.0.1:$(EVO_X2_SSH_LOCAL_PORT)/v1
+EVO_X2_DIRECT_LLM_BASE_URL ?= http://evo-x2:11434/v1
 EVO_X2_LLM_MODEL ?= gemma4:31b
 EVO_X2_BRIEF_LLM_MODEL ?= gemma4:e2b
 EVO_X2_STYLE_LLM_MODEL ?= gemma4:latest
@@ -24,7 +27,7 @@ LLAMACPP_HF_REPO ?= ggml-org/gemma-4-31B-it-GGUF
 LLAMACPP_HF_FILE ?= gemma-4-31B-it-Q4_K_M.gguf
 LLAMA_SERVER ?= llama-server
 
-.PHONY: app dev evo-x2 remote evo-x2-models scenario-evo-x2 server llama check
+.PHONY: app dev evo-x2 remote evo-x2-preflight evo-x2-models evo-x2-direct-models scenario-evo-x2 server llama check
 
 app: dev
 
@@ -33,13 +36,19 @@ dev:
 
 evo-x2: remote
 
-remote:
+remote: evo-x2-preflight
 	NOTE_MAKER_SKIP_ENV=1 LLM_RUNTIME=remote LLM_BASE_URL="$(EVO_X2_LLM_BASE_URL)" LLM_MODEL="$(EVO_X2_LLM_MODEL)" STYLE_LLM_MODEL="$(EVO_X2_STYLE_LLM_MODEL)" BRIEF_LLM_MODEL="$(EVO_X2_BRIEF_LLM_MODEL)" ARTICLE_LLM_MODEL="$(EVO_X2_ARTICLE_LLM_MODEL)" DRAFT_LLM_MODEL="$(EVO_X2_DRAFT_LLM_MODEL)" FALLBACK_LLM_BASE_URL="$(FALLBACK_LLM_BASE_URL)" ./scripts/dev.sh
 
-evo-x2-models:
+evo-x2-preflight:
+	EVO_X2_SSH_HOST="$(EVO_X2_SSH_HOST)" EVO_X2_SSH_LOCAL_PORT="$(EVO_X2_SSH_LOCAL_PORT)" EVO_X2_LLM_BASE_URL="$(EVO_X2_LLM_BASE_URL)" ./scripts/evo-x2-ssh-preflight.sh
+
+evo-x2-models: evo-x2-preflight
 	curl -s "$(EVO_X2_LLM_BASE_URL)/models"
 
-scenario-evo-x2:
+evo-x2-direct-models:
+	curl -s "$(EVO_X2_DIRECT_LLM_BASE_URL)/models"
+
+scenario-evo-x2: evo-x2-preflight
 	RUN_NOTE_SCENARIO=1 RUN_LOCAL_LLM_SCENARIO=1 LLM_BASE_URL="$(EVO_X2_LLM_BASE_URL)" LLM_MODEL="$(EVO_X2_LLM_MODEL)" STYLE_LLM_MODEL="$(EVO_X2_STYLE_LLM_MODEL)" BRIEF_LLM_MODEL="$(EVO_X2_BRIEF_LLM_MODEL)" ARTICLE_LLM_MODEL="$(EVO_X2_ARTICLE_LLM_MODEL)" DRAFT_LLM_MODEL="$(EVO_X2_DRAFT_LLM_MODEL)" LLM_TIMEOUT_SECONDS=900 FALLBACK_LLM_BASE_URL="$(FALLBACK_LLM_BASE_URL)" SCENARIO_MIN_STYLE_SCORE=80 SCENARIO_MIN_DRAFT_RUNES=2800 DRAFT_MAX_ATTEMPTS=2 go run ./cmd/scenario/full_workflow
 
 server:
