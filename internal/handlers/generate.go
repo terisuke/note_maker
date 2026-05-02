@@ -9,7 +9,7 @@ import (
 	articleapp "github.com/teradakousuke/note_maker/internal/application/article"
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
-	notenote "github.com/teradakousuke/note_maker/internal/infrastructure/note"
+	sourcefetch "github.com/teradakousuke/note_maker/internal/infrastructure/source"
 )
 
 // GenerateRequest は記事生成のリクエストボディの構造体
@@ -67,7 +67,7 @@ func newDefaultArticleService() (articleService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return articleapp.NewService(notenote.NewFetcher(), generator, nil), nil
+	return articleapp.NewService(sourcefetch.NewAuthorStyleFetcher(), generator, nil), nil
 }
 
 func handleGenerateArticle(service articleService, w http.ResponseWriter, r *http.Request) {
