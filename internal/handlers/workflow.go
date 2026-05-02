@@ -371,7 +371,7 @@ func EditBriefAnswerHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
 		return
 	}
-	service := newBriefInterviewService(req.BriefModel)
+	service := newBriefInterviewServiceForSession(session, req.BriefModel)
 	result, err := service.ForkAnswer(r.Context(), session, newID("abs"), pathValue(r, "answer_id"), req.Content)
 	if err != nil {
 		respondWithError(w, "BRIEF_ANSWER_EDIT_FAILED", "Failed to edit brief answer", err.Error(), http.StatusBadRequest)
@@ -417,7 +417,7 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		result = briefapp.InterviewResult{Session: session, Brief: &brief, Completed: true}
 	} else {
-		service := newBriefInterviewService(req.BriefModel)
+		service := newBriefInterviewServiceForSession(session, req.BriefModel)
 		next, err := service.Answer(r.Context(), session, req.Content)
 		if err != nil {
 			respondWithError(w, "BRIEF_ANSWER_FAILED", "Failed to record brief answer", err.Error(), http.StatusBadRequest)
@@ -444,7 +444,7 @@ func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, req answer
 		respondWithError(w, "STREAMING_UNSUPPORTED", "Streaming is not supported by this response writer", "", http.StatusInternalServerError)
 		return
 	}
-	service := newBriefInterviewService(req.BriefModel)
+	service := newBriefInterviewServiceForSession(session, req.BriefModel)
 	model := strings.TrimSpace(req.BriefModel)
 	stopHeartbeat := stream.StartHeartbeat(r.Context(), "follow_up", "", model, 10*time.Second)
 	defer stopHeartbeat()
@@ -763,11 +763,27 @@ func newID(prefix string) string {
 }
 
 func newBriefInterviewService(model string) *briefapp.InterviewService {
-	return briefapp.NewInterviewService(llmFollowUpGenerator{model: strings.TrimSpace(model)})
+	return newBriefInterviewServiceWithStyleGuide(model, "")
+}
+
+func newBriefInterviewServiceForSession(session briefdomain.ArticleBriefSession, model string) *briefapp.InterviewService {
+	_, guide, ok := workflowStore.GetProfileAndGuide(session.StyleProfileID)
+	if !ok {
+		return newBriefInterviewService(model)
+	}
+	return newBriefInterviewServiceWithStyleGuide(model, guide.Markdown)
+}
+
+func newBriefInterviewServiceWithStyleGuide(model, styleGuideMarkdown string) *briefapp.InterviewService {
+	return briefapp.NewInterviewService(llmFollowUpGenerator{
+		model:              strings.TrimSpace(model),
+		styleGuideMarkdown: strings.TrimSpace(styleGuideMarkdown),
+	})
 }
 
 type llmFollowUpGenerator struct {
-	model string
+	model              string
+	styleGuideMarkdown string
 }
 
 func (g llmFollowUpGenerator) GenerateFollowUp(ctx context.Context, session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int) (string, error) {
@@ -780,7 +796,7 @@ func (g llmFollowUpGenerator) GenerateFollowUp(ctx context.Context, session brie
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex)
+	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex, g.styleGuideMarkdown)
 	generated, err := generator.Generate(ctx, prompt)
 	if err != nil {
 		return "", err
@@ -802,7 +818,7 @@ func (g llmFollowUpGenerator) GenerateFollowUpStream(ctx context.Context, sessio
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex)
+	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex, g.styleGuideMarkdown)
 	generated, err := generator.GenerateStream(ctx, prompt, onChunk)
 	if err != nil {
 		return "", err
@@ -856,8 +872,13 @@ func targetFieldForQuestion(value articleQuestionJSON) string {
 	return "custom"
 }
 
-func buildFollowUpPrompt(session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int) string {
-	return fmt.Sprintf(`あなたはNote記事の取材編集者です。
+func buildFollowUpPrompt(session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int, styleGuideMarkdown string) string {
+	excerpt := followUpPromptExcerpt(answer.Content, 90)
+	styleGuideMarkdown = strings.TrimSpace(styleGuideMarkdown)
+	if styleGuideMarkdown == "" {
+		styleGuideMarkdown = "文体ガイド未設定。セッションの既存回答に合わせ、自然な日本語で質問する。"
+	}
+	return fmt.Sprintf(`あなたは記事の取材編集者です。
 次の記事ブリーフ回答を深掘りするため、著者に聞く追加質問を1つだけ作ってください。
 
 条件:
@@ -865,24 +886,41 @@ func buildFollowUpPrompt(session briefdomain.ArticleBriefSession, target briefdo
 - はい/いいえで答えられる質問にしない
 - 選択式にしない
 - 具体的な経験、感情、判断、失敗、価値観のどれかを引き出す
+- 文体ガイドのトーンから外れない
 - 質問文だけを出力する
+- 質問は必ず「%s」というご回答を踏まえて、から始める
 
 セッションID: %s
-対象質問: %s
-回答: %s
+親質問: %s
+親回答: %s
 深掘り回数: %d
-`, session.ID, target.Text, answer.Content, followUpIndex)
+文体ガイド:
+%s
+`, excerpt, session.ID, target.Text, answer.Content, followUpIndex, styleGuideMarkdown)
 }
 
 func extractFollowUpQuestion(value string) string {
 	value = strings.TrimSpace(value)
-	value = strings.Trim(value, "`\"'「」")
+	value = strings.Trim(value, "`\"'")
 	for _, line := range strings.Split(value, "\n") {
 		line = strings.TrimSpace(strings.Trim(line, "-*0123456789. "))
-		line = strings.Trim(line, "\"'「」")
+		line = strings.Trim(line, "\"'")
 		if strings.HasSuffix(line, "？") || strings.HasSuffix(line, "?") {
 			return line
 		}
 	}
 	return value
+}
+
+func followUpPromptExcerpt(content string, maxRunes int) string {
+	content = strings.Join(strings.Fields(strings.TrimSpace(content)), " ")
+	if content == "" {
+		return "その点"
+	}
+	content = strings.Trim(content, "「」\"'")
+	runes := []rune(content)
+	if maxRunes > 0 && len(runes) > maxRunes {
+		return string(runes[:maxRunes-1]) + "..."
+	}
+	return content
 }

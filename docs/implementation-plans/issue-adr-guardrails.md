@@ -63,6 +63,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
    - SSH tunnels are allowed only as explicit developer diagnostics, not as the product default, because they depend on per-device SSH setup.
    - Local llama.cpp (`http://127.0.0.1:8081/v1`) is fallback only. Do not set `LLM_BASE_URL` to local Ollama or local llama.cpp for Evo X2 validation unless the test is explicitly measuring fallback behavior.
    - Runtime validation must report base URL, model, elapsed time, score, and draft length.
+   - Each implementation PR that touches interview, prompt, draft, or runtime behavior should add one scenario datapoint with a deliberately varied medium/persona/format. Do not force every PR to rerun every scenario; build averages by collecting one different slice per phase.
    - Draft generation must run the lightweight final verification step before returning the final result; if verification reports NEEDS_REVIEW, surface the report instead of hiding it.
    - If fallback validation fails the strict draft thresholds, keep Evo X2 primary enabled and track fallback hardening separately (Issue [#36](https://github.com/terisuke/note_maker/issues/36)).
    - If Tailnet Evo X2 reaches the API but misses quality gates, track it under Issue [#40](https://github.com/terisuke/note_maker/issues/40), not as a transport regression.

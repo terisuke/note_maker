@@ -237,40 +237,47 @@ func NewDeepDiveQuestion(target ArticleQuestion, followUpIndex int, text string)
 
 // FallbackFollowUpText returns a safe rule-based question when generated wording is unavailable.
 func FallbackFollowUpText(target ArticleQuestion, answer BriefAnswer, followUpIndex int) string {
+	var question string
 	switch target.ID {
 	case QuestionIDOpeningEpisode:
 		if followUpIndex == 1 {
-			return "What specific scene from that opening episode should the reader see first?"
+			question = "読者に最初に見せたい具体的な場面を、どの描写から始めますか？"
+			break
 		}
-		return "What emotion at the time should the article make clear?"
+		question = "その時点の感情を、どんな言葉で記事に残しますか？"
 	case QuestionIDMustInclude:
 		if followUpIndex == 1 {
-			return "Which included point needs the most concrete detail, and what detail should be used?"
+			question = "必ず含めたい論点のうち、どの部分に具体的な根拠を足しますか？"
+			break
 		}
-		return "What lesson should the reader take from that required point?"
+		question = "その論点から読者に持ち帰ってほしい学びを、どう表現しますか？"
 	case QuestionIDPersonalContext:
 		if followUpIndex == 1 {
-			return "Which personal experience should be connected most directly to the article's argument?"
+			question = "記事の主張に最も直接つなげたい個人的な経験は何ですか？"
+			break
 		}
-		return "What personal value or hesitation should the article make visible?"
+		question = "記事の中で見せたい個人的な価値観や迷いは何ですか？"
 	case QuestionIDExpectedReaderAction:
 		if followUpIndex == 1 {
-			return "What reason should make the reader want to take that action?"
+			question = "読者がその行動を取りたくなる理由を、どの実感から説明しますか？"
+			break
 		}
-		return "What concrete first step should the reader imagine after reading?"
+		question = "読後に読者が想像できる最初の一歩は何ですか？"
 	case QuestionIDToneStance:
 		if followUpIndex == 1 {
-			return "What stance should the article explain most carefully?"
+			question = "記事で最も丁寧に説明したい立場は何ですか？"
+			break
 		}
-		return "What experience should support that tone or stance?"
+		question = "そのトーンや立場を支える経験は何ですか？"
 	default:
-		return "What concrete detail should the article add to make this answer useful?"
+		question = "記事を実用的にするために、どんな具体的な情報を足しますか？"
 	}
+	return contextualFollowUpQuestion(answer.Content, question)
 }
 
 // IsAllowedFollowUpQuestion checks that a generated follow-up is open-ended enough for the workflow.
 func IsAllowedFollowUpQuestion(text string) bool {
-	trimmed := strings.TrimSpace(strings.ToLower(text))
+	trimmed := strings.TrimSpace(strings.ToLower(stripFollowUpContextPrefix(text)))
 	if trimmed == "" {
 		return false
 	}
@@ -287,6 +294,50 @@ func IsAllowedFollowUpQuestion(text string) bool {
 		return false
 	}
 	return true
+}
+
+func contextualFollowUpQuestion(answerContent, question string) string {
+	excerpt := followUpContextExcerpt(answerContent, 72)
+	if excerpt == "" {
+		return question
+	}
+	return fmt.Sprintf("「%s」というご回答を踏まえて、%s", excerpt, question)
+}
+
+func followUpContextExcerpt(content string, maxRunes int) string {
+	content = strings.Join(strings.Fields(strings.TrimSpace(content)), " ")
+	if content == "" {
+		return ""
+	}
+	content = strings.Trim(content, "「」\"'")
+	runes := []rune(content)
+	if maxRunes > 0 && len(runes) > maxRunes {
+		content = string(runes[:maxRunes-1]) + "..."
+	}
+	return content
+}
+
+func stripFollowUpContextPrefix(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "「") {
+		return trimmed
+	}
+	end := strings.Index(trimmed, "」")
+	if end < 0 {
+		return trimmed
+	}
+	rest := strings.TrimSpace(trimmed[end+len("」"):])
+	for _, prefix := range []string{
+		"というご回答を踏まえて、",
+		"という回答を踏まえて、",
+		"を踏まえて、",
+		"を受けて、",
+	} {
+		if strings.HasPrefix(rest, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(rest, prefix))
+		}
+	}
+	return trimmed
 }
 
 // MarkDeepDiveSkipped allows completion when the user explicitly skips deep dives.

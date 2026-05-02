@@ -45,6 +45,7 @@ func main() {
 	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
 	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
 	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
+	timeout := scenarioTimeout()
 	streamDraft := os.Getenv("SCENARIO_STREAM_DRAFT") == "1"
 	client, err := llamacpp.NewClientFromEnvForPurpose("DRAFT")
 	if err != nil {
@@ -60,8 +61,9 @@ func main() {
 	var finalElapsed time.Duration
 	var finalFirstChunk time.Duration
 	var finalChunks int
+	finalAttempt := 0
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		started := time.Now()
 		request := draftapp.GenerateRequest{
 			StyleGuide:    guide,
@@ -91,6 +93,7 @@ func main() {
 		finalElapsed = elapsed
 		finalFirstChunk = firstChunk
 		finalChunks = chunkCount
+		finalAttempt = attempt
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("verification_attempt_%d.json", attempt)), result.Verification)
@@ -102,17 +105,17 @@ func main() {
 	writeFile(filepath.Join(outputDir, "draft.md"), result.Draft.Markdown()+"\n")
 	writeJSON(filepath.Join(outputDir, "evaluation.json"), result.Evaluation)
 	writeJSON(filepath.Join(outputDir, "verification.json"), result.Verification)
-	if result.Evaluation.Comparison.Score < minStyleScore {
-		fatalf("style score %.1f below scenario minimum %.1f", result.Evaluation.Comparison.Score, minStyleScore)
-	}
-	if runes := len([]rune(result.Draft.Markdown())); runes < minDraftRunes {
-		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
-	}
 
+	runes := len([]rune(result.Draft.Markdown()))
+	passesScenario := result.Evaluation.Comparison.Score >= minStyleScore && runes >= minDraftRunes
 	fmt.Printf("draft generation scenario completed\n")
+	fmt.Printf("scenario_passed=%v\n", passesScenario)
+	fmt.Printf("attempt=%d\n", finalAttempt)
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
-	fmt.Printf("runes=%d\n", len([]rune(result.Draft.Markdown())))
+	fmt.Printf("min_style_score=%.1f\n", minStyleScore)
+	fmt.Printf("runes=%d\n", runes)
+	fmt.Printf("min_draft_runes=%d\n", minDraftRunes)
 	fmt.Printf("verification_performed=%v\n", result.Verification.Performed)
 	fmt.Printf("verification_passed=%v\n", result.Verification.Passed)
 	fmt.Printf("verification_summary=%s\n", result.Verification.Summary)
@@ -128,6 +131,12 @@ func main() {
 	fmt.Printf("draft=%s\n", filepath.Join(outputDir, "draft.md"))
 	fmt.Printf("evaluation=%s\n", filepath.Join(outputDir, "evaluation.json"))
 	fmt.Printf("verification=%s\n", filepath.Join(outputDir, "verification.json"))
+	if result.Evaluation.Comparison.Score < minStyleScore {
+		fatalf("style score %.1f below scenario minimum %.1f", result.Evaluation.Comparison.Score, minStyleScore)
+	}
+	if runes < minDraftRunes {
+		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
+	}
 }
 
 func readJSON(path string, out any) {
@@ -192,6 +201,14 @@ func envFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+func scenarioTimeout() time.Duration {
+	seconds := envInt("SCENARIO_DRAFT_TIMEOUT_SECONDS", 0)
+	if seconds == 0 {
+		seconds = envInt("LLM_TIMEOUT_SECONDS", 720)
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func fatalf(format string, args ...any) {

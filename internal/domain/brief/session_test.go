@@ -1,6 +1,9 @@
 package brief
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFixedQuestionsAreDeterministic(t *testing.T) {
 	questions := FixedQuestions()
@@ -234,6 +237,33 @@ func TestGeneratedFollowUpQuestionRulesRejectBinaryQuestions(t *testing.T) {
 	}
 	if !IsAllowedFollowUpQuestion("What concrete scene should make that point memorable?") {
 		t.Fatal("expected open-ended follow-up to be allowed")
+	}
+}
+
+func TestFallbackFollowUpTextIncludesContextualPrefix(t *testing.T) {
+	target := FixedQuestions()[1]
+	answer := BriefAnswer{
+		QuestionID: target.ID,
+		Content:    "以前の生成記事を読んだとき、自分の切実さが抜け落ちていると感じた",
+		FlowType:   QuestionFlowMain,
+	}
+	got := FallbackFollowUpText(target, answer, 1)
+	if !strings.HasPrefix(got, "「以前の生成記事を読んだとき、自分の切実さが抜け落ちていると感じた」というご回答を踏まえて、") {
+		t.Fatalf("fallback missing contextual prefix: %q", got)
+	}
+	if !IsAllowedFollowUpQuestion(got) {
+		t.Fatalf("contextual fallback should be allowed: %q", got)
+	}
+}
+
+func TestContextualFollowUpValidationStillRejectsBinaryQuestion(t *testing.T) {
+	text := "「AI or human の迷いがある」というご回答を踏まえて、Do you want the article to be practical?"
+	if IsAllowedFollowUpQuestion(text) {
+		t.Fatalf("expected contextual binary question to be rejected: %q", text)
+	}
+	allowed := "「AI or human の迷いがある」というご回答を踏まえて、どの場面からその迷いを具体的に説明しますか？"
+	if !IsAllowedFollowUpQuestion(allowed) {
+		t.Fatalf("expected contextual open question to be allowed: %q", allowed)
 	}
 }
 
