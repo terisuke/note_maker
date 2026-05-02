@@ -54,6 +54,10 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
    - Note.com access belongs in `internal/infrastructure/note`.
    - OpenAI-compatible local LLM access belongs in `internal/infrastructure/llamacpp`.
    - In-memory/file repositories belong in `internal/infrastructure/repository`.
+   - Evo X2 is the primary heavy-inference runtime and must be reached through the Tailscale SSH tunnel endpoint (`http://127.0.0.1:21434/v1`) in `make evo-x2` and scenario targets.
+   - Local llama.cpp (`http://127.0.0.1:8081/v1`) is fallback only. Do not set `LLM_BASE_URL` to local Ollama or local llama.cpp for Evo X2 validation unless the test is explicitly measuring fallback behavior.
+   - Runtime validation must report base URL, model, elapsed time, score, and draft length.
+   - If fallback validation fails the strict draft thresholds, keep Evo X2 primary enabled and track fallback hardening separately (Issue [#36](https://github.com/terisuke/note_maker/issues/36)).
 
 4. Handlers are JSON boundaries.
    - They create/use application services.
