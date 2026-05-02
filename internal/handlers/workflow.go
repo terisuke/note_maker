@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -40,22 +39,17 @@ type workflowStoreBackend interface {
 }
 
 func newWorkflowStore() workflowStoreBackend {
-	driver := strings.ToLower(strings.TrimSpace(os.Getenv("WORKFLOW_STORE_DRIVER")))
-	if driver == "sqlite" {
-		path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
-		if path == "" {
-			path = "data/workflow_store.db"
-		}
+	config := resolveWorkflowStorageConfig()
+	setActiveWorkflowStorage(config)
+	if config.Driver == storageDriverSQLite {
+		path := config.Path
 		store, err := sqliterepo.NewWorkflowStore(path)
 		if err == nil {
 			return store
 		}
 		panic(fmt.Sprintf("initialize sqlite workflow store: %v", err))
 	}
-	path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
-	if path == "" {
-		path = "data/workflow_store.json"
-	}
+	path := config.Path
 	store, err := memory.NewPersistentWorkflowStore(path)
 	if err == nil {
 		return store

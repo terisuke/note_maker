@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
     templateLoading: false,
     templateError: '',
     templateRequestId: 0,
+    storageConfig: null,
     questionTextById: {},
     lastSubmittedAnswer: '',
     answerAbortController: null,
@@ -59,6 +60,10 @@ document.addEventListener('DOMContentLoaded', () => {
     briefModel: document.getElementById('brief-model'),
     draftModel: document.getElementById('draft-model'),
     verifyModel: document.getElementById('verify-model'),
+    storageDriver: document.getElementById('storage-driver'),
+    storagePath: document.getElementById('storage-path'),
+    saveStorage: document.getElementById('save-storage-btn'),
+    storageSummary: document.getElementById('storage-summary'),
     questionConfigList: document.getElementById('question-config-list'),
     addQuestion: document.getElementById('add-question-btn'),
     resetQuestions: document.getElementById('reset-questions-btn'),
@@ -104,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderQuestionConfig();
   initializeModeControls();
   checkModels();
+  loadStorageConfig();
 
   el.personaSelect.addEventListener('change', onPersonaChange);
   el.formatSelect.addEventListener('change', onFormatChange);
@@ -111,6 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
   el.briefModel.addEventListener('change', saveModelConfig);
   el.draftModel.addEventListener('change', saveModelConfig);
   el.verifyModel.addEventListener('change', saveModelConfig);
+  el.storageDriver.addEventListener('change', onStorageDriverChange);
+  el.saveStorage.addEventListener('click', saveStorageConfig);
   el.addQuestion.addEventListener('click', addQuestion);
   el.resetQuestions.addEventListener('click', resetQuestions);
   el.analyzeStyle.addEventListener('click', analyzeStyle);
@@ -759,6 +767,74 @@ document.addEventListener('DOMContentLoaded', () => {
       verify: el.verifyModel.value,
     };
     saveConfig();
+  }
+
+  async function loadStorageConfig() {
+    try {
+      const data = await requestJSON('/api/config/storage');
+      state.storageConfig = data;
+      applyStorageConfig(data);
+    } catch (error) {
+      el.storageSummary.className = 'storage-summary warning';
+      el.storageSummary.textContent = `保存方式を取得できませんでした: ${error.message}`;
+    }
+  }
+
+  function applyStorageConfig(data) {
+    el.storageDriver.value = data.configured_driver || data.active_driver || 'json';
+    el.storagePath.value = data.configured_path || data.active_path || defaultStoragePath(el.storageDriver.value);
+    el.storageDriver.disabled = Boolean(data.env_locked);
+    el.storagePath.disabled = Boolean(data.env_locked);
+    el.saveStorage.disabled = Boolean(data.env_locked);
+    renderStorageSummary(data);
+  }
+
+  function renderStorageSummary(data) {
+    const active = `${storageDriverLabel(data.active_driver)} / ${data.active_path}`;
+    const configured = `${storageDriverLabel(data.configured_driver)} / ${data.configured_path}`;
+    const status = data.env_locked
+      ? '環境変数で固定されています。UIからは変更できません。'
+      : data.restart_required
+        ? data.restart_message
+        : '現在の保存方式で動作中です。';
+    el.storageSummary.className = `storage-summary${data.restart_required ? ' warning' : ''}`;
+    el.storageSummary.innerHTML = `
+      <span>現在: <strong>${escapeHTML(active)}</strong></span>
+      <span>次回起動: <strong>${escapeHTML(configured)}</strong></span>
+      <span>${escapeHTML(status)}</span>
+    `;
+  }
+
+  function onStorageDriverChange() {
+    const currentPath = el.storagePath.value.trim();
+    if (!currentPath || currentPath === defaultStoragePath('json') || currentPath === defaultStoragePath('sqlite')) {
+      el.storagePath.value = defaultStoragePath(el.storageDriver.value);
+    }
+  }
+
+  async function saveStorageConfig() {
+    clearError();
+    try {
+      const data = await requestJSON('/api/config/storage', {
+        method: 'PATCH',
+        body: {
+          workflow_store_driver: el.storageDriver.value,
+          workflow_store_path: el.storagePath.value,
+        },
+      });
+      state.storageConfig = data;
+      applyStorageConfig(data);
+    } catch (error) {
+      showError(`保存方式の保存に失敗しました: ${error.message}`);
+    }
+  }
+
+  function storageDriverLabel(driver) {
+    return driver === 'sqlite' ? 'SQLite' : 'JSONファイル';
+  }
+
+  function defaultStoragePath(driver) {
+    return driver === 'sqlite' ? 'data/workflow_store.db' : 'data/workflow_store.json';
   }
 
   async function loadQuestionTemplate() {
