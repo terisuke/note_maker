@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -363,6 +364,10 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
 		return
 	}
+	if wantsEventStream(r) && !req.SkipDeepDive {
+		streamAnswerBriefSession(w, r, req, session)
+		return
+	}
 
 	var result briefapp.InterviewResult
 	if req.SkipDeepDive {
@@ -393,6 +398,42 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respondWithJSON(w, http.StatusOK, toBriefSessionResponse(result))
+}
+
+func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, req answerBriefSessionRequest, session briefdomain.ArticleBriefSession) {
+	stream, ok := newSSEStream(w)
+	if !ok {
+		respondWithError(w, "STREAMING_UNSUPPORTED", "Streaming is not supported by this response writer", "", http.StatusInternalServerError)
+		return
+	}
+	service := newBriefInterviewService(req.BriefModel)
+	model := strings.TrimSpace(req.BriefModel)
+	stopHeartbeat := stream.StartHeartbeat(r.Context(), "follow_up", "", model, 10*time.Second)
+	defer stopHeartbeat()
+	result, err := service.AnswerStream(r.Context(), session, req.Content, briefapp.StreamEvents{
+		OnStatus: func(status string) error {
+			return stream.Send("status", streamStatus{Status: status, Phase: "follow_up", Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS()})
+		},
+		OnFollowUpChunk: func(chunk string) error {
+			return stream.Send("chunk", streamChunk{Text: chunk, ElapsedMS: stream.ElapsedMS()})
+		},
+	})
+	if err != nil {
+		_ = stream.Send("error", streamError{Code: "BRIEF_ANSWER_FAILED", Message: "Failed to record brief answer", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+		return
+	}
+	if err := workflowStore.SaveSession(result.Session); err != nil {
+		_ = stream.Send("error", streamError{Code: "BRIEF_SESSION_SAVE_FAILED", Message: "Failed to save brief session", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+		return
+	}
+	if result.Completed && result.Brief != nil {
+		if err := workflowStore.SaveBrief(result.Session.ID, *result.Brief); err != nil {
+			_ = stream.Send("error", streamError{Code: "BRIEF_SAVE_FAILED", Message: "Failed to save article brief", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+			return
+		}
+	}
+	_ = stream.Send("result", toBriefSessionResponse(result))
+	_ = stream.Send("done", streamStatus{Status: "completed", ElapsedMS: stream.ElapsedMS()})
 }
 
 // GenerateDraftHandler generates a draft from a stored style guide and completed brief.
@@ -440,6 +481,11 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 	articleBrief.PersonaID = persona.ID
 	articleBrief.OutputFormatID = format.ID
 
+	if wantsEventStream(r) {
+		streamGenerateDraft(w, r, req, profile, guide, articleBrief, persona, format)
+		return
+	}
+
 	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("DRAFT", req.DraftModel)
 	if err != nil {
 		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED", "Failed to initialize local LLM client", err.Error(), http.StatusInternalServerError)
@@ -463,9 +509,147 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDraftRequest, profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) {
+	stream, ok := newSSEStream(w)
+	if !ok {
+		respondWithError(w, "STREAMING_UNSUPPORTED", "Streaming is not supported by this response writer", "", http.StatusInternalServerError)
+		return
+	}
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("DRAFT", req.DraftModel)
+	if err != nil {
+		_ = stream.Send("error", streamError{Code: "GENERATOR_INITIALIZATION_FAILED", Message: "Failed to initialize local LLM client", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+		return
+	}
+	endpoint := generator.BaseURL()
+	model := generator.Model()
+	_ = stream.Send("status", streamStatus{Status: "runtime_connected", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS()})
+	stopHeartbeat := stream.StartHeartbeat(r.Context(), "draft", endpoint, model, 10*time.Second)
+	defer stopHeartbeat()
+	service := draftapp.NewService(generator)
+	result, err := service.GenerateStream(r.Context(), draftapp.GenerateRequest{
+		StyleGuide:    guide,
+		Brief:         articleBrief,
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	}, draftapp.StreamEvents{
+		OnStatus: func(status string) error {
+			return stream.Send("status", streamStatus{Status: status, Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS()})
+		},
+		OnChunk: func(chunk string) error {
+			return stream.Send("chunk", streamChunk{Text: chunk, ElapsedMS: stream.ElapsedMS()})
+		},
+	})
+	if err != nil {
+		_ = stream.Send("error", streamError{Code: "DRAFT_GENERATION_FAILED", Message: "Failed to generate draft", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
+		return
+	}
+	_ = stream.Send("result", generateDraftResponse{
+		Draft:      result.Draft.Markdown(),
+		Evaluation: result.Evaluation,
+	})
+	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
+}
+
 func decodeJSONRequest(r *http.Request, out any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(out)
+}
+
+func wantsEventStream(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "text/event-stream")
+}
+
+type sseStream struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	started time.Time
+	mu      sync.Mutex
+}
+
+type streamStatus struct {
+	Status    string  `json:"status"`
+	Phase     string  `json:"phase,omitempty"`
+	Endpoint  string  `json:"endpoint,omitempty"`
+	Model     string  `json:"model,omitempty"`
+	StartedAt string  `json:"started_at,omitempty"`
+	ElapsedMS int64   `json:"elapsed_ms"`
+	Runes     int     `json:"runes,omitempty"`
+	Score     float64 `json:"score,omitempty"`
+}
+
+type streamChunk struct {
+	Text      string `json:"text"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+}
+
+type streamError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Detail    string `json:"detail,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+}
+
+func newSSEStream(w http.ResponseWriter) (*sseStream, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return nil, false
+	}
+	headers := w.Header()
+	headers.Set("Content-Type", "text/event-stream; charset=utf-8")
+	headers.Set("Cache-Control", "no-cache, no-transform")
+	headers.Set("Connection", "keep-alive")
+	headers.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	stream := &sseStream{w: w, flusher: flusher, started: time.Now()}
+	_ = stream.Send("status", streamStatus{Status: "stream_opened", ElapsedMS: 0})
+	return stream, true
+}
+
+func (s *sseStream) ElapsedMS() int64 {
+	return time.Since(s.started).Milliseconds()
+}
+
+func (s *sseStream) Send(event string, data any) error {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, encoded); err != nil {
+		return err
+	}
+	s.flusher.Flush()
+	return nil
+}
+
+func (s *sseStream) StartHeartbeat(ctx context.Context, phase, endpoint, model string, interval time.Duration) func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				_ = s.Send("heartbeat", streamStatus{
+					Status:    "running",
+					Phase:     phase,
+					Endpoint:  endpoint,
+					Model:     model,
+					StartedAt: s.started.Format(time.RFC3339),
+					ElapsedMS: s.ElapsedMS(),
+				})
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
 }
 
 func pathValue(r *http.Request, name string) string {
@@ -542,6 +726,28 @@ func (g llmFollowUpGenerator) GenerateFollowUp(ctx context.Context, session brie
 	defer cancel()
 	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex)
 	generated, err := generator.Generate(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+	question := extractFollowUpQuestion(generated)
+	if !briefdomain.IsAllowedFollowUpQuestion(question) {
+		return "", fmt.Errorf("generated follow-up was not allowed")
+	}
+	return question, nil
+}
+
+func (g llmFollowUpGenerator) GenerateFollowUpStream(ctx context.Context, session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int, onChunk func(string) error) (string, error) {
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("BRIEF", g.model)
+	if err != nil {
+		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex)
+	generated, err := generator.GenerateStream(ctx, prompt, onChunk)
 	if err != nil {
 		return "", err
 	}

@@ -15,6 +15,17 @@ type TextGenerator interface {
 	Generate(ctx context.Context, prompt string) (string, error)
 }
 
+// StreamingTextGenerator can stream a draft while returning the final assembled text.
+type StreamingTextGenerator interface {
+	GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error)
+}
+
+// StreamEvents receives long-running draft generation progress.
+type StreamEvents struct {
+	OnStatus func(string) error
+	OnChunk  func(string) error
+}
+
 // Service coordinates prompt building, generation, Markdown validation, and style evaluation.
 type Service struct {
 	generator TextGenerator
@@ -28,6 +39,15 @@ func NewService(generator TextGenerator) *Service {
 // Generate builds a prompt from the style guide and brief, validates the generated Markdown,
 // and returns the draft with strict style evaluation.
 func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
+	return s.generate(ctx, req, StreamEvents{})
+}
+
+// GenerateStream generates a draft while streaming model deltas through events.
+func (s *Service) GenerateStream(ctx context.Context, req GenerateRequest, events StreamEvents) (GenerateResult, error) {
+	return s.generate(ctx, req, events)
+}
+
+func (s *Service) generate(ctx context.Context, req GenerateRequest, events StreamEvents) (GenerateResult, error) {
 	if s.generator == nil {
 		return GenerateResult{}, fmt.Errorf("text generator is required")
 	}
@@ -49,9 +69,15 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	}
 
 	prompt := BuildPromptForModeWithProfile(req.StyleGuide, req.Brief, req.AuthorProfile, persona, format)
-	rawDraft, err := s.generator.Generate(ctx, prompt)
+	if err := emitStatus(events, "draft_generation_started"); err != nil {
+		return GenerateResult{}, err
+	}
+	rawDraft, err := s.generateRaw(ctx, prompt, events.OnChunk)
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("generate draft with local llm: %w", err)
+	}
+	if err := emitStatus(events, "draft_validation_started"); err != nil {
+		return GenerateResult{}, err
 	}
 	articleDraft, err := articledomain.NewDraftForFormat(rawDraft, format.ID)
 	if err != nil {
@@ -59,6 +85,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	}
 	evaluation := EvaluateStyle(req.AuthorProfile, req.Brief, articleDraft)
 	if shouldReviseForStrictStyle(evaluation) {
+		if err := emitStatus(events, "style_revision_started"); err != nil {
+			return GenerateResult{}, err
+		}
 		revisedDraft, revisedEvaluation, ok := s.reviseOnce(ctx, prompt, articleDraft, evaluation, format.ID, req)
 		if ok {
 			articleDraft = revisedDraft
@@ -70,6 +99,15 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		Draft:      articleDraft,
 		Evaluation: evaluation,
 	}, nil
+}
+
+func (s *Service) generateRaw(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	if onChunk != nil {
+		if streamingGenerator, ok := s.generator.(StreamingTextGenerator); ok {
+			return streamingGenerator.GenerateStream(ctx, prompt, onChunk)
+		}
+	}
+	return s.generator.Generate(ctx, prompt)
 }
 
 func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, articleDraft articledomain.Draft, evaluation StyleEvaluation, formatID string, req GenerateRequest) (articledomain.Draft, StyleEvaluation, bool) {
@@ -87,6 +125,13 @@ func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, article
 		return revisedDraft, revisedEvaluation, true
 	}
 	return articledomain.Draft{}, StyleEvaluation{}, false
+}
+
+func emitStatus(events StreamEvents, status string) error {
+	if events.OnStatus == nil {
+		return nil
+	}
+	return events.OnStatus(status)
 }
 
 func shouldReviseForStrictStyle(evaluation StyleEvaluation) bool {

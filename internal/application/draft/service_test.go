@@ -115,6 +115,49 @@ func TestGenerateRunsControlledRevisionWhenStrictStyleFails(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamEmitsStatusAndChunks(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	generator := &streamingFakeGenerator{chunks: []string{
+		"# AIと違和感を小さく言語化する\n\n",
+		strings.Repeat("僕はAIと起業の挑戦について、「違和感」を言語化しながら自分の判断を見直しました。\n\n", 18),
+		"## 体験から始める\n\n" + strings.Repeat("僕は音楽とエンジニアの経験を行き来し、読者が小さくアウトプットできる形にします。\n\n", 12),
+		"## 次の一歩\n\n" + strings.Repeat("僕は抽象論で終わらせず、今日試せる判断基準としてAIとの向き合い方を置き直します。\n\n", 8),
+	}}
+	var statuses []string
+	var streamed strings.Builder
+
+	result, err := NewService(generator).GenerateStream(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID:        profile.ID,
+			Theme:                 "ストリーミングする",
+			TargetLengthStructure: "3000字、導入・本論・結論",
+		},
+		AuthorProfile: profile,
+	}, StreamEvents{
+		OnStatus: func(status string) error {
+			statuses = append(statuses, status)
+			return nil
+		},
+		OnChunk: func(chunk string) error {
+			streamed.WriteString(chunk)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("generate stream: %v", err)
+	}
+	if !generator.streamed {
+		t.Fatal("expected streaming generator to be used")
+	}
+	if strings.TrimSpace(streamed.String()) != result.Draft.Markdown() {
+		t.Fatalf("streamed chunks differ from final draft")
+	}
+	if strings.Join(statuses, ",") != "draft_generation_started,draft_validation_started" {
+		t.Fatalf("unexpected statuses: %#v", statuses)
+	}
+}
+
 func TestGenerateUsesPersonaAndOutputFormat(t *testing.T) {
 	zennDraft := "---\ntitle: \"Goで検証する\"\nemoji: \"🧪\"\ntype: \"tech\"\ntopics: [\"go\", \"test\"]\npublished: false\n---\n\n## 実装\n\n```go\nfmt.Println(\"ok\")\n```"
 	generator := &fakeGenerator{draft: zennDraft}
@@ -316,6 +359,28 @@ func (g *sequenceGenerator) Generate(ctx context.Context, prompt string) (string
 	draft := g.drafts[g.calls]
 	g.calls++
 	return draft, nil
+}
+
+type streamingFakeGenerator struct {
+	chunks   []string
+	prompt   string
+	streamed bool
+}
+
+func (g *streamingFakeGenerator) Generate(ctx context.Context, prompt string) (string, error) {
+	g.prompt = prompt
+	return strings.Join(g.chunks, ""), nil
+}
+
+func (g *streamingFakeGenerator) GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	g.prompt = prompt
+	g.streamed = true
+	for _, chunk := range g.chunks {
+		if err := onChunk(chunk); err != nil {
+			return "", err
+		}
+	}
+	return strings.Join(g.chunks, ""), nil
 }
 
 func profileAndGuideFromDraft(t *testing.T, text string) (AuthorStyleProfile, WritingStyleGuide) {

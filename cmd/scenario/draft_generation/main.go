@@ -44,6 +44,7 @@ func main() {
 	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
 	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
 	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
+	streamDraft := os.Getenv("SCENARIO_STREAM_DRAFT") == "1"
 	client, err := llamacpp.NewClientFromEnvForPurpose("DRAFT")
 	if err != nil {
 		fatalf("create local llm client: %v", err)
@@ -51,17 +52,40 @@ func main() {
 	service := draftapp.NewService(client)
 
 	var result draftapp.GenerateResult
+	var finalElapsed time.Duration
+	var finalFirstChunk time.Duration
+	var finalChunks int
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
-		result, err = service.Generate(ctx, draftapp.GenerateRequest{
+		started := time.Now()
+		request := draftapp.GenerateRequest{
 			StyleGuide:    guide,
 			Brief:         brief,
 			AuthorProfile: profile,
-		})
+		}
+		chunkCount := 0
+		var firstChunk time.Duration
+		if streamDraft {
+			result, err = service.GenerateStream(ctx, request, draftapp.StreamEvents{
+				OnChunk: func(chunk string) error {
+					chunkCount++
+					if firstChunk == 0 {
+						firstChunk = time.Since(started)
+					}
+					return nil
+				},
+			})
+		} else {
+			result, err = service.Generate(ctx, request)
+		}
+		elapsed := time.Since(started)
 		cancel()
 		if err != nil {
 			fatalf("generate draft attempt %d: %v", attempt, err)
 		}
+		finalElapsed = elapsed
+		finalFirstChunk = firstChunk
+		finalChunks = chunkCount
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
 		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes {
@@ -82,6 +106,12 @@ func main() {
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
 	fmt.Printf("runes=%d\n", len([]rune(result.Draft.Markdown())))
+	fmt.Printf("elapsed_seconds=%.2f\n", finalElapsed.Seconds())
+	fmt.Printf("streaming=%v\n", streamDraft)
+	if streamDraft {
+		fmt.Printf("first_chunk_ms=%d\n", finalFirstChunk.Milliseconds())
+		fmt.Printf("chunks=%d\n", finalChunks)
+	}
 	fmt.Printf("llm_base_url=%s\n", baseURL)
 	fmt.Printf("llm_model=%s\n", model)
 	fmt.Printf("draft=%s\n", filepath.Join(outputDir, "draft.md"))

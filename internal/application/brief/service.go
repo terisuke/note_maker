@@ -13,6 +13,17 @@ type FollowUpGenerator interface {
 	GenerateFollowUp(ctx context.Context, session domain.ArticleBriefSession, target domain.ArticleQuestion, answer domain.BriefAnswer, followUpIndex int) (string, error)
 }
 
+// StreamingFollowUpGenerator can stream generated deep-dive question text.
+type StreamingFollowUpGenerator interface {
+	GenerateFollowUpStream(ctx context.Context, session domain.ArticleBriefSession, target domain.ArticleQuestion, answer domain.BriefAnswer, followUpIndex int, onChunk func(string) error) (string, error)
+}
+
+// StreamEvents receives long-running interview progress.
+type StreamEvents struct {
+	OnStatus        func(string) error
+	OnFollowUpChunk func(string) error
+}
+
 // InterviewService drives one-question-at-a-time article brief sessions.
 type InterviewService struct {
 	followUpGenerator FollowUpGenerator
@@ -54,6 +65,16 @@ func (s *InterviewService) StartSession(input StartSessionInput) (InterviewResul
 
 // Answer accepts one answer and returns either the next question or the completed brief.
 func (s *InterviewService) Answer(ctx context.Context, session domain.ArticleBriefSession, content string) (InterviewResult, error) {
+	return s.answer(ctx, session, content, StreamEvents{})
+}
+
+// AnswerStream records one answer and streams generated deep-dive question text
+// when the next question requires an LLM follow-up.
+func (s *InterviewService) AnswerStream(ctx context.Context, session domain.ArticleBriefSession, content string, events StreamEvents) (InterviewResult, error) {
+	return s.answer(ctx, session, content, events)
+}
+
+func (s *InterviewService) answer(ctx context.Context, session domain.ArticleBriefSession, content string, events StreamEvents) (InterviewResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -77,12 +98,16 @@ func (s *InterviewService) Answer(ctx context.Context, session domain.ArticleBri
 			}, nil
 		}
 	}
-	return s.buildResult(ctx, session)
+	return s.buildResultWithEvents(ctx, session, events)
 }
 
 func (s *InterviewService) buildResult(ctx context.Context, session domain.ArticleBriefSession) (InterviewResult, error) {
+	return s.buildResultWithEvents(ctx, session, StreamEvents{})
+}
+
+func (s *InterviewService) buildResultWithEvents(ctx context.Context, session domain.ArticleBriefSession, events StreamEvents) (InterviewResult, error) {
 	if question, ok := session.CurrentQuestion(); ok {
-		question = s.withGeneratedFollowUp(ctx, session, question)
+		question = s.withGeneratedFollowUp(ctx, session, question, events)
 		return InterviewResult{
 			Session:      session,
 			NextQuestion: &question,
@@ -99,7 +124,7 @@ func (s *InterviewService) buildResult(ctx context.Context, session domain.Artic
 	}, nil
 }
 
-func (s *InterviewService) withGeneratedFollowUp(ctx context.Context, session domain.ArticleBriefSession, question domain.ArticleQuestion) domain.ArticleQuestion {
+func (s *InterviewService) withGeneratedFollowUp(ctx context.Context, session domain.ArticleBriefSession, question domain.ArticleQuestion, events StreamEvents) domain.ArticleQuestion {
 	if question.FlowType != domain.QuestionFlowDeepDiveFollowUp || s.followUpGenerator == nil {
 		return question
 	}
@@ -107,7 +132,8 @@ func (s *InterviewService) withGeneratedFollowUp(ctx context.Context, session do
 	if !ok {
 		return question
 	}
-	generated, err := s.followUpGenerator.GenerateFollowUp(ctx, session, target, answer, question.FollowUpIndex)
+	_ = emitStatus(events, "follow_up_generation_started")
+	generated, err := s.generateFollowUp(ctx, session, target, answer, question.FollowUpIndex, events.OnFollowUpChunk)
 	if err != nil {
 		return question
 	}
@@ -117,6 +143,22 @@ func (s *InterviewService) withGeneratedFollowUp(ctx context.Context, session do
 	}
 	question.Text = generated
 	return question
+}
+
+func (s *InterviewService) generateFollowUp(ctx context.Context, session domain.ArticleBriefSession, target domain.ArticleQuestion, answer domain.BriefAnswer, followUpIndex int, onChunk func(string) error) (string, error) {
+	if onChunk != nil {
+		if streamingGenerator, ok := s.followUpGenerator.(StreamingFollowUpGenerator); ok {
+			return streamingGenerator.GenerateFollowUpStream(ctx, session, target, answer, followUpIndex, onChunk)
+		}
+	}
+	return s.followUpGenerator.GenerateFollowUp(ctx, session, target, answer, followUpIndex)
+}
+
+func emitStatus(events StreamEvents, status string) error {
+	if events.OnStatus == nil {
+		return nil
+	}
+	return events.OnStatus(status)
 }
 
 func followUpContext(session domain.ArticleBriefSession, question domain.ArticleQuestion) (domain.ArticleQuestion, domain.BriefAnswer, bool) {
