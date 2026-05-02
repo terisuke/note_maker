@@ -2,6 +2,9 @@ package draft
 
 import (
 	"fmt"
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
@@ -17,11 +20,16 @@ func BuildPrompt(guide WritingStyleGuide, brief ArticleBrief) string {
 	if !ok {
 		format = outputformat.DefaultRegistry().MustGet(outputformat.IDNoteArticle)
 	}
-	return BuildPromptForMode(guide, brief, persona, format)
+	return BuildPromptForModeWithProfile(guide, brief, AuthorStyleProfile{}, persona, format)
 }
 
 // BuildPromptForMode creates a persona- and format-aware local-LLM instruction.
 func BuildPromptForMode(guide WritingStyleGuide, brief ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) string {
+	return BuildPromptForModeWithProfile(guide, brief, AuthorStyleProfile{}, persona, format)
+}
+
+// BuildPromptForModeWithProfile creates a persona- and format-aware local-LLM instruction with strict metric hints.
+func BuildPromptForModeWithProfile(guide WritingStyleGuide, brief ArticleBrief, profile AuthorStyleProfile, persona personadomain.Persona, format outputformat.OutputFormat) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("あなたは指定された人格と媒体に合わせて日本語の下書きを作る編集者です。\n")
@@ -61,10 +69,79 @@ func BuildPromptForMode(guide WritingStyleGuide, brief ArticleBrief, persona per
 	appendCustomAnswers(&prompt, brief.CustomAnswers)
 	appendDeepDives(&prompt, brief.DeepDives)
 
+	if calibration := strictMetricCalibration(profile, brief, guide); calibration != "" {
+		prompt.WriteString("\n## strict style calibration\n")
+		prompt.WriteString(calibration)
+		prompt.WriteString("\n")
+	}
+
 	prompt.WriteString("\n## 出力条件\n")
 	appendOutputConditions(&prompt, format.ID)
 
 	return prompt.String()
+}
+
+// BuildStyleRevisionPrompt asks the local model for one constrained rewrite when strict evaluation fails.
+func BuildStyleRevisionPrompt(originalPrompt, draftMarkdown string, evaluation StyleEvaluation) string {
+	var prompt strings.Builder
+	prompt.WriteString("以下の下書きは媒体形式としては使えますが、strict style evaluation の一部を満たしていません。\n")
+	prompt.WriteString("元の指示、媒体ルール、文体ガイド、記事ブリーフを維持し、失敗した指標だけを改善するように全文を書き直してください。\n")
+	prompt.WriteString("前置き、解説、内部メモは出力せず、修正版の下書き本文だけを返してください。\n\n")
+
+	prompt.WriteString("## 元の生成指示\n")
+	prompt.WriteString(truncateRunes(originalPrompt, 4500))
+	prompt.WriteString("\n\n")
+
+	prompt.WriteString("## strict style evaluation failures\n")
+	if len(evaluation.Failures) == 0 {
+		prompt.WriteString("- failed without detailed metric\n")
+	} else {
+		for _, failure := range evaluation.Failures {
+			prompt.WriteString("- " + failure + "\n")
+		}
+	}
+	if evaluation.RequiredFirstPerson != "" {
+		appendLine(&prompt, "必須一人称", evaluation.RequiredFirstPerson)
+	}
+	if detail := revisionMetricDetail(evaluation); detail != "" {
+		prompt.WriteString(detail)
+	}
+	prompt.WriteString("評価を上げるために、一人称密度、段落長、文長、引用表現、頻出テーマの自然な回収を調整してください。閾値や媒体形式は変えないでください。\n\n")
+
+	prompt.WriteString("## 現在の下書き\n")
+	prompt.WriteString(truncateRunes(draftMarkdown, 6000))
+	prompt.WriteString("\n")
+	return prompt.String()
+}
+
+func revisionMetricDetail(evaluation StyleEvaluation) string {
+	var lines []string
+	ref := evaluation.Comparison.Reference
+	cand := evaluation.Comparison.Candidate
+	if ref.CharCount > 0 && cand.CharCount > 0 {
+		refFirst := float64(ref.FirstPersonCount) / float64(ref.CharCount) * 1000
+		candFirst := float64(cand.FirstPersonCount) / float64(cand.CharCount) * 1000
+		firstDirection := "維持"
+		if candFirst > refFirst*1.2 {
+			firstDirection = "減らす"
+		} else if candFirst < refFirst*0.8 {
+			firstDirection = "増やす"
+		}
+		lines = append(lines, fmt.Sprintf("- first_person density: reference %.2f/1000字, current %.2f/1000字。一人称（僕/私/俺の合計）は%s方向で調整", refFirst, candFirst, firstDirection))
+		refQuote := float64(ref.QuoteCount) / float64(ref.CharCount) * 1000
+		candQuote := float64(cand.QuoteCount) / float64(cand.CharCount) * 1000
+		direction := "維持"
+		if candQuote > refQuote*1.2 {
+			direction = "減らす"
+		} else if candQuote < refQuote*0.8 {
+			direction = "増やす"
+		}
+		lines = append(lines, fmt.Sprintf("- quote density: reference %.2f/1000字, current %.2f/1000字。鉤括弧は%s方向で調整", refQuote, candQuote, direction))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func appendOutputConditions(prompt *strings.Builder, formatID string) {
@@ -80,9 +157,9 @@ func appendOutputConditions(prompt *strings.Builder, formatID string) {
 		outputformat.IDNoteArticle: {
 			"noteで変換されやすい最小記法だけを使う。##、###、>、-、1.、**太字**、~~取り消し線~~、---、通常のコードブロックまでに抑える。",
 			"表、脚注、数式、HTML、Zenn/Qiita独自の補足ブロック、ファイル名付きコードフェンスは使わない。",
-			"文体ガイドの頻出テーマは、無理な羅列にせず、著者の背景や比喩として自然に4語以上回収する。",
-			"一人称は指定に従うが、全文で6〜8回程度に抑える。主語を省略できる文では省略し、各段落の冒頭を一人称で始めない。",
-			"鉤括弧の内省や印象的な言葉を4〜6箇所ほど入れ、違和感や気づきを残す。",
+			"文体ガイドとstrict style calibrationの頻出テーマは、無理な羅列にせず、著者の背景や比喩として自然に10語以上回収する。",
+			"一人称は指定とstrict style calibrationの目標密度に従う。主語を省略できる文では省略し、各段落の冒頭を一人称で始めない。",
+			"鉤括弧の内省や印象的な言葉はstrict style calibrationの目標密度に従い、短い引用を乱発しない。",
 			"各段落は短すぎる断片にせず、体験、解釈、読者への接続をできるだけ一段落内で結ぶ。",
 			"最後は読者に残す判断基準か次の一歩で締める。",
 		},
@@ -118,6 +195,111 @@ func appendOutputConditions(prompt *strings.Builder, formatID string) {
 	for i, line := range lines {
 		prompt.WriteString(fmt.Sprintf("%d. %s\n", i+1, line))
 	}
+}
+
+func strictMetricCalibration(profile AuthorStyleProfile, brief ArticleBrief, guide WritingStyleGuide) string {
+	if profile.Metrics.CharCount <= 0 || profile.Metrics.FirstPersonCount <= 0 {
+		return ""
+	}
+	firstPerson := preferredFirstPerson(guide, brief)
+	if firstPerson == "" {
+		firstPerson = normalizedFirstPerson(profile.PreferredFirstPerson)
+	}
+	if firstPerson == "" {
+		return ""
+	}
+	targetRunes := targetRunesFromBrief(brief.TargetLengthStructure)
+	density := float64(profile.Metrics.FirstPersonCount) / float64(profile.Metrics.CharCount)
+	targetCount := int(math.Round(density * float64(targetRunes)))
+	if targetCount < 1 {
+		targetCount = 1
+	}
+	lower := maxInt(1, int(math.Floor(float64(targetCount)*0.8)))
+	upper := maxInt(lower, int(math.Ceil(float64(targetCount)*1.2)))
+	lines := []string{fmt.Sprintf(
+		"参照文体の一人称密度は約 %.2f 回/1000字です。今回の目標長さでは一人称「%s」を中心にし、「僕」「私」「俺」の合計を%d〜%d回程度に収めてください。指定がない限り「%s」以外の一人称を混ぜないでください。少なすぎても多すぎてもfirst_person評価が下がります。\n",
+		density*1000,
+		firstPerson,
+		lower,
+		upper,
+		firstPerson,
+	)}
+	if quoteLine := quoteDensityCalibration(profile, targetRunes); quoteLine != "" {
+		lines = append(lines, quoteLine)
+	}
+	if keywordLine := keywordCalibration(profile); keywordLine != "" {
+		lines = append(lines, keywordLine)
+	}
+	return strings.Join(lines, "")
+}
+
+func quoteDensityCalibration(profile AuthorStyleProfile, targetRunes int) string {
+	if profile.Metrics.CharCount <= 0 || profile.Metrics.QuoteCount <= 0 {
+		return ""
+	}
+	density := float64(profile.Metrics.QuoteCount) / float64(profile.Metrics.CharCount)
+	targetCount := int(math.Round(density * float64(targetRunes)))
+	if targetCount < 1 {
+		targetCount = 1
+	}
+	lower := maxInt(1, int(math.Floor(float64(targetCount)*0.8)))
+	upper := maxInt(lower, int(math.Ceil(float64(targetCount)*1.2)))
+	return fmt.Sprintf(
+		"参照文体の鉤括弧密度は約 %.2f 個/1000字です。今回の目標長さでは開始記号「 または『 を合計%d〜%d個程度に収めてください。短い引用を増やしすぎるとquote_density評価が下がります。\n",
+		density*1000,
+		lower,
+		upper,
+	)
+}
+
+func keywordCalibration(profile AuthorStyleProfile) string {
+	if len(profile.Metrics.KeywordCounts) == 0 {
+		return ""
+	}
+	keywords := make([]string, 0, len(profile.Metrics.KeywordCounts))
+	for keyword, count := range profile.Metrics.KeywordCounts {
+		if count > 0 {
+			keywords = append(keywords, keyword)
+		}
+	}
+	if len(keywords) == 0 {
+		return ""
+	}
+	sortStrings(keywords)
+	return fmt.Sprintf(
+		"参照文体の主要キーワード候補: %s。本文ではこのうち少なくとも10語を、不自然な羅列ではなく体験・比喩・判断基準の中で自然に回収してください。\n",
+		strings.Join(keywords, " / "),
+	)
+}
+
+func sortStrings(values []string) {
+	for i := 0; i < len(values); i++ {
+		for j := i + 1; j < len(values); j++ {
+			if values[j] < values[i] {
+				values[i], values[j] = values[j], values[i]
+			}
+		}
+	}
+}
+
+func targetRunesFromBrief(value string) int {
+	const fallback = 3000
+	matches := regexp.MustCompile(`([0-9]{3,5})\s*字`).FindStringSubmatch(value)
+	if len(matches) != 2 {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(matches[1])
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func formatStyleGuide(guide WritingStyleGuide) string {
