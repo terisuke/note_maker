@@ -1,8 +1,12 @@
 package brief
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	"github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 func TestFixedQuestionsAreDeterministic(t *testing.T) {
@@ -41,6 +45,48 @@ func TestFixedQuestionsAreDeterministic(t *testing.T) {
 		}
 		if question.FlowType != QuestionFlowMain {
 			t.Fatalf("question %d flow = %q, want %q", i, question.FlowType, QuestionFlowMain)
+		}
+	}
+}
+
+func TestComposeFixedQuestionsCoversPersonasAndFormats(t *testing.T) {
+	personas := []string{persona.IDTerisuke, persona.IDCloudia}
+	formats := []string{
+		outputformat.IDNoteArticle,
+		outputformat.IDMarkdownBlog,
+		outputformat.IDZennArticle,
+		outputformat.IDQiitaArticle,
+		outputformat.IDHomepageSection,
+	}
+	for _, personaID := range personas {
+		for _, formatID := range formats {
+			t.Run(personaID+"_"+formatID, func(t *testing.T) {
+				questions := ComposeFixedQuestions(personaID, formatID)
+				if len(questions) < len(FixedQuestions()) {
+					t.Fatalf("question count = %d, want at least %d", len(questions), len(FixedQuestions()))
+				}
+				assertUniqueQuestionIDs(t, questions)
+				if personaID == persona.IDTerisuke && formatID == outputformat.IDNoteArticle {
+					if !reflect.DeepEqual(questions, FixedQuestions()) {
+						t.Fatalf("terisuke note_article template changed:\ngot  %#v\nwant %#v", questions, FixedQuestions())
+					}
+					return
+				}
+				switch formatID {
+				case outputformat.IDNoteArticle:
+					assertQuestionPresent(t, questions, QuestionIDStoryArc)
+				case outputformat.IDMarkdownBlog, outputformat.IDZennArticle, outputformat.IDQiitaArticle:
+					assertQuestionPresent(t, questions, QuestionIDTargetStack)
+				case outputformat.IDHomepageSection:
+					assertQuestionPresent(t, questions, QuestionIDHomepageCTA)
+				}
+				if personaID == persona.IDCloudia {
+					assertQuestionPresent(t, questions, QuestionIDCloudiaViewpoint)
+				}
+				if personaID == persona.IDCloudia && formatID == outputformat.IDZennArticle {
+					assertQuestionPresent(t, questions, QuestionIDTargetStack)
+				}
+			})
 		}
 	}
 }
@@ -293,4 +339,25 @@ func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBrie
 		}
 	}
 	return session
+}
+
+func assertQuestionPresent(t *testing.T, questions []ArticleQuestion, id string) {
+	t.Helper()
+	for _, question := range questions {
+		if question.ID == id {
+			return
+		}
+	}
+	t.Fatalf("question %q was not present in %#v", id, questions)
+}
+
+func assertUniqueQuestionIDs(t *testing.T, questions []ArticleQuestion) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, question := range questions {
+		if seen[question.ID] {
+			t.Fatalf("duplicate question id %q in %#v", question.ID, questions)
+		}
+		seen[question.ID] = true
+	}
 }

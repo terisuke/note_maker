@@ -103,6 +103,33 @@ func TestCreateBriefSessionHandlerCreatesAndPersistsSession(t *testing.T) {
 	}
 }
 
+func TestCreateBriefSessionHandlerAppendsCustomQuestionsAfterTemplate(t *testing.T) {
+	style := setupWorkflowStyle(t)
+	body := `{"style_profile_id":"` + style.Profile.ID + `","session_id":"session-custom","persona_id":"cloudia","output_format_id":"zenn_article","questions":[{"id":"custom_reference","text":"参考リンクとして必ず確認するURLは何ですか？"}]}`
+	request := httptest.NewRequest(http.MethodPost, "/api/brief-sessions", bytes.NewBufferString(body))
+	response := httptest.NewRecorder()
+
+	CreateBriefSessionHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	session, ok := workflowStore.GetSession("session-custom")
+	if !ok {
+		t.Fatal("created session was not saved")
+	}
+	template := briefdomain.ComposeFixedQuestions(personadomain.IDCloudia, outputformat.IDZennArticle)
+	if len(session.Questions) != len(template)+1 {
+		t.Fatalf("question count = %d, want %d", len(session.Questions), len(template)+1)
+	}
+	if session.Questions[len(template)-1].ID != briefdomain.QuestionIDCloudiaViewpoint {
+		t.Fatalf("last template question = %#v", session.Questions[len(template)-1])
+	}
+	if session.Questions[len(session.Questions)-1].ID != "custom_reference" {
+		t.Fatalf("custom question was not appended after template: %#v", session.Questions)
+	}
+}
+
 func TestCreateBriefSessionHandlerValidatesInputs(t *testing.T) {
 	style := setupWorkflowStyle(t)
 	tests := []struct {

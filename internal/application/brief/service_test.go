@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	domain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	"github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 func TestInterviewServiceStartsAndCompletesWorkflow(t *testing.T) {
@@ -151,6 +153,55 @@ func TestInterviewServiceForksEditedAnswerAndReturnsNextQuestion(t *testing.T) {
 	}
 }
 
+func TestInterviewServiceAppendsCustomQuestionsAfterComposedTemplate(t *testing.T) {
+	service := NewInterviewService(nil)
+	result, err := service.StartSession(StartSessionInput{
+		SessionID:      "session-custom",
+		StyleProfileID: "style-1",
+		PersonaID:      persona.IDCloudia,
+		OutputFormatID: outputformat.IDZennArticle,
+		Questions: []domain.ArticleQuestion{
+			{
+				ID:          "custom_reference",
+				Text:        "参考リンクとして必ず確認するURLは何ですか？",
+				FlowType:    domain.QuestionFlowMain,
+				TargetField: "custom",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	template := domain.ComposeFixedQuestions(persona.IDCloudia, outputformat.IDZennArticle)
+	if len(result.Session.Questions) != len(template)+1 {
+		t.Fatalf("question count = %d, want %d", len(result.Session.Questions), len(template)+1)
+	}
+	if result.Session.Questions[len(template)-1].ID != domain.QuestionIDCloudiaViewpoint {
+		t.Fatalf("last template question = %#v", result.Session.Questions[len(template)-1])
+	}
+	if result.Session.Questions[len(result.Session.Questions)-1].ID != "custom_reference" {
+		t.Fatalf("custom question was not appended last: %#v", result.Session.Questions)
+	}
+}
+
+func TestInterviewServiceUsesPersonaDefaultFormatForTemplate(t *testing.T) {
+	service := NewInterviewService(nil)
+	result, err := service.StartSession(StartSessionInput{
+		SessionID:      "session-cloudia-default",
+		StyleProfileID: "style-1",
+		PersonaID:      persona.IDCloudia,
+	})
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if result.Session.OutputFormatID != outputformat.IDZennArticle {
+		t.Fatalf("output format = %q, want %q", result.Session.OutputFormatID, outputformat.IDZennArticle)
+	}
+	if !sessionHasQuestion(result.Session.Questions, domain.QuestionIDTargetStack) {
+		t.Fatalf("cloudia default template missing target_stack: %#v", result.Session.Questions)
+	}
+}
+
 func fixedAnswers() []string {
 	return []string{
 		"Local article generation with a small deterministic workflow.",
@@ -163,6 +214,15 @@ func fixedAnswers() []string {
 		"3000字前後 with six sections.",
 		"Practical and introspective.",
 	}
+}
+
+func sessionHasQuestion(questions []domain.ArticleQuestion, id string) bool {
+	for _, question := range questions {
+		if question.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 type staticFollowUpGenerator struct {

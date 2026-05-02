@@ -95,6 +95,12 @@ type briefSessionResponse struct {
 	Answers         []briefdomain.BriefAnswer `json:"answers"`
 }
 
+type briefSessionTemplateResponse struct {
+	PersonaID      string                `json:"persona_id"`
+	OutputFormatID string                `json:"output_format_id"`
+	Questions      []articleQuestionJSON `json:"questions"`
+}
+
 type articleQuestionJSON struct {
 	ID               string `json:"id"`
 	Text             string `json:"text"`
@@ -143,6 +149,29 @@ func ListPersonasHandler(w http.ResponseWriter, r *http.Request) {
 // ListFormatsHandler returns built-in output formats.
 func ListFormatsHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, outputformat.DefaultRegistry().List())
+}
+
+// GetBriefSessionTemplateHandler returns the composed fixed-question template.
+func GetBriefSessionTemplateHandler(w http.ResponseWriter, r *http.Request) {
+	persona, ok := personadomain.DefaultRegistry().Get(r.URL.Query().Get("persona_id"))
+	if !ok {
+		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", r.URL.Query().Get("persona_id"), http.StatusBadRequest)
+		return
+	}
+	formatID := outputformat.NormalizeID(r.URL.Query().Get("format_id"))
+	if strings.TrimSpace(r.URL.Query().Get("format_id")) == "" {
+		formatID = persona.DefaultFormat
+	}
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", formatID, http.StatusBadRequest)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, briefSessionTemplateResponse{
+		PersonaID:      persona.ID,
+		OutputFormatID: format.ID,
+		Questions:      toArticleQuestionJSONList(briefdomain.ComposeFixedQuestions(persona.ID, format.ID)),
+	})
 }
 
 // SeedAuthorStyleHandler stores a practical persona preset as a style guide.
@@ -831,14 +860,8 @@ func toAuthorStyleResponse(result authorstyleapp.AnalyzeResult) authorStyleRespo
 func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionResponse {
 	var question *articleQuestionJSON
 	if result.NextQuestion != nil {
-		question = &articleQuestionJSON{
-			ID:               result.NextQuestion.ID,
-			Text:             result.NextQuestion.Text,
-			FlowType:         string(result.NextQuestion.FlowType),
-			TargetField:      result.NextQuestion.TargetField,
-			TargetQuestionID: result.NextQuestion.TargetQuestionID,
-			FollowUpIndex:    result.NextQuestion.FollowUpIndex,
-		}
+		value := toArticleQuestionJSON(*result.NextQuestion)
+		question = &value
 	}
 	return briefSessionResponse{
 		SessionID:       result.Session.ID,
@@ -851,6 +874,25 @@ func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionRespons
 		NextQuestion:    question,
 		Brief:           result.Brief,
 		Answers:         result.Session.Answers,
+	}
+}
+
+func toArticleQuestionJSONList(questions []briefdomain.ArticleQuestion) []articleQuestionJSON {
+	result := make([]articleQuestionJSON, 0, len(questions))
+	for _, question := range questions {
+		result = append(result, toArticleQuestionJSON(question))
+	}
+	return result
+}
+
+func toArticleQuestionJSON(question briefdomain.ArticleQuestion) articleQuestionJSON {
+	return articleQuestionJSON{
+		ID:               question.ID,
+		Text:             question.Text,
+		FlowType:         string(question.FlowType),
+		TargetField:      question.TargetField,
+		TargetQuestionID: question.TargetQuestionID,
+		FollowUpIndex:    question.FollowUpIndex,
 	}
 }
 

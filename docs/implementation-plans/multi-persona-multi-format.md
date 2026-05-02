@@ -250,6 +250,8 @@ Acceptance:
 - Starting a `terisuke × note_article` session is byte-identical to the current question set.
 - Custom questions added via the existing config UI are appended after the composed list.
 
+Implementation note as of 2026-05-03: #25 is implemented with `brief.ComposeFixedQuestions(persona_id, output_format_id)` and `GET /api/brief-sessions/templates`. The frontend now displays server templates as read-only rows and sends only custom additions on session start. `cmd/scenario/media_matrix` validates all 2 personas x 5 formats templates and creates a six-case cross-media evaluation matrix for follow-on live LLM runs.
+
 ## Phase C — Memory & history
 
 ### C1 — SQLite store (extends Issue [#14](https://github.com/terisuke/note_maker/issues/14))

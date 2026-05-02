@@ -1,16 +1,33 @@
 document.addEventListener('DOMContentLoaded', () => {
   const configStorageKey = 'note-maker-config-v1';
-  const defaultQuestions = [
-    { id: 'theme', text: '記事の中心テーマは何ですか？', flow_type: 'main', target_field: 'theme' },
-    { id: 'opening_episode', text: '記事の導入に置く具体的な体験や場面は何ですか？', flow_type: 'main', target_field: 'opening_episode' },
-    { id: 'reader', text: 'この記事を届けたい読者は誰ですか？', flow_type: 'main', target_field: 'reader' },
-    { id: 'expected_reader_action', text: '読後に読者へどんな変化や行動を起こしてほしいですか？', flow_type: 'main', target_field: 'expected_reader_action' },
-    { id: 'must_include', text: '記事に必ず含める論点、事実、手順は何ですか？', flow_type: 'main', target_field: 'must_include' },
-    { id: 'personal_context', text: '著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？', flow_type: 'main', target_field: 'personal_context' },
-    { id: 'exclusions', text: '記事に含めないこと、避けたい表現、断言しないことは何ですか？', flow_type: 'main', target_field: 'exclusions' },
-    { id: 'target_length_structure', text: '目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。', flow_type: 'main', target_field: 'target_length_structure' },
-    { id: 'tone_stance', text: '記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。', flow_type: 'main', target_field: 'tone_stance' },
-  ];
+  const legacyTemplateQuestionIds = new Set([
+    'theme',
+    'opening_episode',
+    'reader',
+    'expected_reader_action',
+    'must_include',
+    'personal_context',
+    'exclusions',
+    'target_length_structure',
+    'tone_stance',
+    'cor_blog_purpose',
+    'cor_blog_category',
+    'cor_blog_metadata',
+    'cor_blog_evidence',
+    'cor_blog_next_action',
+    'target_stack',
+    'prerequisite_knowledge',
+    'code_examples',
+    'references',
+    'target_conversion',
+    'primary_cta',
+    'brand_voice',
+    'story_arc',
+    'technical_proof',
+    'homepage_cta',
+    'homepage_trust',
+    'cloudia_viewpoint',
+  ]);
 
   const config = loadConfig();
   const state = {
@@ -22,6 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
     completedBrief: null,
     personas: [],
     formats: [],
+    templateQuestions: [],
+    templateLoading: false,
+    templateError: '',
+    templateRequestId: 0,
     questionTextById: {},
     lastSubmittedAnswer: '',
     answerAbortController: null,
@@ -127,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
       populateFormatSelect();
       applyPersonaDefaults(false);
       renderModeSummary();
+      loadQuestionTemplate();
     } catch (error) {
       showError(`書き分け設定の取得に失敗しました: ${error.message}`);
     }
@@ -223,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.nextQuestion = data.next_question;
       state.answers = data.answers || [];
       state.completedBrief = null;
-      rememberQuestions(currentQuestions());
+      rememberQuestions([...state.templateQuestions, ...currentQuestions()]);
       rememberQuestion(data.next_question);
       el.interviewArea.classList.remove('hidden');
       el.briefResult.classList.add('hidden');
@@ -676,13 +698,14 @@ document.addEventListener('DOMContentLoaded', () => {
     applyPersonaDefaults(true);
     saveConfig();
     renderModeSummary();
+    loadQuestionTemplate();
   }
 
   function onFormatChange() {
     config.mode.format = currentFormatId();
     saveConfig();
     renderModeSummary();
-    renderQuestionConfig();
+    loadQuestionTemplate();
   }
 
   function applyPersonaDefaults(forceFormat) {
@@ -698,7 +721,6 @@ document.addEventListener('DOMContentLoaded', () => {
       el.formatSelect.value = persona.default_format;
       config.mode.format = persona.default_format;
     }
-    renderQuestionConfig();
   }
 
   function renderModeSummary() {
@@ -739,38 +761,124 @@ document.addEventListener('DOMContentLoaded', () => {
     saveConfig();
   }
 
+  async function loadQuestionTemplate() {
+    const personaId = currentPersonaId();
+    const formatId = currentFormatId();
+    if (!personaId || !formatId) {
+      state.templateQuestions = [];
+      state.templateError = '';
+      state.templateLoading = false;
+      renderQuestionConfig();
+      return;
+    }
+
+    const requestId = state.templateRequestId + 1;
+    state.templateRequestId = requestId;
+    state.templateLoading = true;
+    state.templateError = '';
+    state.templateQuestions = [];
+    renderQuestionConfig();
+
+    try {
+      const params = new URLSearchParams({ persona_id: personaId, format_id: formatId });
+      const data = await requestJSON(`/api/brief-sessions/templates?${params.toString()}`);
+      if (requestId !== state.templateRequestId) {
+        return;
+      }
+      state.templateQuestions = normalizeTemplateQuestions(data);
+      rememberQuestions(state.templateQuestions);
+    } catch (error) {
+      if (requestId !== state.templateRequestId) {
+        return;
+      }
+      state.templateQuestions = [];
+      state.templateError = `テンプレート質問を取得できませんでした: ${error.message}`;
+    } finally {
+      if (requestId === state.templateRequestId) {
+        state.templateLoading = false;
+        renderQuestionConfig();
+      }
+    }
+  }
+
   function renderQuestionConfig() {
     el.questionConfigList.innerHTML = '';
-    config.questions.forEach((question, index) => {
-      const row = document.createElement('div');
-      row.className = 'question-config-row';
 
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = question.text;
-      input.addEventListener('input', () => {
-        config.questions[index].text = input.value;
-        saveConfig();
-      });
+    if (state.templateLoading) {
+      el.questionConfigList.appendChild(createQuestionConfigStatus('テンプレート質問を読み込んでいます...'));
+    }
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'secondary-btn';
-      remove.textContent = '削除';
-      remove.disabled = isFixedQuestion(question.id);
-      remove.addEventListener('click', () => {
-        config.questions.splice(index, 1);
-        saveConfig();
-        renderQuestionConfig();
-      });
-
-      row.append(input, remove);
-      el.questionConfigList.appendChild(row);
+    state.templateQuestions.forEach((question) => {
+      el.questionConfigList.appendChild(createTemplateQuestionRow(question));
     });
+
+    if (state.templateError) {
+      el.questionConfigList.appendChild(createQuestionConfigStatus(state.templateError, true));
+    }
+
+    config.customQuestions.forEach((question, index) => {
+      el.questionConfigList.appendChild(createCustomQuestionRow(question, index));
+    });
+
+    if (!state.templateLoading && !state.templateQuestions.length && !state.templateError && !config.customQuestions.length) {
+      el.questionConfigList.appendChild(createQuestionConfigStatus('テンプレート質問はありません。追加質問を入力できます。'));
+    }
+  }
+
+  function createTemplateQuestionRow(question) {
+    const row = document.createElement('div');
+    row.className = 'question-config-row template';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = question.text;
+    input.readOnly = true;
+    input.setAttribute('aria-label', 'テンプレート質問');
+
+    const label = document.createElement('span');
+    label.className = 'question-config-tag';
+    label.textContent = 'テンプレート';
+
+    row.append(input, label);
+    return row;
+  }
+
+  function createCustomQuestionRow(question, index) {
+    const row = document.createElement('div');
+    row.className = 'question-config-row custom';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = question.text;
+    input.setAttribute('aria-label', '追加質問');
+    input.addEventListener('input', () => {
+      config.customQuestions[index].text = input.value;
+      saveConfig();
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary-btn';
+    remove.textContent = '削除';
+    remove.addEventListener('click', () => {
+      config.customQuestions.splice(index, 1);
+      saveConfig();
+      renderQuestionConfig();
+    });
+
+    row.append(input, remove);
+    return row;
+  }
+
+  function createQuestionConfigStatus(message, isError = false) {
+    const status = document.createElement('div');
+    status.className = `question-config-status${isError ? ' error' : ''}`;
+    status.textContent = message;
+    return status;
   }
 
   function addQuestion() {
-    config.questions.push({
+    config.customQuestions.push({
       id: `custom_${Date.now()}`,
       text: '追加で聞きたい質問を入力してください',
       flow_type: 'main',
@@ -781,48 +889,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function resetQuestions() {
-    config.questions = cloneQuestions(defaultQuestions);
+    config.customQuestions = [];
     saveConfig();
-    renderQuestionConfig();
+    loadQuestionTemplate();
   }
 
   function currentQuestions() {
-    return [...config.questions, ...formatQuestions(currentFormatId())]
-      .map((question) => ({
-        id: question.id,
-        text: question.text.trim(),
-        flow_type: question.flow_type || 'main',
-        target_field: question.target_field || 'custom',
-      }))
-      .filter((question) => question.id && question.text);
-  }
-
-  function formatQuestions(formatId) {
-    if (formatId === 'markdown_blog') {
-      return [
-        { id: 'cor_blog_purpose', text: '会社ブログとしての主目的は何ですか？例: 技術知見の報告、実装判断の共有、社員へのビジョン共有。', flow_type: 'main', target_field: 'custom' },
-        { id: 'cor_blog_category', text: 'カテゴリは ai / engineering / founder / lab のどれにしますか？理由も教えてください。', flow_type: 'main', target_field: 'custom' },
-        { id: 'cor_blog_metadata', text: 'slug候補、タグ3-5個、featuredの有無、画像パスがあれば指定してください。', flow_type: 'main', target_field: 'custom' },
-        { id: 'cor_blog_evidence', text: '本文に入れる具体的な実装、検証結果、数値、意思決定の根拠は何ですか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'cor_blog_next_action', text: '社員や読者に、この記事を読んだ後どんな判断や行動をしてほしいですか？', flow_type: 'main', target_field: 'custom' },
-      ];
-    }
-    if (formatId === 'zenn_article' || formatId === 'qiita_article') {
-      return [
-        { id: 'target_stack', text: '対象技術スタック、バージョン、実行環境は何ですか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'prerequisite_knowledge', text: '読者に前提として求める知識と、説明を厚くする箇所はどこですか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'code_examples', text: '必ず入れるコード例、コマンド、設定ファイルは何ですか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'references', text: '参照すべき公式ドキュメント、記事、リポジトリURLはありますか？', flow_type: 'main', target_field: 'custom' },
-      ];
-    }
-    if (formatId === 'homepage_section') {
-      return [
-        { id: 'target_conversion', text: 'このHTMLセクションで読者に起こしてほしい行動は何ですか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'primary_cta', text: 'CTAの文言とリンク先は何にしますか？', flow_type: 'main', target_field: 'custom' },
-        { id: 'brand_voice', text: '会社サイトとして守りたい言い回し、避けたい表現はありますか？', flow_type: 'main', target_field: 'custom' },
-      ];
-    }
-    return [];
+    const templateIds = new Set(state.templateQuestions.map((question) => question.id));
+    const templateTexts = new Set(state.templateQuestions.map((question) => question.text.trim()).filter(Boolean));
+    return normalizeQuestionList(config.customQuestions)
+      .filter((question) => question.id && question.text && !templateIds.has(question.id) && !templateTexts.has(question.text));
   }
 
   function currentPersonaId() {
@@ -841,24 +917,31 @@ document.addEventListener('DOMContentLoaded', () => {
     return state.formats.find((format) => format.id === currentFormatId());
   }
 
-  function isFixedQuestion(id) {
-    return defaultQuestions.some((question) => question.id === id);
+  function normalizeTemplateQuestions(data) {
+    const values = Array.isArray(data)
+      ? data
+      : data?.questions || data?.template_questions || data?.template?.questions || data?.Template?.Questions || [];
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return normalizeQuestionList(values)
+      .map((question) => ({ ...question, template: true }))
+      .filter((question) => question.id && question.text);
   }
 
   function loadConfig() {
     const fallback = {
       mode: { persona: 'terisuke', format: 'note_article' },
       models: { style: 'gemma4:e2b', brief: 'qwen3.6:27b', draft: 'gemma4:31b', verify: 'gemma4:latest' },
-      questions: cloneQuestions(defaultQuestions),
+      customQuestions: [],
     };
     try {
       const saved = JSON.parse(localStorage.getItem(configStorageKey) || '{}');
+      const savedCustomQuestions = saved.customQuestions || saved.custom_questions || migrateLegacyQuestions(saved.questions);
       return {
         models: { ...fallback.models, ...(saved.models || {}) },
         mode: { ...fallback.mode, ...(saved.mode || {}) },
-        questions: Array.isArray(saved.questions) && saved.questions.length
-          ? saved.questions
-          : fallback.questions,
+        customQuestions: normalizeQuestionList(savedCustomQuestions),
       };
     } catch (_) {
       return fallback;
@@ -869,8 +952,32 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem(configStorageKey, JSON.stringify(config));
   }
 
-  function cloneQuestions(questions) {
-    return questions.map((question) => ({ ...question }));
+  function migrateLegacyQuestions(questions) {
+    if (!Array.isArray(questions)) {
+      return [];
+    }
+    return questions.filter((question) => question?.id && !legacyTemplateQuestionIds.has(question.id));
+  }
+
+  function normalizeQuestionList(questions) {
+    if (!Array.isArray(questions)) {
+      return [];
+    }
+    const seen = new Set();
+    return questions
+      .map((question) => ({
+        id: String(question.id || question.ID || '').trim(),
+        text: String(question.text || question.Text || '').trim(),
+        flow_type: question.flow_type || question.FlowType || 'main',
+        target_field: question.target_field || question.TargetField || 'custom',
+      }))
+      .filter((question) => {
+        if (!question.id || !question.text || seen.has(question.id)) {
+          return false;
+        }
+        seen.add(question.id);
+        return true;
+      });
   }
 
   function escapeHTML(value) {
