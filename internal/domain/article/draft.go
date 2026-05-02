@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 )
 
 var (
@@ -16,17 +18,23 @@ type Draft struct {
 	markdown string
 }
 
-// NewDraft normalizes and validates generated Markdown.
+// NewDraft normalizes and validates generated Markdown for note_article.
 func NewDraft(raw string) (Draft, error) {
+	return NewDraftForFormat(raw, outputformat.IDNoteArticle)
+}
+
+// NewDraftForFormat normalizes and validates generated output for a publishing target.
+func NewDraftForFormat(raw, formatID string) (Draft, error) {
 	markdown := normalizeDraft(raw)
 	if markdown == "" {
 		return Draft{}, fmt.Errorf("draft is empty")
 	}
-	if !strings.HasPrefix(markdown, "# ") {
-		return Draft{}, fmt.Errorf("draft must start with a level-1 Markdown title")
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		return Draft{}, fmt.Errorf("unknown output format %q", formatID)
 	}
-	if strings.Contains(markdown, "```") {
-		return Draft{}, fmt.Errorf("draft must not wrap the article in code fences")
+	if err := format.Validator.Validate(markdown); err != nil {
+		return Draft{}, err
 	}
 	if strings.Contains(markdown, "以下") && strings.Contains(markdown, "下書き") && strings.Index(markdown, "# ") > 20 {
 		return Draft{}, fmt.Errorf("draft appears to contain preamble before the article")
@@ -49,13 +57,17 @@ func normalizeDraft(raw string) string {
 	if match := codeFencePattern.FindStringSubmatch(text); len(match) == 2 {
 		text = strings.TrimSpace(match[1])
 	}
+	droppedPreambleWithFence := false
 	if idx := strings.Index(text, "# "); idx > 0 {
 		preamble := strings.TrimSpace(text[:idx])
 		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
+			droppedPreambleWithFence = strings.Contains(preamble, "```")
 			text = strings.TrimSpace(text[idx:])
 		}
 	}
-	text = strings.TrimSuffix(text, "```")
+	if droppedPreambleWithFence {
+		text = strings.TrimSuffix(text, "```")
+	}
 	text = strings.TrimSpace(text)
 	lines := strings.Split(text, "\n")
 	cleaned := make([]string, 0, len(lines))

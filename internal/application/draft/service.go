@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 // TextGenerator generates a draft from a prompt.
@@ -33,12 +35,25 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
-	prompt := BuildPrompt(req.StyleGuide, req.Brief)
+	persona := req.Persona
+	if persona.ID == "" {
+		persona, _ = personadomain.DefaultRegistry().Get(req.Brief.PersonaID)
+	}
+	format := req.OutputFormat
+	if format.ID == "" {
+		var ok bool
+		format, ok = outputformat.DefaultRegistry().Get(req.Brief.OutputFormatID)
+		if !ok {
+			format, _ = outputformat.DefaultRegistry().Get(outputformat.IDNoteArticle)
+		}
+	}
+
+	prompt := BuildPromptForMode(req.StyleGuide, req.Brief, persona, format)
 	rawDraft, err := s.generator.Generate(ctx, prompt)
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("generate draft with local llm: %w", err)
 	}
-	articleDraft, err := articledomain.NewDraft(rawDraft)
+	articleDraft, err := articledomain.NewDraftForFormat(rawDraft, format.ID)
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("local llm returned an unusable draft: %w", err)
 	}

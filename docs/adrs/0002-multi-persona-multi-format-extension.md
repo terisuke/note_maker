@@ -4,7 +4,7 @@ Date: 2026-05-02
 
 ## Status
 
-Accepted. Extends and partially supersedes [ADR 0001](0001-three-phase-local-article-generation.md). The three-phase workflow (style analysis → interview → draft) is preserved. This ADR adds two orthogonal axes — **author persona** and **output format** — and reshapes UX, persistence, and prompt construction accordingly.
+Accepted. Implementation started in Phase B. Extends and partially supersedes [ADR 0001](0001-three-phase-local-article-generation.md). The three-phase workflow (style analysis → interview → draft) is preserved. This ADR adds two orthogonal axes — **author persona** and **output format** — and reshapes UX, persistence, and prompt construction accordingly.
 
 ## Context
 
@@ -60,16 +60,17 @@ An `OutputFormat` is a typed strategy with:
 - a Markdown/HTML template surface (frontmatter, heading rules, code-fence policy, length envelope),
 - a validator (e.g., Zenn requires frontmatter; note rejects code fences; homepage sections forbid `# title`),
 - a default question-set extension (technical formats add "対象スタック", "実行環境", "想定読者の前提知識"; narrative formats add "導入エピソード", "結末で読者に届けたい感情"),
-- a system-prompt fragment merged into the draft prompt (instead of a single hard-coded fragment).
+- a system-prompt fragment merged into the draft prompt (instead of a single hard-coded fragment),
+- an embedded Markdown guide for notation details that are too verbose for the registry fragment.
 
 Formats shipped in v2:
 
 | Format | Validator highlights | Source/target |
 |---|---|---|
-| `note_article` | Existing rules: starts with `# `, no code fences, `ですます調` default | note.com paste |
-| `markdown_blog` | Frontmatter optional, allows code fences, `## ` first heading allowed (Astro blogs at `cor-jp.com/blog`) | cor-jp.com |
-| `zenn_article` | Frontmatter required (`title`, `emoji`, `type`, `topics`, `published`), code fences allowed, technical tone bias | zenn.dev/cloudia |
-| `qiita_article` | Frontmatter required (`title`, `tags`), code blocks expected, technical tone bias | qiita.com/Cloudia_Cor_Inc |
+| `note_article` | Starts with `# `, no frontmatter, paste-safe note Markdown subset; plain code fences only when needed | note.com paste |
+| `markdown_blog` | `corsweb2024` Astro frontmatter required (`title`, `description`, `pubDate`, `author`, `category`, `tags`, `lang`, `featured`), Japanese-first, code fences require language | cor-jp.com |
+| `zenn_article` | Frontmatter required (`title`, `emoji`, `type`, `topics`, `published`), Zenn extensions (`:::message`, `:::details`, `@[card]`), `diff language` fences | zenn.dev/cloudia |
+| `qiita_article` | Frontmatter required (`title`, `tags`), Qiita extensions (`:::note`, HTML `details`), `diff_language` fences, `math` code blocks | qiita.com/Cloudia_Cor_Inc |
 | `homepage_section` | HTML output, no `# title`, semantic sectioning, CTA placement guidance | static HTML embed |
 
 The two axes compose: any persona can produce any format. The application layer rejects nonsensical combinations only when the persona explicitly excludes a format (configurable, not hard-coded).
@@ -125,6 +126,9 @@ New domain types under `internal/domain`:
   - `OutputFormat` (id, validator, template fragment, default_question_extension)
   - `FormatRegistry`
   - `Validator` interface; per-format implementations (e.g., `NoteValidator`, `ZennValidator`)
+- `application/draft/format_guides`
+  - embedded Markdown guides for the final draft prompt (`note`, `markdown_blog`, `zenn`, `qiita`, `homepage_section`)
+  - guides encode editor notation differences that are too detailed for the short registry fragment
 - `domain/article`
   - `Draft` gains a `format_id`; `NewDraft` dispatches to the format's validator instead of hard-coded rules.
 - `domain/brief`
@@ -137,7 +141,7 @@ New domain types under `internal/domain`:
 
 - `AnalyzeAuthorStyleService` accepts a `persona_id` and persists the resulting guide as a new version under that persona; previous versions are preserved.
 - `InterviewService` consults the active persona and format to assemble the question list before the first question.
-- `GenerateDraftService` resolves the prompt template fragment from the format's strategy and merges persona-specific tone hints.
+- `GenerateDraftService` resolves the prompt template fragment from the format's strategy, injects the active format's embedded Markdown guide, and merges persona-specific tone hints.
 - New `RegenerateSectionService` accepts a draft id, a section selector (heading anchor or character range), the brief, and the persona+format; returns a candidate replacement for human review.
 - New `StreamingDraftService` produces SSE chunks for the draft phase.
 
@@ -200,9 +204,9 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - A2 — [#18](https://github.com/terisuke/note_maker/issues/18) Stream LLM responses via SSE for follow-up and draft generation
 - A3 — [#19](https://github.com/terisuke/note_maker/issues/19) Editable draft Markdown + per-section regenerate API
 - A4 — [#20](https://github.com/terisuke/note_maker/issues/20) Surface deep-dive question rationale in prompt and UI
-- B1 — [#21](https://github.com/terisuke/note_maker/issues/21) Introduce Persona and OutputFormat domain concepts (registry + strategy)
+- B1 — [#21](https://github.com/terisuke/note_maker/issues/21) Introduce Persona and OutputFormat domain concepts (registry + strategy). Implemented by the first Phase B PR: `internal/domain/persona`, `internal/domain/format`, API selectors, prompt dispatch, and format-aware draft validation.
 - B2 — [#22](https://github.com/terisuke/note_maker/issues/22) Generalize SourceFetcher beyond note.com (Zenn, Qiita, RSS, HTML)
-- B3 — [#23](https://github.com/terisuke/note_maker/issues/23) Format-specific prompt templates and draft validators (note / markdown_blog / zenn / qiita / homepage_section)
+- B3 — [#23](https://github.com/terisuke/note_maker/issues/23) Format-specific prompt templates and draft validators (note / markdown_blog / zenn / qiita / homepage_section). Partially implemented: validators and embedded format guides exist; scenario samples remain open.
 - B4 — [#24](https://github.com/terisuke/note_maker/issues/24) Seed persona library with `terisuke` and `cloudia` profiles
 - B5 — [#25](https://github.com/terisuke/note_maker/issues/25) Format- and persona-aware fixed question sets
 - C1 — [#26](https://github.com/terisuke/note_maker/issues/26) Replace JSON store with SQLite-backed schema (extends [#14](https://github.com/terisuke/note_maker/issues/14))

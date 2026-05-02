@@ -120,8 +120,25 @@ body {
 
 .config-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 14px;
+}
+
+.mode-summary {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0 14px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--primary);
+    border-radius: 6px;
+    background: #f8fafc;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.mode-summary strong {
+    color: var(--text);
 }
 
 .section-heading {

@@ -3,6 +3,9 @@ package brief
 import (
 	"fmt"
 	"strings"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	"github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 const (
@@ -64,6 +67,8 @@ type BriefAnswer struct {
 // ArticleBrief is the structured requirement set assembled from a completed interview.
 type ArticleBrief struct {
 	StyleProfileID        string
+	PersonaID             string
+	OutputFormatID        string
 	Theme                 string
 	OpeningEpisode        string
 	Reader                string
@@ -81,6 +86,9 @@ type ArticleBrief struct {
 type ArticleBriefSession struct {
 	ID              string
 	StyleProfileID  string
+	PersonaID       string
+	OutputFormatID  string
+	ParentSessionID string
 	Phase           InterviewPhase
 	Questions       []ArticleQuestion
 	Answers         []BriefAnswer
@@ -95,6 +103,11 @@ func NewArticleBriefSession(id, styleProfileID string) (ArticleBriefSession, err
 
 // NewArticleBriefSessionWithQuestions creates a session with a caller-provided question set.
 func NewArticleBriefSessionWithQuestions(id, styleProfileID string, questions []ArticleQuestion) (ArticleBriefSession, error) {
+	return NewArticleBriefSessionWithOptions(id, styleProfileID, persona.IDTerisuke, outputformat.IDNoteArticle, "", questions)
+}
+
+// NewArticleBriefSessionWithOptions creates a session with persona/format metadata.
+func NewArticleBriefSessionWithOptions(id, styleProfileID, personaID, outputFormatID, parentSessionID string, questions []ArticleQuestion) (ArticleBriefSession, error) {
 	if strings.TrimSpace(id) == "" {
 		return ArticleBriefSession{}, fmt.Errorf("session id is required")
 	}
@@ -106,10 +119,13 @@ func NewArticleBriefSessionWithQuestions(id, styleProfileID string, questions []
 		return ArticleBriefSession{}, fmt.Errorf("questions are required")
 	}
 	return ArticleBriefSession{
-		ID:             strings.TrimSpace(id),
-		StyleProfileID: strings.TrimSpace(styleProfileID),
-		Phase:          InterviewPhaseFixedQuestions,
-		Questions:      questions,
+		ID:              strings.TrimSpace(id),
+		StyleProfileID:  strings.TrimSpace(styleProfileID),
+		PersonaID:       persona.NormalizeID(personaID),
+		OutputFormatID:  outputformat.NormalizeID(outputFormatID),
+		ParentSessionID: strings.TrimSpace(parentSessionID),
+		Phase:           InterviewPhaseFixedQuestions,
+		Questions:       questions,
 	}, nil
 }
 

@@ -32,6 +32,9 @@ func main() {
 	// APIエンドポイントの設定
 	r.HandleFunc("/api/generate", handlers.GenerateArticleHandler).Methods("POST")
 	r.HandleFunc("/api/models", handlers.ListModelsHandler).Methods("GET")
+	r.HandleFunc("/api/personas", handlers.ListPersonasHandler).Methods("GET")
+	r.HandleFunc("/api/formats", handlers.ListFormatsHandler).Methods("GET")
+	r.HandleFunc("/api/author-style/seed", handlers.SeedAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/analyze", handlers.AnalyzeAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/{id}", handlers.GetAuthorStyleHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions", handlers.CreateBriefSessionHandler).Methods("POST")

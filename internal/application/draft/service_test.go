@@ -8,6 +8,8 @@ import (
 
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
@@ -74,6 +76,119 @@ func TestGenerateReturnsFailedEvaluationWithoutError(t *testing.T) {
 	}
 	if len(result.Evaluation.Failures) == 0 {
 		t.Fatalf("expected evaluation failures: %#v", result.Evaluation)
+	}
+}
+
+func TestGenerateUsesPersonaAndOutputFormat(t *testing.T) {
+	zennDraft := "---\ntitle: \"Goで検証する\"\nemoji: \"🧪\"\ntype: \"tech\"\ntopics: [\"go\", \"test\"]\npublished: false\n---\n\n## 実装\n\n```go\nfmt.Println(\"ok\")\n```"
+	generator := &fakeGenerator{draft: zennDraft}
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDCloudia)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDZennArticle)
+
+	result, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			PersonaID:      persona.ID,
+			OutputFormatID: format.ID,
+			Theme:          "Goで検証する",
+		},
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	})
+	if err != nil {
+		t.Fatalf("generate zenn draft: %v", err)
+	}
+	if result.Draft.Markdown() != zennDraft {
+		t.Fatalf("unexpected zenn draft:\n%s", result.Draft.Markdown())
+	}
+	for _, want := range []string{"宇宙野クラウディア", "Zenn記事", "title, emoji, type, topics, published", "## 媒体別Markdownガイド", ":::message", "@[card](https://example.com)"} {
+		if !strings.Contains(generator.prompt, want) {
+			t.Fatalf("prompt does not contain %q:\n%s", want, generator.prompt)
+		}
+	}
+}
+
+func TestPromptIncludesFormatGuideForEveryRegisteredFormat(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDTerisuke)
+
+	tests := []struct {
+		formatID string
+		want     string
+	}{
+		{outputformat.IDNoteArticle, "Use this guide only for `note_article` output."},
+		{outputformat.IDMarkdownBlog, "corsweb2024/src/content/blog/ja/{slug}.md"},
+		{outputformat.IDZennArticle, "Use this guide only for `zenn_article` output."},
+		{outputformat.IDQiitaArticle, "Use this guide only for `qiita_article` output."},
+		{outputformat.IDHomepageSection, "Return HTML only. Do not output Markdown."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.formatID, func(t *testing.T) {
+			format, ok := outputformat.DefaultRegistry().Get(tt.formatID)
+			if !ok {
+				t.Fatalf("missing format %s", tt.formatID)
+			}
+			prompt := BuildPromptForMode(styleGuide, ArticleBrief{
+				StyleProfileID: profile.ID,
+				PersonaID:      persona.ID,
+				OutputFormatID: tt.formatID,
+				Theme:          "形式別ガイド",
+			}, persona, format)
+			for _, want := range []string{"## 媒体別Markdownガイド", tt.want} {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateUsesCorBlogOutputRules(t *testing.T) {
+	companyBlogDraft := "---\n" +
+		"title: \"AI開発の知見\"\n" +
+		"description: \"AI駆動開発で得た実装判断と検証結果を共有する\"\n" +
+		"pubDate: 2026-05-02\n" +
+		"author: \"Terisuke\"\n" +
+		"category: \"engineering\"\n" +
+		"tags: [\"AI\", \"開発\", \"検証\"]\n" +
+		"lang: \"ja\"\n" +
+		"featured: false\n" +
+		"isDraft: true\n" +
+		"---\n\n" +
+		"# AI開発の知見\n\n" +
+		"会社の実装判断を共有する記事だ。\n\n" +
+		"```go\nfmt.Println(\"ok\")\n```"
+	generator := &fakeGenerator{draft: companyBlogDraft}
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDTerisuke)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDMarkdownBlog)
+
+	result, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			PersonaID:      persona.ID,
+			OutputFormatID: format.ID,
+			Theme:          "AI開発の知見",
+		},
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	})
+	if err != nil {
+		t.Fatalf("generate company blog draft: %v", err)
+	}
+	if result.Draft.Markdown() != companyBlogDraft {
+		t.Fatalf("unexpected company blog draft:\n%s", result.Draft.Markdown())
+	}
+	for _, want := range []string{"corsweb2024", "category は ai / engineering / founder / lab", "langは必ず ja", "社員へのビジョン共有"} {
+		if !strings.Contains(generator.prompt, want) {
+			t.Fatalf("prompt does not contain %q:\n%s", want, generator.prompt)
+		}
 	}
 }
 

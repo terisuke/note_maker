@@ -14,6 +14,22 @@ func TestNewDraftNormalizesPasteReadyMarkdown(t *testing.T) {
 	}
 }
 
+func TestNewDraftForFormatAllowsTechnicalFormats(t *testing.T) {
+	zenn := "---\ntitle: \"Goで試す\"\nemoji: \"🧪\"\ntype: \"tech\"\ntopics: [\"go\", \"test\"]\npublished: false\n---\n\n## 実装\n\n```go\nfmt.Println(\"ok\")\n```"
+	draft, err := NewDraftForFormat(zenn, "zenn_article")
+	if err != nil {
+		t.Fatalf("zenn draft: %v", err)
+	}
+	if draft.Markdown() != zenn {
+		t.Fatalf("unexpected draft:\n%s", draft.Markdown())
+	}
+
+	homepage := "<section><h2>AI活用</h2><p>小さく試せる導入文です。</p></section>"
+	if _, err := NewDraftForFormat(homepage, "homepage_section"); err != nil {
+		t.Fatalf("homepage draft: %v", err)
+	}
+}
+
 func TestNewDraftRejectsNonArticleOutput(t *testing.T) {
 	if _, err := NewDraft("承知しました。記事を書きます。"); err == nil {
 		t.Fatal("expected validation error")
