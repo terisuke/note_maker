@@ -22,6 +22,7 @@ type InterviewService struct {
 type StartSessionInput struct {
 	SessionID      string
 	StyleProfileID string
+	Questions      []domain.ArticleQuestion
 }
 
 // InterviewResult contains either the next question or a completed brief.
@@ -39,7 +40,10 @@ func NewInterviewService(followUpGenerator FollowUpGenerator) *InterviewService 
 
 // StartSession creates a session and returns the first fixed question.
 func (s *InterviewService) StartSession(input StartSessionInput) (InterviewResult, error) {
-	session, err := domain.NewArticleBriefSession(input.SessionID, input.StyleProfileID)
+	if len(input.Questions) == 0 {
+		input.Questions = domain.FixedQuestions()
+	}
+	session, err := domain.NewArticleBriefSessionWithQuestions(input.SessionID, input.StyleProfileID, input.Questions)
 	if err != nil {
 		return InterviewResult{}, err
 	}

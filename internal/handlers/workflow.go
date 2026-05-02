@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	authorstyleapp "github.com/teradakousuke/note_maker/internal/application/authorstyle"
@@ -19,12 +21,25 @@ import (
 	"github.com/teradakousuke/note_maker/internal/infrastructure/repository/memory"
 )
 
-var workflowStore = memory.NewWorkflowStore()
+var workflowStore = newWorkflowStore()
+
+func newWorkflowStore() *memory.WorkflowStore {
+	path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
+	if path == "" {
+		path = "data/workflow_store.json"
+	}
+	store, err := memory.NewPersistentWorkflowStore(path)
+	if err == nil {
+		return store
+	}
+	return memory.NewWorkflowStore()
+}
 
 type analyzeAuthorStyleRequest struct {
 	Username    string   `json:"username"`
 	ArticleURLs []string `json:"article_urls"`
 	Limit       int      `json:"limit"`
+	StyleModel  string   `json:"style_model"`
 }
 
 type authorStyleResponse struct {
@@ -39,13 +54,16 @@ type authorStyleResponse struct {
 }
 
 type createBriefSessionRequest struct {
-	StyleProfileID string `json:"style_profile_id"`
-	SessionID      string `json:"session_id"`
+	StyleProfileID string                `json:"style_profile_id"`
+	SessionID      string                `json:"session_id"`
+	BriefModel     string                `json:"brief_model"`
+	Questions      []articleQuestionJSON `json:"questions"`
 }
 
 type answerBriefSessionRequest struct {
 	Content      string `json:"content"`
 	SkipDeepDive bool   `json:"skip_deep_dive"`
+	BriefModel   string `json:"brief_model"`
 }
 
 type briefSessionResponse struct {
@@ -62,6 +80,7 @@ type articleQuestionJSON struct {
 	ID               string `json:"id"`
 	Text             string `json:"text"`
 	FlowType         string `json:"flow_type"`
+	TargetField      string `json:"target_field,omitempty"`
 	TargetQuestionID string `json:"target_question_id,omitempty"`
 	FollowUpIndex    int    `json:"follow_up_index,omitempty"`
 }
@@ -69,6 +88,7 @@ type articleQuestionJSON struct {
 type generateDraftRequest struct {
 	StyleProfileID string `json:"style_profile_id"`
 	SessionID      string `json:"session_id"`
+	DraftModel     string `json:"draft_model"`
 }
 
 type generateDraftResponse struct {
@@ -98,8 +118,41 @@ func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if strings.TrimSpace(req.StyleModel) != "" {
+		if refined, err := refineStyleGuideWithModel(r.Context(), result, req.StyleModel); err == nil {
+			result.Guide.Markdown = refined
+			_ = workflowStore.SaveAuthorStyle(result)
+		}
+	}
 
 	respondWithJSON(w, http.StatusOK, toAuthorStyleResponse(result))
+}
+
+func refineStyleGuideWithModel(ctx context.Context, result authorstyleapp.AnalyzeResult, model string) (string, error) {
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("STYLE", model)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	var titles []string
+	for _, article := range result.Source.Articles {
+		if strings.TrimSpace(article.Title) != "" {
+			titles = append(titles, article.Title)
+		}
+	}
+	prompt := fmt.Sprintf(`あなたはNote記事の文体分析者です。
+以下の機械的な文体ガイドと記事タイトル群をもとに、後続の下書き生成で使いやすい日本語Markdownの箇条書きに整えてください。
+事実を捏造せず、文体、頻出テーマ、導入、締め方、避けるべき癖だけを簡潔にまとめてください。
+出力はMarkdown箇条書きのみ。
+
+記事タイトル:
+%s
+
+機械的な文体ガイド:
+%s
+`, strings.Join(titles, "\n"), result.Guide.Markdown)
+	return generator.Generate(ctx, prompt)
 }
 
 // GetAuthorStyleHandler returns a stored author style analysis result.
@@ -132,10 +185,11 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		req.SessionID = newID("abs")
 	}
 
-	service := briefapp.NewInterviewService(localFollowUpGenerator{})
+	service := newBriefInterviewService(req.BriefModel)
 	result, err := service.StartSession(briefapp.StartSessionInput{
 		SessionID:      req.SessionID,
 		StyleProfileID: req.StyleProfileID,
+		Questions:      toDomainQuestions(req.Questions),
 	})
 	if err != nil {
 		respondWithError(w, "BRIEF_SESSION_CREATE_FAILED", "Failed to create brief session", err.Error(), http.StatusBadRequest)
@@ -188,7 +242,7 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		result = briefapp.InterviewResult{Session: session, Brief: &brief, Completed: true}
 	} else {
-		service := briefapp.NewInterviewService(localFollowUpGenerator{})
+		service := newBriefInterviewService(req.BriefModel)
 		next, err := service.Answer(r.Context(), session, req.Content)
 		if err != nil {
 			respondWithError(w, "BRIEF_ANSWER_FAILED", "Failed to record brief answer", err.Error(), http.StatusBadRequest)
@@ -231,7 +285,7 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		articleBrief = session.AssembleBrief()
 	}
 
-	generator, err := llamacpp.NewClientFromEnv()
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("DRAFT", req.DraftModel)
 	if err != nil {
 		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED", "Failed to initialize local LLM client", err.Error(), http.StatusInternalServerError)
 		return
@@ -284,6 +338,7 @@ func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionRespons
 			ID:               result.NextQuestion.ID,
 			Text:             result.NextQuestion.Text,
 			FlowType:         string(result.NextQuestion.FlowType),
+			TargetField:      result.NextQuestion.TargetField,
 			TargetQuestionID: result.NextQuestion.TargetQuestionID,
 			FollowUpIndex:    result.NextQuestion.FollowUpIndex,
 		}
@@ -307,8 +362,105 @@ func newID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(bytes[:])
 }
 
-type localFollowUpGenerator struct{}
+func newBriefInterviewService(model string) *briefapp.InterviewService {
+	return briefapp.NewInterviewService(llmFollowUpGenerator{model: strings.TrimSpace(model)})
+}
 
-func (localFollowUpGenerator) GenerateFollowUp(ctx context.Context, session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int) (string, error) {
-	return briefdomain.FallbackFollowUpText(target, answer, followUpIndex), nil
+type llmFollowUpGenerator struct {
+	model string
+}
+
+func (g llmFollowUpGenerator) GenerateFollowUp(ctx context.Context, session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int) (string, error) {
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("BRIEF", g.model)
+	if err != nil {
+		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	prompt := buildFollowUpPrompt(session, target, answer, followUpIndex)
+	generated, err := generator.Generate(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+	question := extractFollowUpQuestion(generated)
+	if !briefdomain.IsAllowedFollowUpQuestion(question) {
+		return "", fmt.Errorf("generated follow-up was not allowed")
+	}
+	return question, nil
+}
+
+func toDomainQuestions(values []articleQuestionJSON) []briefdomain.ArticleQuestion {
+	if len(values) == 0 {
+		return nil
+	}
+	questions := make([]briefdomain.ArticleQuestion, 0, len(values))
+	for _, value := range values {
+		flowType := briefdomain.QuestionFlowType(value.FlowType)
+		if flowType == "" {
+			flowType = briefdomain.QuestionFlowMain
+		}
+		questions = append(questions, briefdomain.ArticleQuestion{
+			ID:          strings.TrimSpace(value.ID),
+			Text:        strings.TrimSpace(value.Text),
+			FlowType:    flowType,
+			Required:    requiredForQuestionID(value.ID),
+			TargetField: targetFieldForQuestion(value),
+		})
+	}
+	return briefdomain.NormalizeQuestions(questions)
+}
+
+func requiredForQuestionID(id string) bool {
+	for _, question := range briefdomain.FixedQuestions() {
+		if question.ID == id {
+			return question.Required
+		}
+	}
+	return false
+}
+
+func targetFieldForQuestion(value articleQuestionJSON) string {
+	if field := strings.TrimSpace(value.TargetField); field != "" {
+		return field
+	}
+	for _, question := range briefdomain.FixedQuestions() {
+		if question.ID == value.ID {
+			return question.TargetField
+		}
+	}
+	return "custom"
+}
+
+func buildFollowUpPrompt(session briefdomain.ArticleBriefSession, target briefdomain.ArticleQuestion, answer briefdomain.BriefAnswer, followUpIndex int) string {
+	return fmt.Sprintf(`あなたはNote記事の取材編集者です。
+次の記事ブリーフ回答を深掘りするため、著者に聞く追加質問を1つだけ作ってください。
+
+条件:
+- 日本語で質問する
+- はい/いいえで答えられる質問にしない
+- 選択式にしない
+- 具体的な経験、感情、判断、失敗、価値観のどれかを引き出す
+- 質問文だけを出力する
+
+セッションID: %s
+対象質問: %s
+回答: %s
+深掘り回数: %d
+`, session.ID, target.Text, answer.Content, followUpIndex)
+}
+
+func extractFollowUpQuestion(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "`\"'「」")
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(strings.Trim(line, "-*0123456789. "))
+		line = strings.Trim(line, "\"'「」")
+		if strings.HasSuffix(line, "？") || strings.HasSuffix(line, "?") {
+			return line
+		}
+	}
+	return value
 }

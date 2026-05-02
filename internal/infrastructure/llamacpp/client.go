@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,24 +18,117 @@ const (
 	defaultModel   = "gemma4:31b"
 )
 
-// Client calls a llama.cpp llama-server OpenAI-compatible API.
+// Client calls an OpenAI-compatible local LLM API such as llama.cpp or Ollama.
 type Client struct {
 	baseURL    string
 	model      string
 	httpClient *http.Client
+	fallback   *Client
 }
 
-// NewClientFromEnv creates a client from LLAMACPP_BASE_URL and LLAMACPP_MODEL.
+// NewClientFromEnv creates a client from LLM_BASE_URL/LLM_MODEL.
+//
+// LLAMACPP_BASE_URL and LLAMACPP_MODEL remain supported for existing local
+// llama.cpp setups.
 func NewClientFromEnv() (*Client, error) {
-	baseURL := os.Getenv("LLAMACPP_BASE_URL")
+	return NewClientFromEnvForPurpose("")
+}
+
+// NewClientFromEnvForPurposeWithModel creates a purpose client and lets callers
+// override the model without mutating process-wide environment.
+func NewClientFromEnvForPurposeWithModel(purpose, modelOverride string) (*Client, error) {
+	return newClientFromEnvForPurpose(purpose, modelOverride)
+}
+
+// NewClientFromEnvForPurpose creates a client for a workflow phase.
+//
+// For purpose "DRAFT", DRAFT_LLM_MODEL is used before LLM_MODEL. This allows
+// heavier remote models for draft generation while keeping one default base URL.
+func NewClientFromEnvForPurpose(purpose string) (*Client, error) {
+	return newClientFromEnvForPurpose(purpose, "")
+}
+
+func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) {
+	baseURL := firstEnv("LLM_BASE_URL", "LLAMACPP_BASE_URL")
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
-	model := os.Getenv("LLAMACPP_MODEL")
+	model := strings.TrimSpace(modelOverride)
+	if model == "" {
+		model = modelFromEnv(purpose)
+	}
 	if model == "" {
 		model = defaultModel
 	}
-	return NewClient(baseURL, model, &http.Client{Timeout: 180 * time.Second})
+	client, err := NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
+	if err != nil {
+		return nil, err
+	}
+	fallback, err := fallbackClientFromEnv(purpose, model)
+	if err != nil {
+		return nil, err
+	}
+	client.fallback = fallback
+	return client, nil
+}
+
+func timeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(firstEnv("LLM_TIMEOUT_SECONDS", "LLAMACPP_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 180 * time.Second
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 180 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func modelFromEnv(purpose string) string {
+	purpose = strings.ToUpper(strings.TrimSpace(purpose))
+	if purpose != "" {
+		if model := os.Getenv(purpose + "_LLM_MODEL"); model != "" {
+			return model
+		}
+	}
+	return firstEnv("LLM_MODEL", "LLAMACPP_MODEL")
+}
+
+func firstEnv(names ...string) string {
+	for _, name := range names {
+		if value := os.Getenv(name); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func fallbackClientFromEnv(purpose, primaryModel string) (*Client, error) {
+	purpose = strings.ToUpper(strings.TrimSpace(purpose))
+	keys := func(suffix string) []string {
+		if purpose == "" {
+			return []string{"FALLBACK_" + suffix}
+		}
+		return []string{purpose + "_FALLBACK_" + suffix, "FALLBACK_" + suffix}
+	}
+	baseURL := firstEnv(keys("LLM_BASE_URL")...)
+	if baseURL == "" {
+		baseURL = firstEnv("FALLBACK_LLAMACPP_BASE_URL")
+	}
+	model := firstEnv(keys("LLM_MODEL")...)
+	if model == "" && purpose == "" {
+		model = firstEnv("FALLBACK_LLM_MODEL", "FALLBACK_LLAMACPP_MODEL")
+	}
+	if baseURL == "" && model == "" {
+		return nil, nil
+	}
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	if model == "" {
+		model = primaryModel
+	}
+	return NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
 }
 
 // NewClient creates a llama.cpp client.
@@ -81,6 +175,9 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 
 	var response chatCompletionResponse
 	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
+		if c.fallback != nil {
+			return c.fallback.Generate(ctx, prompt)
+		}
 		return "", err
 	}
 	if len(response.Choices) == 0 {
@@ -101,10 +198,16 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
+		if c.fallback != nil {
+			return c.fallback.ListModels(ctx)
+		}
 		return nil, fmt.Errorf("list llama.cpp models: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if c.fallback != nil {
+			return c.fallback.ListModels(ctx)
+		}
 		return nil, fmt.Errorf("list llama.cpp models: unexpected status %s", response.Status)
 	}
 

@@ -46,6 +46,64 @@ LLAMACPP_BASE_URL=http://127.0.0.1:8081/v1
 LLAMACPP_MODEL=gemma4:31b
 ```
 
+### まとめて起動する
+
+`llama-server` と Go サーバーをまとめて起動できます。
+
+```bash
+make app
+```
+
+ブラウザで `http://localhost:8080` にアクセスします。終了するときは `Ctrl-C` で両方のプロセスを停止できます。
+
+`llama-server` の場所やモデルを変える場合は `.env` の `LLAMA_SERVER`、`LLAMACPP_HF_REPO`、`LLAMACPP_HF_FILE`、`LLAMACPP_MODEL` を変更します。
+
+### Evo X2 の Ollama を使って起動する
+
+Tailscale 経由で Evo X2 の Ollama を使う場合は、Mac側でローカルLLMを起動せず、Goサーバーだけを起動します。
+
+```bash
+make evo-x2
+```
+
+または mise を使う場合:
+
+```bash
+mise trust
+mise run evo-x2
+```
+
+既定では `http://evo-x2:11434/v1` の OpenAI互換APIに接続し、`gemma4:31b` を使います。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
+
+画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は初期テンプレートを編集でき、追加質問も下書き生成のブリーフに含まれます。
+
+文体分析結果、取材セッションの回答、完成ブリーフは `WORKFLOW_STORE_PATH` にJSONとして永続化されます。既定値は `data/workflow_store.json` です。
+
+フェーズ別モデルの目安:
+
+- `STYLE_LLM_MODEL`: Note記事取得後の文体ガイド整理用。
+- `BRIEF_LLM_MODEL`: 深掘り質問生成用。軽いモデルで十分です。
+- `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。
+- `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。品質重視のモデルを指定します。
+- `FALLBACK_LLM_BASE_URL`: Evo X2 に接続できない場合の llama.cpp フォールバック先です。
+- フォールバック時のモデル名は、原則としてUIまたは環境変数で選んだフェーズ別モデルをそのまま使います。別名にしたい場合だけ `STYLE_FALLBACK_LLM_MODEL` / `BRIEF_FALLBACK_LLM_MODEL` / `ARTICLE_FALLBACK_LLM_MODEL` / `DRAFT_FALLBACK_LLM_MODEL` を設定します。
+
+接続確認だけ行う場合:
+
+```bash
+curl http://evo-x2:11434/v1/models
+```
+
+3,000字前後の統合シナリオを Evo X2 で実行する場合:
+
+```bash
+make scenario-evo-x2
+```
+
+このシナリオは文体分析、一問一答、深掘り、下書き生成を通し、文体スコア80点以上と一定以上の本文量を確認します。
+
+### 個別に起動する
+
 Gemma4 31B を `llama-server` で起動します。
 
 ```bash

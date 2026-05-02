@@ -1,0 +1,57 @@
+SHELL := /bin/bash
+
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
+PORT ?= 8080
+LLM_RUNTIME ?= local
+LLM_BASE_URL ?= http://$(LLAMACPP_HOST):$(LLAMACPP_PORT)/v1
+LLM_MODEL ?= gemma4:31b
+EVO_X2_LLM_BASE_URL ?= http://evo-x2:11434/v1
+EVO_X2_LLM_MODEL ?= gemma4:31b
+EVO_X2_BRIEF_LLM_MODEL ?= gemma4:e2b
+EVO_X2_STYLE_LLM_MODEL ?= gemma4:latest
+EVO_X2_ARTICLE_LLM_MODEL ?= gemma4:latest
+EVO_X2_DRAFT_LLM_MODEL ?= gemma4:31b
+FALLBACK_LLM_BASE_URL ?= http://127.0.0.1:8081/v1
+LLAMACPP_HOST ?= 127.0.0.1
+LLAMACPP_PORT ?= 8081
+LLAMACPP_BASE_URL ?= $(LLM_BASE_URL)
+LLAMACPP_MODEL ?= gemma4:31b
+LLAMACPP_HF_REPO ?= ggml-org/gemma-4-31B-it-GGUF
+LLAMACPP_HF_FILE ?= gemma-4-31B-it-Q4_K_M.gguf
+LLAMA_SERVER ?= llama-server
+
+.PHONY: app dev evo-x2 remote evo-x2-models scenario-evo-x2 server llama check
+
+app: dev
+
+dev:
+	./scripts/dev.sh
+
+evo-x2: remote
+
+remote:
+	NOTE_MAKER_SKIP_ENV=1 LLM_RUNTIME=remote LLM_BASE_URL="$(EVO_X2_LLM_BASE_URL)" LLM_MODEL="$(EVO_X2_LLM_MODEL)" STYLE_LLM_MODEL="$(EVO_X2_STYLE_LLM_MODEL)" BRIEF_LLM_MODEL="$(EVO_X2_BRIEF_LLM_MODEL)" ARTICLE_LLM_MODEL="$(EVO_X2_ARTICLE_LLM_MODEL)" DRAFT_LLM_MODEL="$(EVO_X2_DRAFT_LLM_MODEL)" FALLBACK_LLM_BASE_URL="$(FALLBACK_LLM_BASE_URL)" ./scripts/dev.sh
+
+evo-x2-models:
+	curl -s "$(EVO_X2_LLM_BASE_URL)/models"
+
+scenario-evo-x2:
+	RUN_NOTE_SCENARIO=1 RUN_LOCAL_LLM_SCENARIO=1 LLM_BASE_URL="$(EVO_X2_LLM_BASE_URL)" LLM_MODEL="$(EVO_X2_LLM_MODEL)" STYLE_LLM_MODEL="$(EVO_X2_STYLE_LLM_MODEL)" BRIEF_LLM_MODEL="$(EVO_X2_BRIEF_LLM_MODEL)" ARTICLE_LLM_MODEL="$(EVO_X2_ARTICLE_LLM_MODEL)" DRAFT_LLM_MODEL="$(EVO_X2_DRAFT_LLM_MODEL)" LLM_TIMEOUT_SECONDS=900 FALLBACK_LLM_BASE_URL="$(FALLBACK_LLM_BASE_URL)" SCENARIO_MIN_STYLE_SCORE=80 SCENARIO_MIN_DRAFT_RUNES=2800 DRAFT_MAX_ATTEMPTS=2 go run ./cmd/scenario/full_workflow
+
+server:
+	go run ./cmd/server
+
+llama:
+	$(LLAMA_SERVER) \
+		--hf-repo $(LLAMACPP_HF_REPO) \
+		--hf-file $(LLAMACPP_HF_FILE) \
+		--alias $(LLAMACPP_MODEL) \
+		--host $(LLAMACPP_HOST) \
+		--port $(LLAMACPP_PORT)
+
+check:
+	go test ./...

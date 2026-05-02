@@ -22,6 +22,7 @@ func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
 			Reader:                "個人開発者",
 			ExpectedReaderAction:  "小さく検証する",
 			MustInclude:           "プロンプトを短くする。評価を返す。",
+			PersonalContext:       "音楽家からエンジニアになった経験を入れる。",
 			Exclusions:            "Note記事本文の再取得",
 			TargetLengthStructure: "1200字、導入・本論・結論",
 		},
@@ -43,6 +44,7 @@ func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
 	for _, want := range []string{
 		styleGuide.ParagraphRhythm,
 		"ローカルLLMで記事を書く",
+		"音楽家からエンジニアになった経験",
 		"Note記事本文の再取得",
 		"参考記事本文は与えられていません",
 	} {

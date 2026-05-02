@@ -12,7 +12,7 @@ import (
 	"github.com/teradakousuke/note_maker/internal/domain/article"
 )
 
-const maxRecurringKeywords = 6
+const maxRecurringKeywords = 10
 
 // BuildAuthorStyleProfile derives an author profile from fetched articles and source metadata.
 func BuildAuthorStyleProfile(source AuthorSource, articles []article.Article) (AuthorStyleProfile, error) {

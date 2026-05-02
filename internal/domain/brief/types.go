@@ -11,6 +11,7 @@ const (
 	QuestionIDReader                = "reader"
 	QuestionIDExpectedReaderAction  = "expected_reader_action"
 	QuestionIDMustInclude           = "must_include"
+	QuestionIDPersonalContext       = "personal_context"
 	QuestionIDExclusions            = "exclusions"
 	QuestionIDTargetLengthStructure = "target_length_structure"
 	QuestionIDToneStance            = "tone_stance"
@@ -18,7 +19,7 @@ const (
 	MaxFollowUpsPerTarget = 2
 	MaxTotalFollowUps     = 4
 
-	DefaultTargetLengthStructure = "1500-2000 words with an introduction, body, and conclusion"
+	DefaultTargetLengthStructure = "3000字前後。導入、違和感、背景、実装と検証、読者への提案、結論で構成する"
 )
 
 // QuestionFlowType identifies how an interview question participates in the brief flow.
@@ -68,10 +69,12 @@ type ArticleBrief struct {
 	Reader                string
 	ExpectedReaderAction  string
 	MustInclude           string
+	PersonalContext       string
 	Exclusions            string
 	TargetLengthStructure string
 	ToneStance            string
 	DeepDives             []BriefAnswer
+	CustomAnswers         []BriefAnswer
 }
 
 // ArticleBriefSession owns article-interview state.
@@ -87,18 +90,52 @@ type ArticleBriefSession struct {
 
 // NewArticleBriefSession creates a session with the deterministic fixed question set.
 func NewArticleBriefSession(id, styleProfileID string) (ArticleBriefSession, error) {
+	return NewArticleBriefSessionWithQuestions(id, styleProfileID, FixedQuestions())
+}
+
+// NewArticleBriefSessionWithQuestions creates a session with a caller-provided question set.
+func NewArticleBriefSessionWithQuestions(id, styleProfileID string, questions []ArticleQuestion) (ArticleBriefSession, error) {
 	if strings.TrimSpace(id) == "" {
 		return ArticleBriefSession{}, fmt.Errorf("session id is required")
 	}
 	if strings.TrimSpace(styleProfileID) == "" {
 		return ArticleBriefSession{}, fmt.Errorf("style profile id is required")
 	}
+	questions = NormalizeQuestions(questions)
+	if len(questions) == 0 {
+		return ArticleBriefSession{}, fmt.Errorf("questions are required")
+	}
 	return ArticleBriefSession{
 		ID:             strings.TrimSpace(id),
 		StyleProfileID: strings.TrimSpace(styleProfileID),
 		Phase:          InterviewPhaseFixedQuestions,
-		Questions:      FixedQuestions(),
+		Questions:      questions,
 	}, nil
+}
+
+// NormalizeQuestions keeps only valid main questions and fills missing metadata.
+func NormalizeQuestions(questions []ArticleQuestion) []ArticleQuestion {
+	normalized := make([]ArticleQuestion, 0, len(questions))
+	seen := map[string]bool{}
+	for _, question := range questions {
+		question.ID = strings.TrimSpace(question.ID)
+		question.Text = strings.TrimSpace(question.Text)
+		if question.ID == "" || question.Text == "" || seen[question.ID] {
+			continue
+		}
+		if question.FlowType == "" {
+			question.FlowType = QuestionFlowMain
+		}
+		if question.FlowType != QuestionFlowMain {
+			continue
+		}
+		if question.TargetField == "" {
+			question.TargetField = "custom"
+		}
+		seen[question.ID] = true
+		normalized = append(normalized, question)
+	}
+	return normalized
 }
 
 // FixedQuestions returns the deterministic main interview questions.
@@ -106,56 +143,63 @@ func FixedQuestions() []ArticleQuestion {
 	return []ArticleQuestion{
 		{
 			ID:          QuestionIDTheme,
-			Text:        "What is the article's core theme?",
+			Text:        "記事の中心テーマは何ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "theme",
 		},
 		{
 			ID:          QuestionIDOpeningEpisode,
-			Text:        "What concrete experience or episode should open the article?",
+			Text:        "記事の導入に置く具体的な体験や場面は何ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "opening_episode",
 		},
 		{
 			ID:          QuestionIDReader,
-			Text:        "Who is the reader?",
+			Text:        "この記事を届けたい読者は誰ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "reader",
 		},
 		{
 			ID:          QuestionIDExpectedReaderAction,
-			Text:        "What should the reader feel or do after reading?",
+			Text:        "読後に読者へどんな変化や行動を起こしてほしいですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "expected_reader_action",
 		},
 		{
 			ID:          QuestionIDMustInclude,
-			Text:        "What must be included?",
+			Text:        "記事に必ず含める論点、事実、手順は何ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "must_include",
 		},
 		{
+			ID:          QuestionIDPersonalContext,
+			Text:        "著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    true,
+			TargetField: "personal_context",
+		},
+		{
 			ID:          QuestionIDExclusions,
-			Text:        "What must be excluded?",
+			Text:        "記事に含めないこと、避けたい表現、断言しないことは何ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    false,
 			TargetField: "exclusions",
 		},
 		{
 			ID:          QuestionIDTargetLengthStructure,
-			Text:        "What target length and structure should be used?",
+			Text:        "目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。",
 			FlowType:    QuestionFlowMain,
-			Required:    false,
+			Required:    true,
 			TargetField: "target_length_structure",
 		},
 		{
 			ID:          QuestionIDToneStance,
-			Text:        "Should the article be more introspective, technical, narrative, or practical?",
+			Text:        "記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "tone_stance",

@@ -1,7 +1,10 @@
 package memory
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/teradakousuke/note_maker/internal/application/authorstyle"
@@ -11,13 +14,20 @@ import (
 
 // WorkflowStore is an in-memory repository for the local three-phase workflow.
 type WorkflowStore struct {
-	mu sync.RWMutex
+	mu   sync.RWMutex
+	path string
 
 	authorStyles   map[string]authorstyle.AnalyzeResult
 	profileIndexes map[string]authorstyle.AnalyzeResult
 	guideIndexes   map[string]authorstyle.AnalyzeResult
 	sessions       map[string]briefdomain.ArticleBriefSession
 	briefs         map[string]briefdomain.ArticleBrief
+}
+
+type workflowSnapshot struct {
+	AuthorStyles map[string]authorstyle.AnalyzeResult       `json:"author_styles"`
+	Sessions     map[string]briefdomain.ArticleBriefSession `json:"sessions"`
+	Briefs       map[string]briefdomain.ArticleBrief        `json:"briefs"`
 }
 
 // NewWorkflowStore creates an empty local workflow store.
@@ -29,6 +39,19 @@ func NewWorkflowStore() *WorkflowStore {
 		sessions:       make(map[string]briefdomain.ArticleBriefSession),
 		briefs:         make(map[string]briefdomain.ArticleBrief),
 	}
+}
+
+// NewPersistentWorkflowStore creates a workflow store backed by a JSON file.
+func NewPersistentWorkflowStore(path string) (*WorkflowStore, error) {
+	if path == "" {
+		return nil, fmt.Errorf("workflow store path is required")
+	}
+	store := NewWorkflowStore()
+	store.path = path
+	if err := store.load(); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 // SaveAuthorStyle stores an author style analysis result.
@@ -48,7 +71,7 @@ func (s *WorkflowStore) SaveAuthorStyle(result authorstyle.AnalyzeResult) error 
 	s.authorStyles[result.ID] = result
 	s.profileIndexes[result.Profile.ID] = result
 	s.guideIndexes[result.Guide.ID] = result
-	return nil
+	return s.persistLocked()
 }
 
 // GetAuthorStyle returns an analysis result by analysis ID, profile ID, or guide ID.
@@ -75,7 +98,7 @@ func (s *WorkflowStore) SaveSession(session briefdomain.ArticleBriefSession) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[session.ID] = session
-	return nil
+	return s.persistLocked()
 }
 
 // GetSession returns a brief interview session by ID.
@@ -97,7 +120,7 @@ func (s *WorkflowStore) SaveBrief(sessionID string, brief briefdomain.ArticleBri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.briefs[sessionID] = brief
-	return nil
+	return s.persistLocked()
 }
 
 // GetBrief returns a completed brief by session ID.
@@ -115,4 +138,88 @@ func (s *WorkflowStore) GetProfileAndGuide(id string) (authordomain.AuthorStyleP
 		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, false
 	}
 	return result.Profile, result.Guide, true
+}
+
+func (s *WorkflowStore) load() error {
+	encoded, err := os.ReadFile(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read workflow store: %w", err)
+	}
+	var snapshot workflowSnapshot
+	if err := json.Unmarshal(encoded, &snapshot); err != nil {
+		return fmt.Errorf("decode workflow store: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorStyles = nonNilAuthorStyles(snapshot.AuthorStyles)
+	s.sessions = nonNilSessions(snapshot.Sessions)
+	s.briefs = nonNilBriefs(snapshot.Briefs)
+	s.rebuildIndexesLocked()
+	return nil
+}
+
+func (s *WorkflowStore) persistLocked() error {
+	if s.path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return fmt.Errorf("create workflow store dir: %w", err)
+	}
+	snapshot := workflowSnapshot{
+		AuthorStyles: s.authorStyles,
+		Sessions:     s.sessions,
+		Briefs:       s.briefs,
+	}
+	encoded, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode workflow store: %w", err)
+	}
+	tempPath := s.path + ".tmp"
+	if err := os.WriteFile(tempPath, append(encoded, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write workflow store temp: %w", err)
+	}
+	if err := os.Rename(tempPath, s.path); err != nil {
+		return fmt.Errorf("replace workflow store: %w", err)
+	}
+	return nil
+}
+
+func (s *WorkflowStore) rebuildIndexesLocked() {
+	s.profileIndexes = make(map[string]authorstyle.AnalyzeResult, len(s.authorStyles))
+	s.guideIndexes = make(map[string]authorstyle.AnalyzeResult, len(s.authorStyles))
+	for id, result := range s.authorStyles {
+		if result.ID == "" {
+			result.ID = id
+		}
+		if result.Profile.ID != "" {
+			s.profileIndexes[result.Profile.ID] = result
+		}
+		if result.Guide.ID != "" {
+			s.guideIndexes[result.Guide.ID] = result
+		}
+	}
+}
+
+func nonNilAuthorStyles(values map[string]authorstyle.AnalyzeResult) map[string]authorstyle.AnalyzeResult {
+	if values == nil {
+		return make(map[string]authorstyle.AnalyzeResult)
+	}
+	return values
+}
+
+func nonNilSessions(values map[string]briefdomain.ArticleBriefSession) map[string]briefdomain.ArticleBriefSession {
+	if values == nil {
+		return make(map[string]briefdomain.ArticleBriefSession)
+	}
+	return values
+}
+
+func nonNilBriefs(values map[string]briefdomain.ArticleBrief) map[string]briefdomain.ArticleBrief {
+	if values == nil {
+		return make(map[string]briefdomain.ArticleBrief)
+	}
+	return values
 }

@@ -1,0 +1,15 @@
+[tasks.dev]
+description = "Start local llama.cpp and the Note Maker web app"
+run = "make dev"
+
+[tasks.evo-x2]
+description = "Start the Note Maker web app against Ollama on Evo X2 via Tailscale"
+run = "make evo-x2"
+
+[tasks.scenario-evo-x2]
+description = "Run the full 3000-character scenario against Ollama on Evo X2"
+run = "make scenario-evo-x2"
+
+[tasks.check]
+description = "Run Go tests"
+run = "make check"

@@ -119,8 +119,9 @@ func fixedAnswers() []string {
 		"Solo developers who write note.com articles with local tools.",
 		"They should try a three-phase workflow before drafting.",
 		"Mention style analysis, brief interviews, and final draft checks.",
+		"Use the author's personal history as a musician and engineer.",
 		"Avoid cloud-only assumptions.",
-		"1800 words with three sections.",
+		"3000字前後 with six sections.",
 		"Practical and introspective.",
 	}
 }
