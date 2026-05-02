@@ -33,6 +33,7 @@ Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `13
    - Add status, heartbeat, token, done, and error event types.
    - Support cancellation from browser disconnect and explicit Cancel.
    - Keep non-streaming generation for tests and compatibility.
+   - Status: implemented in the current feature branch; close only after Tailnet Evo X2 OpenAI-compatible API validation and PR merge.
 
 2. **[#17] Chat transcript and editable answers**
    - Replace the bounded log with a transcript surface.

@@ -201,11 +201,12 @@ Current implementation status as of 2026-05-02:
 - ADR 0001's strict Terisuke style threshold work is complete ([#11](https://github.com/terisuke/note_maker/issues/11)).
 - Phase B1 is complete ahead of the original order: `Persona` and `OutputFormat` concepts, prompt dispatch, and format validators are in place ([#21](https://github.com/terisuke/note_maker/issues/21)). The remaining Phase B work stays deferred until after Phase A/C foundations.
 - Evo X2 is the primary heavy-inference runtime through the Tailnet OpenAI-compatible API (`http://evo-x2:11434/v1`). SSH tunnel access is an explicit developer diagnostic only.
-- Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A should start with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
+- Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A started with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
+- Phase A2 is implemented in code: `llamacpp.Client.GenerateStream`, streaming follow-up/draft service paths, `Accept: text/event-stream` handlers, browser Cancel controls, heartbeat events, and final runtime metrics. It still requires real Tailnet Evo X2 validation before closing the issue.
 
 Near-term execution order:
 
-1. [#18](https://github.com/terisuke/note_maker/issues/18) — streaming LLM responses, progress events, and cancellation for Tailnet Evo X2.
+1. Validate and merge [#18](https://github.com/terisuke/note_maker/issues/18) — streaming LLM responses, progress events, and cancellation for Tailnet Evo X2.
 2. [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answer/fork UX, using the streaming primitives from #18.
 3. [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
 4. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.

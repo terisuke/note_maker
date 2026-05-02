@@ -130,6 +130,7 @@
           </div>
           <div class="button-row">
             <button id="submit-answer-btn" class="primary-btn">回答を送信</button>
+            <button id="cancel-answer-btn" class="secondary-btn hidden" type="button">停止</button>
             <button id="skip-deep-dive-btn" class="secondary-btn hidden">深掘りをスキップ</button>
           </div>
         </div>
@@ -149,7 +150,10 @@
           <p>文体ガイドと記事ブリーフだけを使って下書きを生成します。</p>
         </div>
 
-        <button id="generate-draft-btn" class="primary-btn" disabled>下書きを生成</button>
+        <div class="button-row">
+          <button id="generate-draft-btn" class="primary-btn" disabled>下書きを生成</button>
+          <button id="cancel-draft-btn" class="secondary-btn hidden" type="button">停止</button>
+        </div>
         <div id="draft-status" class="status-line"></div>
 
         <div id="draft-result" class="hidden">

@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
     completedBrief: null,
     personas: [],
     formats: [],
+    answerAbortController: null,
+    draftAbortController: null,
   };
 
   const el = {
@@ -47,10 +49,12 @@ document.addEventListener('DOMContentLoaded', () => {
     questionLog: document.getElementById('question-log'),
     answerInput: document.getElementById('answer-input'),
     submitAnswer: document.getElementById('submit-answer-btn'),
+    cancelAnswer: document.getElementById('cancel-answer-btn'),
     skipDeepDive: document.getElementById('skip-deep-dive-btn'),
     briefResult: document.getElementById('brief-result'),
     briefPreview: document.getElementById('brief-preview'),
     generateDraft: document.getElementById('generate-draft-btn'),
+    cancelDraft: document.getElementById('cancel-draft-btn'),
     draftStatus: document.getElementById('draft-status'),
     draftResult: document.getElementById('draft-result'),
     evaluationSummary: document.getElementById('evaluation-summary'),
@@ -77,8 +81,10 @@ document.addEventListener('DOMContentLoaded', () => {
   el.usePresetStyle.addEventListener('click', usePresetStyle);
   el.startInterview.addEventListener('click', startInterview);
   el.submitAnswer.addEventListener('click', submitAnswer);
+  el.cancelAnswer.addEventListener('click', () => state.answerAbortController?.abort());
   el.skipDeepDive.addEventListener('click', skipDeepDive);
   el.generateDraft.addEventListener('click', generateDraft);
+  el.cancelDraft.addEventListener('click', () => state.draftAbortController?.abort());
   el.copy.addEventListener('click', copyMarkdown);
 
   document.querySelectorAll('.tab-btn').forEach((button) => {
@@ -218,28 +224,87 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function sendAnswer(payload) {
-    setLoading(true, '回答を保存し、次の質問を準備しています...');
+    if (payload.skip_deep_dive) {
+      setLoading(true, '回答を保存し、次の質問を準備しています...');
+      try {
+        const data = await requestJSON(`/api/brief-sessions/${state.sessionId}/answers`, {
+          method: 'POST',
+          body: { ...payload, brief_model: el.briefModel.value },
+        });
+        applyInterviewResult(data);
+      } catch (error) {
+        showError(`回答の保存に失敗しました: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    let streamedQuestion = '';
+    let streamedQuestionItem = null;
+    state.answerAbortController = new AbortController();
+    setAnswerStreaming(true);
+    appendLog('system', '回答を保存しています。');
     try {
-      const data = await requestJSON(`/api/brief-sessions/${state.sessionId}/answers`, {
+      await requestSSE(`/api/brief-sessions/${state.sessionId}/answers`, {
         method: 'POST',
         body: { ...payload, brief_model: el.briefModel.value },
+        signal: state.answerAbortController.signal,
+        onEvent(event, data) {
+          if (event === 'status') {
+            if (data.status === 'follow_up_generation_started') {
+              appendLog('system', '深掘り質問を生成しています。');
+            }
+            return;
+          }
+          if (event === 'chunk') {
+            streamedQuestion += data.text || '';
+            if (!streamedQuestionItem) {
+              streamedQuestionItem = appendLog('deep-dive', '');
+            }
+            streamedQuestionItem.textContent = streamedQuestion;
+            el.questionLog.scrollTop = el.questionLog.scrollHeight;
+            return;
+          }
+          if (event === 'result') {
+            applyInterviewResult(data, { questionAlreadyRendered: Boolean(streamedQuestionItem) });
+            if (streamedQuestionItem && data.next_question?.text) {
+              streamedQuestionItem.textContent = data.next_question.text;
+            }
+            return;
+          }
+          if (event === 'error') {
+            throw new Error(data.message || data.detail || 'stream error');
+          }
+        },
       });
-      if (data.completed) {
-        state.completedBrief = data.brief;
-        state.nextQuestion = null;
-        el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
-        el.briefResult.classList.remove('hidden');
-        el.generateDraft.disabled = false;
-        appendLog('system', '記事ブリーフが完成しました。');
-        return;
-      }
-      state.nextQuestion = data.next_question;
-      renderQuestion(data.next_question);
     } catch (error) {
-      showError(`回答の保存に失敗しました: ${error.message}`);
+      if (error.name === 'AbortError') {
+        appendLog('system', '処理を停止しました。途中までの内容は画面に残しています。');
+      } else {
+        showError(`回答の保存に失敗しました: ${error.message}`);
+      }
     } finally {
-      setLoading(false);
+      setAnswerStreaming(false);
+      state.answerAbortController = null;
     }
+  }
+
+  function applyInterviewResult(data, options = {}) {
+    if (data.completed) {
+      state.completedBrief = data.brief;
+      state.nextQuestion = null;
+      el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
+      el.briefResult.classList.remove('hidden');
+      el.generateDraft.disabled = false;
+      appendLog('system', '記事ブリーフが完成しました。');
+      return;
+    }
+    state.nextQuestion = data.next_question;
+    if (!options.questionAlreadyRendered) {
+      renderQuestion(data.next_question);
+    }
+    el.skipDeepDive.classList.toggle('hidden', data.next_question?.flow_type !== 'deep_dive_follow_up');
   }
 
   async function generateDraft() {
@@ -248,10 +313,17 @@ document.addEventListener('DOMContentLoaded', () => {
       showError('文体分析と取材を完了してください');
       return;
     }
-    setLoading(true, 'ローカルLLMで下書きを生成しています...');
-    el.draftStatus.textContent = 'Gemma4 31B の処理には数分かかる場合があります。';
+    state.draftAbortController = new AbortController();
+    setDraftStreaming(true);
+    el.draftStatus.textContent = 'Evo X2 の OpenAI互換APIで下書きを生成しています。';
+    let draftBuffer = '';
+    el.markdownOutput.value = '';
+    el.previewContent.innerHTML = '';
+    el.evaluationSummary.textContent = '';
+    el.draftResult.classList.remove('hidden');
+    setActiveTab('markdown');
     try {
-      const data = await requestJSON('/api/drafts', {
+      await requestSSE('/api/drafts', {
         method: 'POST',
         body: {
           style_profile_id: state.profileId,
@@ -260,12 +332,43 @@ document.addEventListener('DOMContentLoaded', () => {
           output_format_id: currentFormatId(),
           draft_model: el.draftModel.value,
         },
+        signal: state.draftAbortController.signal,
+        onEvent(event, data) {
+          if (event === 'status') {
+            el.draftStatus.textContent = draftStatusText(data.status, data.elapsed_ms);
+            return;
+          }
+          if (event === 'heartbeat') {
+            el.draftStatus.textContent = draftStatusText('running', data.elapsed_ms);
+            return;
+          }
+          if (event === 'chunk') {
+            draftBuffer += data.text || '';
+            el.markdownOutput.value = draftBuffer;
+            el.previewContent.innerHTML = marked.parse(draftBuffer);
+            return;
+          }
+          if (event === 'result') {
+            renderDraft(data);
+            return;
+          }
+          if (event === 'error') {
+            throw new Error(data.message || data.detail || 'stream error');
+          }
+          if (event === 'done') {
+            el.draftStatus.textContent = draftDoneText(data);
+          }
+        },
       });
-      renderDraft(data);
     } catch (error) {
-      showError(`下書き生成に失敗しました: ${error.message}`);
+      if (error.name === 'AbortError') {
+        el.draftStatus.textContent = '停止しました。途中まで生成されたMarkdownは残しています。';
+      } else {
+        showError(`下書き生成に失敗しました: ${error.message}`);
+      }
     } finally {
-      setLoading(false);
+      setDraftStreaming(false);
+      state.draftAbortController = null;
     }
   }
 
@@ -522,6 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
     item.textContent = text;
     el.questionLog.appendChild(item);
     el.questionLog.scrollTop = el.questionLog.scrollHeight;
+    return item;
   }
 
   function escapeHTML(value) {
@@ -563,6 +667,94 @@ document.addEventListener('DOMContentLoaded', () => {
       throw new Error(errorData?.error?.message || `HTTP ${response.status}`);
     }
     return response.json();
+  }
+
+  async function requestSSE(url, options = {}) {
+    const response = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.error?.message || `HTTP ${response.status}`);
+    }
+    if (!response.body) {
+      throw new Error('stream response body is unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+      for (const part of parts) {
+        dispatchSSEBlock(part, options.onEvent);
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      dispatchSSEBlock(buffer, options.onEvent);
+    }
+  }
+
+  function dispatchSSEBlock(block, onEvent) {
+    const lines = block.split('\n');
+    let event = 'message';
+    const dataLines = [];
+    lines.forEach((line) => {
+      if (line.startsWith('event:')) {
+        event = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    });
+    if (!dataLines.length || !onEvent) {
+      return;
+    }
+    const data = JSON.parse(dataLines.join('\n'));
+    onEvent(event, data);
+  }
+
+  function draftStatusText(status, elapsedMS = 0) {
+    const seconds = Math.max(0, Math.round(Number(elapsedMS || 0) / 1000));
+    const labels = {
+      stream_opened: '接続しました',
+      draft_generation_started: '本文を生成しています',
+      draft_validation_started: 'Markdownと文体を検証しています',
+      style_revision_started: '文体スコアを上げるために一度だけ修正しています',
+      runtime_connected: '推論エンドポイントに接続しました',
+      running: '生成を継続しています',
+      completed: '生成が完了しました',
+    };
+    return `${labels[status] || status} (${seconds}s)`;
+  }
+
+  function draftDoneText(data) {
+    const seconds = Math.max(0, Math.round(Number(data.elapsed_ms || 0) / 1000));
+    const score = Number(data.score || 0).toFixed(1);
+    return `生成が完了しました (${seconds}s / ${data.runes || 0}字 / score ${score})`;
+  }
+
+  function setAnswerStreaming(active) {
+    el.submitAnswer.disabled = active;
+    el.skipDeepDive.disabled = active;
+    el.cancelAnswer.classList.toggle('hidden', !active);
+  }
+
+  function setDraftStreaming(active) {
+    el.generateDraft.disabled = active || !state.completedBrief;
+    el.cancelDraft.classList.toggle('hidden', !active);
   }
 
   function setActiveTab(tabId) {

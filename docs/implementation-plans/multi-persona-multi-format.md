@@ -41,7 +41,7 @@ Near-term implementation cut:
 
 | Order | Issue | Why now | Done when |
 |---|---|---|---|
-| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Draft generation streams to the UI, can be cancelled, and reports endpoint/model/elapsed time. |
+| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Code streams follow-up/draft output, can be cancelled, and reports endpoint/model/elapsed time; final closure waits for Tailnet Evo X2 validation. |
 | 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Answers render as editable bubbles and edits fork the in-memory session. |
 | 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Every follow-up references the parent answer in prompt and UI. |
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
@@ -63,6 +63,8 @@ Acceptance:
 - Original session is reachable from the new session via `parent_session_id`.
 
 ### A2 — Stream LLM responses via SSE
+
+Implementation status: code path implemented on `codex/issue-18-sse-streaming`; validate against real Tailnet Evo X2 before closing the issue.
 
 - Add SSE support to `internal/infrastructure/llamacpp/client.go` (OpenAI-compatible `stream: true`).
 - Wire streaming through the application services for `follow-up generation` and `draft generation`. Style analysis can stay non-streaming (single short call).

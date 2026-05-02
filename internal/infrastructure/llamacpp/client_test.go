@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +63,46 @@ func TestListModels(t *testing.T) {
 	}
 	if len(models) != 1 || models[0] != "gemma4:31b" {
 		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestGenerateStreamCallsChatCompletionsAndAssemblesChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !request.Stream {
+			t.Fatal("stream should be enabled")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# Draft\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nBody\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL+"/v1", "gemma4:31b", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	var chunks []string
+	draft, err := client.GenerateStream(context.Background(), "write", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate stream: %v", err)
+	}
+	if draft != "# Draft\n\nBody" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+	if strings.Join(chunks, "") != draft {
+		t.Fatalf("chunks did not assemble to draft: %#v", chunks)
 	}
 }
 

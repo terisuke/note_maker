@@ -1,6 +1,7 @@
 package llamacpp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -153,8 +154,57 @@ func NewClient(baseURL, model string, httpClient *http.Client) (*Client, error) 
 	return &Client{baseURL: baseURL, model: model, httpClient: httpClient}, nil
 }
 
+// BaseURL returns the OpenAI-compatible endpoint used by this client.
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+// Model returns the model name used by this client.
+func (c *Client) Model() string {
+	return c.model
+}
+
 // Generate sends a prompt to /v1/chat/completions and returns the first text response.
 func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
+	body := c.chatCompletionRequest(prompt, false)
+
+	var response chatCompletionResponse
+	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
+		if c.fallback != nil {
+			return c.fallback.Generate(ctx, prompt)
+		}
+		return "", err
+	}
+	if len(response.Choices) == 0 {
+		return "", fmt.Errorf("llama.cpp response had no choices")
+	}
+	content := strings.TrimSpace(response.Choices[0].Message.Content)
+	if content == "" {
+		return "", fmt.Errorf("llama.cpp response choice was empty")
+	}
+	return content, nil
+}
+
+// GenerateStream sends a streaming chat completion request and calls onChunk for
+// every text delta. It returns the assembled response so callers can validate it
+// with the same path as the non-streaming API.
+func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	content, err := c.generateStream(ctx, prompt, onChunk)
+	if err != nil {
+		if c.fallback != nil && strings.TrimSpace(content) == "" {
+			if streamingFallback, ok := any(c.fallback).(interface {
+				GenerateStream(context.Context, string, func(string) error) (string, error)
+			}); ok {
+				return streamingFallback.GenerateStream(ctx, prompt, onChunk)
+			}
+			return c.fallback.Generate(ctx, prompt)
+		}
+		return content, err
+	}
+	return content, nil
+}
+
+func (c *Client) chatCompletionRequest(prompt string, stream bool) chatCompletionRequest {
 	body := chatCompletionRequest{
 		Model: c.model,
 		Messages: []message{
@@ -170,22 +220,73 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 		Temperature: 1.0,
 		TopP:        0.95,
 		MaxTokens:   4096,
-		Stream:      false,
+		Stream:      stream,
+	}
+	return body
+}
+
+func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	encoded, err := json.Marshal(c.chatCompletionRequest(prompt, true))
+	if err != nil {
+		return "", fmt.Errorf("encode llama.cpp request: %w", err)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(encoded))
+	if err != nil {
+		return "", fmt.Errorf("create llama.cpp stream request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("call llama.cpp stream: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("call llama.cpp stream: unexpected status %s", response.Status)
 	}
 
-	var response chatCompletionResponse
-	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
-		if c.fallback != nil {
-			return c.fallback.Generate(ctx, prompt)
+	var builder strings.Builder
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
 		}
-		return "", err
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk chatCompletionStreamResponse
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return builder.String(), fmt.Errorf("decode llama.cpp stream chunk: %w", err)
+		}
+		for _, choice := range chunk.Choices {
+			content := choice.Delta.Content
+			if content == "" {
+				content = choice.Message.Content
+			}
+			if content == "" {
+				continue
+			}
+			builder.WriteString(content)
+			if onChunk != nil {
+				if err := onChunk(content); err != nil {
+					return builder.String(), err
+				}
+			}
+		}
 	}
-	if len(response.Choices) == 0 {
-		return "", fmt.Errorf("llama.cpp response had no choices")
+	if err := scanner.Err(); err != nil {
+		return builder.String(), fmt.Errorf("read llama.cpp stream: %w", err)
 	}
-	content := strings.TrimSpace(response.Choices[0].Message.Content)
+	content := strings.TrimSpace(builder.String())
 	if content == "" {
-		return "", fmt.Errorf("llama.cpp response choice was empty")
+		return "", fmt.Errorf("llama.cpp stream response was empty")
 	}
 	return content, nil
 }
@@ -265,6 +366,13 @@ type message struct {
 
 type chatCompletionResponse struct {
 	Choices []struct {
+		Message message `json:"message"`
+	} `json:"choices"`
+}
+
+type chatCompletionStreamResponse struct {
+	Choices []struct {
+		Delta   message `json:"delta"`
 		Message message `json:"message"`
 	} `json:"choices"`
 }
