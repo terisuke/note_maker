@@ -39,7 +39,7 @@ func TestGenerateDraftHandlerStreamsSSE(t *testing.T) {
 	if !ok {
 		t.Fatal("missing terisuke persona")
 	}
-	style, err := buildPresetAuthorStyle(persona)
+	style, err := buildPresetAuthorStyle(persona, outputformat.DefaultRegistry().MustGet(outputformat.IDNoteArticle))
 	if err != nil {
 		t.Fatalf("build style: %v", err)
 	}

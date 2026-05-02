@@ -20,7 +20,7 @@ import (
 func TestSeedAuthorStyleHandlerStoresPresetAndGetAuthorStyle(t *testing.T) {
 	workflowStore = memory.NewWorkflowStore()
 
-	request := httptest.NewRequest(http.MethodPost, "/api/author-styles/seed", bytes.NewBufferString(`{"persona_id":"terisuke"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/author-styles/seed", bytes.NewBufferString(`{"persona_id":"terisuke","output_format_id":"markdown_blog"}`))
 	response := httptest.NewRecorder()
 
 	SeedAuthorStyleHandler(response, request)
@@ -32,7 +32,7 @@ func TestSeedAuthorStyleHandlerStoresPresetAndGetAuthorStyle(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&seeded); err != nil {
 		t.Fatalf("decode seed response: %v", err)
 	}
-	if seeded.ProfileID == "" || seeded.GuideID == "" || !strings.Contains(seeded.GuideMarkdown, "一人称") {
+	if seeded.ProfileID == "" || seeded.GuideID == "" || !strings.Contains(seeded.GuideMarkdown, "一人称") || !strings.Contains(seeded.GuideMarkdown, "自社ブログ") {
 		t.Fatalf("unexpected seeded style response: %#v", seeded)
 	}
 
@@ -51,6 +51,38 @@ func TestSeedAuthorStyleHandlerStoresPresetAndGetAuthorStyle(t *testing.T) {
 	}
 	if fetched.ID != seeded.ID || fetched.ProfileID != seeded.ProfileID {
 		t.Fatalf("fetched style = %#v, seeded = %#v", fetched, seeded)
+	}
+}
+
+func TestDefaultStyleSourceSelectorFollowsPersonaAndFormat(t *testing.T) {
+	registry := personadomain.DefaultRegistry()
+	terisuke, ok := registry.Get(personadomain.IDTerisuke)
+	if !ok {
+		t.Fatal("missing terisuke persona")
+	}
+	cloudia, ok := registry.Get(personadomain.IDCloudia)
+	if !ok {
+		t.Fatal("missing cloudia persona")
+	}
+	formats := outputformat.DefaultRegistry()
+
+	tests := []struct {
+		name    string
+		persona personadomain.Persona
+		format  outputformat.OutputFormat
+		want    string
+	}{
+		{"note", terisuke, formats.MustGet(outputformat.IDNoteArticle), "note:cor_instrument"},
+		{"company blog", terisuke, formats.MustGet(outputformat.IDMarkdownBlog), "github:Cor-Incorporated/corsweb2024/src/content/blog/ja"},
+		{"zenn", cloudia, formats.MustGet(outputformat.IDZennArticle), "zenn:cloudia"},
+		{"qiita", cloudia, formats.MustGet(outputformat.IDQiitaArticle), "qiita:Cloudia_Cor_Inc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := defaultStyleSourceSelector(tt.persona, tt.format); got != tt.want {
+				t.Fatalf("source = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -142,7 +174,8 @@ func TestAnalyzeAuthorStyleHandlerValidatesRequest(t *testing.T) {
 		code   string
 	}{
 		{name: "bad json", body: `{`, status: http.StatusBadRequest, code: "INVALID_REQUEST_FORMAT"},
-		{name: "missing source", body: `{}`, status: http.StatusInternalServerError, code: "AUTHOR_STYLE_ANALYSIS_FAILED"},
+		{name: "unknown persona", body: `{"persona_id":"missing"}`, status: http.StatusBadRequest, code: "UNKNOWN_PERSONA"},
+		{name: "unknown format", body: `{"persona_id":"terisuke","output_format_id":"missing"}`, status: http.StatusBadRequest, code: "UNKNOWN_OUTPUT_FORMAT"},
 	}
 
 	for _, tt := range tests {
@@ -658,7 +691,7 @@ func setupWorkflowStyle(t *testing.T) authorstyleapp.AnalyzeResult {
 	if !ok {
 		t.Fatal("missing terisuke persona")
 	}
-	style, err := buildPresetAuthorStyle(persona)
+	style, err := buildPresetAuthorStyle(persona, outputformat.DefaultRegistry().MustGet(outputformat.IDNoteArticle))
 	if err != nil {
 		t.Fatalf("build style: %v", err)
 	}

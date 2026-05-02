@@ -182,19 +182,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function analyzeStyle() {
     clearError();
-    const username = el.username.value.trim();
-    if (!username) {
-      showError('Noteユーザー名を入力してください');
+    const sourceSelector = el.username.value.trim() || defaultStyleSourceSelector();
+    if (!sourceSelector) {
+      showError('文体ソースを入力してください');
       return;
     }
-    setLoading(true, 'Note記事を取得し、文体を分析しています...');
+    setLoading(true, '選択中の媒体ソースから記事を取得し、文体を分析しています...');
     try {
       const data = await requestJSON('/api/author-style/analyze', {
         method: 'POST',
         body: {
-          username,
+          username: sourceSelector,
+          source_selector: sourceSelector,
           limit: Number(el.limit.value),
           style_model: el.styleModel.value,
+          persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
         },
       });
       applyStyleResult(data);
@@ -214,6 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         body: {
           persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
         },
       });
       applyStyleResult(data);
@@ -731,6 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function onPersonaChange() {
     config.mode.persona = currentPersonaId();
     applyPersonaDefaults(true);
+    applyStyleSourceDefault(true);
     saveConfig();
     renderModeSummary();
     loadQuestionTemplate();
@@ -738,6 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function onFormatChange() {
     config.mode.format = currentFormatId();
+    applyStyleSourceDefault(true);
     saveConfig();
     renderModeSummary();
     loadQuestionTemplate();
@@ -748,14 +754,57 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!persona) {
       return;
     }
-    const noteSource = (persona.sources || []).find((source) => source.kind === 'note' && source.ref);
-    if (noteSource && el.username.value.trim() === 'cor_instrument') {
-      el.username.value = noteSource.ref;
-    }
     if ((forceFormat || !el.formatSelect.value) && persona.default_format) {
       el.formatSelect.value = persona.default_format;
       config.mode.format = persona.default_format;
     }
+    applyStyleSourceDefault(false);
+  }
+
+  function applyStyleSourceDefault(force) {
+    const source = defaultStyleSourceSelector();
+    if (!source) {
+      return;
+    }
+    const current = el.username.value.trim();
+    if (force || !current || isKnownPersonaSource(current)) {
+      el.username.value = source;
+    }
+    el.username.placeholder = source;
+  }
+
+  function defaultStyleSourceSelector() {
+    const persona = currentPersona();
+    const format = currentFormat();
+    if (!persona || !format) {
+      return '';
+    }
+    const sources = persona.sources || [];
+    const find = (kind) => sources.find((source) => source.kind === kind);
+    let source = null;
+    if (format.id === 'markdown_blog' || format.id === 'homepage_section') {
+      source = find('github') || find('rss');
+    } else if (format.id === 'zenn_article') {
+      source = find('zenn');
+    } else if (format.id === 'qiita_article') {
+      source = find('qiita');
+    } else if (format.id === 'note_article') {
+      source = find('note');
+    }
+    source = source || sources[0];
+    if (!source) {
+      return '';
+    }
+    return source.ref ? `${source.kind}:${source.ref}` : `${source.kind}:${source.url || ''}`;
+  }
+
+  function isKnownPersonaSource(value) {
+    const sources = (state.personas || []).flatMap((persona) => persona.sources || []);
+    return sources.some((source) => {
+      const refSelector = source.ref ? `${source.kind}:${source.ref}` : '';
+      const urlSelector = source.url ? `${source.kind}:${source.url}` : '';
+      return value === source.ref || value === source.url || value === refSelector || value === urlSelector;
+    });
   }
 
   function renderModeSummary() {
