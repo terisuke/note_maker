@@ -18,7 +18,7 @@ check_models() {
 }
 
 if check_models "$models_url"; then
-  echo "Evo X2 SSH LLM tunnel is ready: ${models_url}"
+  echo "Evo X2 SSH diagnostic tunnel is ready: ${models_url}"
   exit 0
 fi
 
@@ -52,7 +52,7 @@ if "$ssh_bin" \
 fi
 
 cat >&2 <<EOF
-Evo X2 SSH LLM tunnel is not reachable.
+Evo X2 SSH diagnostic tunnel is not reachable.
 
 Expected primary endpoint:
   ${models_url}
@@ -60,7 +60,7 @@ Expected primary endpoint:
 Expected remote endpoint over SSH:
   ${remote_models_url}
 
-The local llama.cpp endpoint is intentionally not used here. It is only the
-fallback for the application after the Evo X2 primary endpoint has failed.
+This SSH tunnel is not the default system path. The default path is the
+Tailnet OpenAI-compatible API, normally http://evo-x2:11434/v1.
 EOF
 exit 1

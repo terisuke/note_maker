@@ -1,16 +1,30 @@
-# Evo X2 SSH primary validation - 2026-05-02
+# Evo X2 Tailnet primary validation - 2026-05-02
 
-Tracks Issue [#35](https://github.com/terisuke/note_maker/issues/35).
+Tracks Issue [#38](https://github.com/terisuke/note_maker/issues/38). Supersedes the SSH-primary wording from Issue [#35](https://github.com/terisuke/note_maker/issues/35).
 
 ## Summary
 
-Evo X2 over the Tailscale SSH tunnel is the correct primary inference path. It passes the full workflow scenario with the intended `gemma4:31b` draft model.
+Evo X2's OpenAI-compatible API over Tailscale VPN/MagicDNS is the correct primary inference path. It allows every authorized Tailnet device to use the same Evo X2 endpoint without per-device SSH port forwarding.
+
+The previous SSH tunnel validation proved that Evo X2 itself could pass the scenario, but SSH is now treated as a developer diagnostic path only.
 
 Local llama.cpp is available as a fallback runtime, but the local fallback model set did not meet the draft quality threshold in this run. Follow-up hardening is tracked by Issue [#36](https://github.com/terisuke/note_maker/issues/36).
 
 ## Evo X2 primary
 
-Command:
+Endpoint check:
+
+```bash
+make evo-x2-models
+```
+
+Result:
+
+```text
+Evo X2 Tailnet LLM API is ready: http://evo-x2:11434/v1/models
+```
+
+Scenario command:
 
 ```bash
 /usr/bin/time -p make scenario-evo-x2
@@ -18,23 +32,33 @@ Command:
 
 Runtime:
 
-- Base URL: `http://127.0.0.1:21434/v1`
-- Transport: Tailscale SSH tunnel to `evo-x2:127.0.0.1:11434`
+- Base URL: `http://evo-x2:11434/v1`
+- Transport: Tailscale VPN/MagicDNS to the OpenAI-compatible API on Evo X2
 - Draft model: `gemma4:31b`
 - Style model: `gemma4:latest`
 - Brief model: `gemma4:e2b`
 
 Result:
 
+- Passed: `false` in this Tailnet run
+- Style score: `82.0`
+- Draft length: `2653` runes
+- Elapsed: `1396.80s`
+- Failures: `first_person=49 below 60`; scenario also failed the caller's `SCENARIO_MIN_DRAFT_RUNES=2800` gate
+
+The transport was correct: `make scenario-evo-x2` used `LLM_BASE_URL=http://evo-x2:11434/v1` and did not require SSH. The quality miss is stochastic output behavior from the same Evo X2 model family, not a transport failure.
+
+For comparison, the earlier SSH-tunnel validation against the same Evo X2 service produced:
+
 - Passed: `true`
 - Style score: `89.2`
 - Draft length: `2813` runes
 - Elapsed: `749.13s`
 
-The preflight confirmed the SSH tunnel before the scenario:
+The preflight must confirm the Tailnet API endpoint before the scenario:
 
 ```text
-Evo X2 SSH LLM tunnel is ready: http://127.0.0.1:21434/v1/models
+Evo X2 Tailnet LLM API is ready: http://evo-x2:11434/v1/models
 ```
 
 ## Local llama.cpp fallback
@@ -75,6 +99,7 @@ qwen35.rope.dimension_sections has wrong array length; expected 4, got 3
 
 ## Decision
 
-- Keep Evo X2 over Tailscale SSH as the default primary path.
+- Keep Evo X2 over Tailscale VPN/MagicDNS as the default primary path.
+- Keep SSH tunnel validation as opt-in developer diagnostics only.
 - Keep local llama.cpp as fallback only.
 - Do not treat local fallback as production-quality until Issue [#36](https://github.com/terisuke/note_maker/issues/36) finds a local llama.cpp-compatible model and server flag set that passes the strict draft thresholds.
