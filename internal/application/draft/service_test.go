@@ -49,6 +49,8 @@ func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
 		"音楽家からエンジニアになった経験",
 		"Note記事本文の再取得",
 		"参考記事本文は与えられていません",
+		"strict style calibration",
+		"一人称密度",
 	} {
 		if !strings.Contains(generator.prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, generator.prompt)
@@ -76,6 +78,40 @@ func TestGenerateReturnsFailedEvaluationWithoutError(t *testing.T) {
 	}
 	if len(result.Evaluation.Failures) == 0 {
 		t.Fatalf("expected evaluation failures: %#v", result.Evaluation)
+	}
+}
+
+func TestGenerateRunsControlledRevisionWhenStrictStyleFails(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	generator := &sequenceGenerator{drafts: []string{
+		"# Draft\n\nこれは短い説明です。",
+		matchingDraft(),
+	}}
+
+	result, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID:        profile.ID,
+			Theme:                 "改善する",
+			TargetLengthStructure: "3000字、導入・本論・結論",
+		},
+		AuthorProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("generate with revision: %v", err)
+	}
+	if generator.calls != 2 {
+		t.Fatalf("calls = %d, want 2", generator.calls)
+	}
+	if !strings.Contains(generator.prompts[1], "strict style evaluation failures") {
+		t.Fatalf("revision prompt missing failures:\n%s", generator.prompts[1])
+	}
+	expectedDraft, err := articledomain.NewDraft(matchingDraft())
+	if err != nil {
+		t.Fatalf("new expected draft: %v", err)
+	}
+	if result.Draft.Markdown() != expectedDraft.Markdown() {
+		t.Fatalf("expected revised draft to be returned")
 	}
 }
 
@@ -144,6 +180,31 @@ func TestPromptIncludesFormatGuideForEveryRegisteredFormat(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildPromptCalibratesFirstPersonDensityFromReferenceProfile(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDTerisuke)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDNoteArticle)
+
+	prompt := BuildPromptForModeWithProfile(styleGuide, ArticleBrief{
+		StyleProfileID:        profile.ID,
+		PersonaID:             persona.ID,
+		OutputFormatID:        format.ID,
+		Theme:                 "一人称密度を合わせる",
+		TargetLengthStructure: "3000字、導入・本論・結論",
+	}, profile, persona, format)
+
+	for _, want := range []string{"strict style calibration", "参照文体の一人称密度", "一人称「僕」", "参照文体の鉤括弧密度", "参照文体の主要キーワード候補", "今回の目標長さ"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{"全文で6〜8回程度", "4〜6箇所ほど"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt still contains fixed density guidance %q:\n%s", forbidden, prompt)
+		}
 	}
 }
 
@@ -238,6 +299,23 @@ type fakeGenerator struct {
 func (g *fakeGenerator) Generate(ctx context.Context, prompt string) (string, error) {
 	g.prompt = prompt
 	return g.draft, g.err
+}
+
+type sequenceGenerator struct {
+	prompts []string
+	drafts  []string
+	calls   int
+}
+
+func (g *sequenceGenerator) Generate(ctx context.Context, prompt string) (string, error) {
+	g.prompts = append(g.prompts, prompt)
+	if g.calls >= len(g.drafts) {
+		g.calls++
+		return g.drafts[len(g.drafts)-1], nil
+	}
+	draft := g.drafts[g.calls]
+	g.calls++
+	return draft, nil
 }
 
 func profileAndGuideFromDraft(t *testing.T, text string) (AuthorStyleProfile, WritingStyleGuide) {
