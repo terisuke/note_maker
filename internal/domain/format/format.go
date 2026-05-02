@@ -174,6 +174,9 @@ func (NoteValidator) Validate(markdown string) error {
 	if containsAny(markdown, []string{":::message", ":::note", ":::details", "@[card]", "@[gist]", "$$", "<details", "<table"}) {
 		return fmt.Errorf("note article must not contain platform-specific extended Markdown")
 	}
+	if regexp.MustCompile(`(?im)^\s*</?(section|article|div|h[1-6]|p|ul|ol|li|table|details|summary|a)\b`).MatchString(markdown) {
+		return fmt.Errorf("note article must not contain HTML blocks")
+	}
 	if regexp.MustCompile("(?m)^```\\S+[:_]").MatchString(markdown) {
 		return fmt.Errorf("note article must not contain filename or diff-specific code fences")
 	}
@@ -228,11 +231,20 @@ func (ZennValidator) Validate(markdown string) error {
 	if !regexp.MustCompile(`(?m)^type:\s*"?\b(tech|idea)\b"?`).MatchString(frontmatter) {
 		return fmt.Errorf("zenn type must be tech or idea")
 	}
+	if !regexp.MustCompile(`(?m)^published:\s*(true|false)\s*$`).MatchString(frontmatter) {
+		return fmt.Errorf("zenn published must be a boolean")
+	}
+	if err := validateInlineListLimit(frontmatter, "topics", 5); err != nil {
+		return fmt.Errorf("zenn %w", err)
+	}
 	if strings.Contains(markdown, ":::note") {
 		return fmt.Errorf("zenn article must use :::message, not Qiita :::note")
 	}
 	if strings.Contains(markdown, "```diff_") {
 		return fmt.Errorf("zenn diff code fences use `diff language`, not diff_language")
+	}
+	if containsAny(markdown, []string{"<details", "<summary"}) {
+		return fmt.Errorf("zenn article must use :::details, not HTML details")
 	}
 	return nil
 }
@@ -249,6 +261,9 @@ func (QiitaValidator) Validate(markdown string) error {
 			return fmt.Errorf("qiita frontmatter missing %s", strings.TrimSuffix(key, ":"))
 		}
 	}
+	if !hasNonEmptyYAMLValue(frontmatter, "tags") {
+		return fmt.Errorf("qiita frontmatter tags must not be empty")
+	}
 	if strings.Contains(markdown, ":::message") || strings.Contains(markdown, ":::details") || strings.Contains(markdown, "@[card]") {
 		return fmt.Errorf("qiita article must not contain Zenn-specific notation")
 	}
@@ -264,6 +279,15 @@ func (HomepageSectionValidator) Validate(markdown string) error {
 	html := strings.TrimSpace(strings.ToLower(markdown))
 	if strings.HasPrefix(html, "#") {
 		return fmt.Errorf("homepage section must be HTML, not Markdown")
+	}
+	if hasFrontMatter(markdown) {
+		return fmt.Errorf("homepage section must not contain YAML frontmatter")
+	}
+	if strings.Contains(html, "```") {
+		return fmt.Errorf("homepage section must not contain code fences")
+	}
+	if regexp.MustCompile(`(?m)^\s{0,3}#{1,6}\s+`).MatchString(markdown) {
+		return fmt.Errorf("homepage section must not contain Markdown headings")
 	}
 	for _, tag := range []string{"<section", "<h2", "<p"} {
 		if !strings.Contains(html, tag) {
@@ -320,6 +344,44 @@ func hasCodeFenceWithoutLanguage(markdown string) bool {
 		inFence = false
 	}
 	return false
+}
+
+func validateInlineListLimit(frontmatter, key string, limit int) error {
+	pattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:\s*\[(.*)\]\s*$`)
+	match := pattern.FindStringSubmatch(frontmatter)
+	if len(match) != 2 {
+		return fmt.Errorf("%s must be an inline YAML array", key)
+	}
+	entries := splitInlineYAMLList(match[1])
+	if len(entries) == 0 {
+		return fmt.Errorf("%s must not be empty", key)
+	}
+	if limit > 0 && len(entries) > limit {
+		return fmt.Errorf("%s must contain at most %d items", key, limit)
+	}
+	return nil
+}
+
+func splitInlineYAMLList(value string) []string {
+	rawItems := strings.Split(value, ",")
+	items := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		item = strings.TrimSpace(strings.Trim(item, `"'`))
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func hasNonEmptyYAMLValue(frontmatter, key string) bool {
+	inlinePattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:\s*(.+)\s*$`)
+	if match := inlinePattern.FindStringSubmatch(frontmatter); len(match) == 2 {
+		value := strings.TrimSpace(match[1])
+		return value != "" && value != "[]" && value != "{}"
+	}
+	blockPattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:\s*\n\s*-\s+\S+`)
+	return blockPattern.MatchString(frontmatter)
 }
 
 func containsAny(value string, needles []string) bool {
