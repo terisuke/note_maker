@@ -186,3 +186,66 @@ func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
 		t.Fatalf("unexpected draft: %q", draft)
 	}
 }
+
+func TestGenerateUsesOrderedFallbackChain(t *testing.T) {
+	firstFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "first fallback unavailable", http.StatusServiceUnavailable)
+	}))
+	defer firstFallback.Close()
+	secondFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "local-qwen" {
+			t.Fatalf("unexpected final fallback model: %s", request.Model)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Ordered Fallback"}}]}`))
+	}))
+	defer secondFallback.Close()
+
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+	t.Setenv("LLM_MODEL", "remote-ollama")
+	t.Setenv("DRAFT_LLM_FALLBACK_BASE_URLS", firstFallback.URL+"/v1, "+secondFallback.URL+"/v1")
+	t.Setenv("DRAFT_LLM_FALLBACK_MODELS", "remote-llama, local-qwen")
+
+	client, err := NewClientFromEnvForPurpose("draft")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Ordered Fallback" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+}
+
+func TestGenerateFallsBackWhenResponseContentIsEmpty(t *testing.T) {
+	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""}}]}`))
+	}))
+	defer emptyServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Non Empty"}}]}`))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", emptyServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "thinking-model")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback-model")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Non Empty" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+}

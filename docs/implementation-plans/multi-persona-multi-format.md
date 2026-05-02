@@ -286,7 +286,7 @@ Acceptance:
 
 Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold tuning) and Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright E2E) are tracked separately but their acceptance criteria are folded into Phase D's exit gate.
 
-Runtime validation treats Evo X2's OpenAI-compatible API over Tailscale VPN/MagicDNS as the primary heavy-inference path. SSH tunnels are explicit developer diagnostics only. Local llama.cpp remains a fallback-only measurement path, and scenario reports must include base URL, model, elapsed time, score, and draft length to prevent accidental local-runtime validation. The 2026-05-02 validation passed on Evo X2 and found local fallback quality/model-compatibility gaps; fallback hardening is tracked in Issue [#36](https://github.com/terisuke/note_maker/issues/36).
+Runtime validation treats Evo X2 Ollama's OpenAI-compatible API over Tailscale VPN/MagicDNS as the primary heavy-inference path. SSH tunnels are explicit developer diagnostics only. The fallback chain is Evo X2 Ollama → Evo X2 llama.cpp → workstation-local llama.cpp. Scenario reports must include base URL, model, elapsed time, score, and draft length to prevent accidental local-runtime validation. The 2026-05-02 validation passed on Evo X2 and found local fallback quality/model-compatibility gaps; fallback hardening is tracked in Issue [#36](https://github.com/terisuke/note_maker/issues/36). Future llama.cpp model swap orchestration is tracked in Issue [#45](https://github.com/terisuke/note_maker/issues/45).
 
 ## Risk register
 

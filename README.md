@@ -62,11 +62,13 @@ make app
 
 ### Evo X2 の Ollama を Tailscale VPN 経由で使って起動する
 
-Evo X2 の Ollama を使う場合は、Tailscale VPN/MagicDNS 上の OpenAI互換APIを primary とし、Mac側のローカルLLMは起動しません。ローカル llama.cpp は Evo X2 に接続できない場合の fallback としてのみ扱います。
+Evo X2 の Ollama を使う場合は、Tailscale VPN/MagicDNS 上の OpenAI互換APIを primary とし、Mac側のローカルLLMは起動しません。fallback は順番を固定します。
 
-前提として、利用端末が同じ Tailnet に参加しており、`evo-x2` の OpenAI互換APIが Tailnet 内から `http://evo-x2:11434/v1` で到達できる必要があります。これにより、SSH の個別認証や端末ごとの port forward に依存せず、他の許可済みデバイスからも同じEVO X2を利用できます。
+1. Evo X2 Ollama OpenAI互換API: `http://evo-x2.tailb30e58.ts.net/v1`
+2. Evo X2 llama.cpp OpenAI互換API: `http://evo-x2.tailb30e58.ts.net/llama/v1`
+3. 最終手段の作業端末ローカル llama.cpp: `http://127.0.0.1:8081/v1`
 
-Evo X2 側の Ollama は localhost 専用ではなく、Tailnet から到達可能なインターフェイスで listen してください。`OLLAMA_HOST` を Tailnet IP か、Tailscale ACL / OS firewall で制限した上で `0.0.0.0:11434` に設定します。
+前提として、利用端末が同じ Tailnet に参加しており、Evo X2 の Caddy/OpenAI互換APIが Tailnet 内から到達できる必要があります。これにより、SSH の個別認証や端末ごとの port forward に依存せず、他の許可済みデバイスからも同じ Evo X2 を利用できます。
 
 ```bash
 make evo-x2
@@ -79,7 +81,7 @@ mise trust
 mise run evo-x2
 ```
 
-既定では Tailnet 上の `http://evo-x2:11434/v1` に接続し、`gemma4:31b` を使います。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
+既定では Tailnet 上の `http://evo-x2.tailb30e58.ts.net/v1` に接続します。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`STYLE_LLM_MODEL`、`BRIEF_LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
 
 画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は初期テンプレートを編集でき、追加質問も下書き生成のブリーフに含まれます。
 
@@ -87,14 +89,14 @@ mise run evo-x2
 
 フェーズ別モデルの目安:
 
-- `STYLE_LLM_MODEL`: Note記事取得後の文体ガイド整理用。
-- `BRIEF_LLM_MODEL`: 深掘り質問生成用。軽いモデルで十分です。
-- `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。
-- `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。品質重視のモデルを指定します。
-- `EVO_X2_TAILNET_HOST`: Tailnet/MagicDNS 上の Evo X2 ホスト名です。既定値は `evo-x2`。
-- `EVO_X2_LLM_BASE_URL`: Evo X2 primary の OpenAI互換APIです。既定値は `http://evo-x2:11434/v1`。
-- `FALLBACK_LLM_BASE_URL`: Evo X2 primary に接続できない場合の llama.cpp フォールバック先です。通常は `http://127.0.0.1:8081/v1`。
-- フォールバック時のモデル名は、原則としてUIまたは環境変数で選んだフェーズ別モデルをそのまま使います。別名にしたい場合だけ `STYLE_FALLBACK_LLM_MODEL` / `BRIEF_FALLBACK_LLM_MODEL` / `ARTICLE_FALLBACK_LLM_MODEL` / `DRAFT_FALLBACK_LLM_MODEL` を設定します。
+- `STYLE_LLM_MODEL`: Note記事取得後の文体ガイド整理用。既定は軽量な `gemma4:e2b`。
+- `BRIEF_LLM_MODEL`: 深掘り質問生成用。既定は推論力重視の `qwen3.6:27b`。
+- `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。既定は軽量な `gemma4:e2b`。
+- `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。既定は日本語下書き品質重視の `gemma4:31b`。
+- `EVO_X2_TAILNET_HOST`: Tailnet/MagicDNS 上の Evo X2 ホスト名です。既定値は `evo-x2.tailb30e58.ts.net`。
+- `EVO_X2_LLM_BASE_URL`: Evo X2 Ollama primary の OpenAI互換APIです。既定値は `http://evo-x2.tailb30e58.ts.net/v1`。
+- `LLM_FALLBACK_BASE_URLS`: カンマ区切りの fallback chain です。既定は Evo X2 llama.cpp、最後にローカル llama.cpp。
+- `STYLE_LLM_FALLBACK_MODELS` など: fallback endpoint ごとのモデル名をカンマ区切りで指定します。
 
 Tailnet primary の接続確認だけ行う場合:
 
