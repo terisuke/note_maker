@@ -17,10 +17,11 @@ Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/00
 
 | Issue | Scope | ADR Section | Guardrail |
 | --- | --- | --- | --- |
-| [#11](https://github.com/terisuke/note_maker/issues/11) | Strict style threshold tuning | ADR 0001 Draft Generation | Thresholds remain code-level; tuning may be revised once `first_person` density is computed per persona (ADR 0002 §Persona). |
 | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E for model config and question CRUD | ADR 0002 §Testing Strategy | Phase D folds persona switch, format switch, edit-and-fork, streaming, regenerate-section into the E2E surface. |
 | [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
 | [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
+| [#36](https://github.com/terisuke/note_maker/issues/36) | local llama.cpp fallback quality | ADR 0001/0002 runtime validation | Non-blocking for Phase A. Do not promote fallback as production-quality until it passes strict draft thresholds. |
+| [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. |
 
 Closed historical issues:
 
@@ -30,12 +31,15 @@ Closed historical issues:
 | [#4](https://github.com/terisuke/note_maker/issues/4) | Resilient Note acquisition | Provides article acquisition adapter for author style analysis. |
 | [#5](https://github.com/terisuke/note_maker/issues/5) | DDD boundary split | Provides package boundary precedent. |
 | [#6](https://github.com/terisuke/note_maker/issues/6) | API contract alignment | Existing compatibility endpoint remains while new workflow is added. |
+| [#11](https://github.com/terisuke/note_maker/issues/11) | Strict style threshold tuning | Threshold logic is in place; future persona-specific revisions must be tracked separately. |
+| [#21](https://github.com/terisuke/note_maker/issues/21) | Persona and OutputFormat domain concepts | B1 landed early; remaining B work must not expand persistence assumptions until Phase C. |
 
 ## ADR 0002 Phase Map
 
 The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (A, B, C, D) are tracked as separate issues in the new tranche. Their guardrails extend the rules below:
 
 - Phase A (Conversation UX): no domain changes, only handler streaming + frontend rewrite. Must keep all existing `go test ./...` green without modification.
+- Phase A execution starts with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): introduces `internal/domain/persona` and `internal/domain/format`. The note.com host check moves out of application services into `internal/infrastructure/source/note` only.
 - Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store becomes import/export utility.
 - Phase D (Quality): handler tests are mandatory before any further endpoint additions land. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
@@ -59,6 +63,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
    - Local llama.cpp (`http://127.0.0.1:8081/v1`) is fallback only. Do not set `LLM_BASE_URL` to local Ollama or local llama.cpp for Evo X2 validation unless the test is explicitly measuring fallback behavior.
    - Runtime validation must report base URL, model, elapsed time, score, and draft length.
    - If fallback validation fails the strict draft thresholds, keep Evo X2 primary enabled and track fallback hardening separately (Issue [#36](https://github.com/terisuke/note_maker/issues/36)).
+   - If Tailnet Evo X2 reaches the API but misses quality gates, track it under Issue [#40](https://github.com/terisuke/note_maker/issues/40), not as a transport regression.
 
 4. Handlers are JSON boundaries.
    - They create/use application services.
