@@ -1,63 +1,89 @@
 # Next implementation cut
 
-Date: 2026-05-02
+Date: 2026-05-03
 
-This document translates the current open issue set into the next executable implementation sequence after the Tailnet Evo X2 runtime fixes.
+This document translates the current open issue set into the next executable implementation sequence. The end state is unchanged: run Evo X2 Tailnet scenarios for note, Qiita, Zenn, and Cor.inc company blog with different themes, tones, and target lengths, then compare runtime, score, verification, and final output quality.
 
-## Current issue state
+## Current state
 
-Closed and incorporated:
+Implemented and merged:
 
 - [#11](https://github.com/terisuke/note_maker/issues/11) — strict Terisuke style tuning.
-- [#18](https://github.com/terisuke/note_maker/issues/18) — SSE streaming and cancellation.
 - [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answers.
-- [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale in transcript.
+- [#18](https://github.com/terisuke/note_maker/issues/18) — SSE streaming, heartbeat, and cancellation.
+- [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft Markdown and per-section regeneration.
+- [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale in transcript and prompt.
 - [#21](https://github.com/terisuke/note_maker/issues/21) — Persona and OutputFormat domain concepts.
-- [#38](https://github.com/terisuke/note_maker/issues/38) — Evo X2 Tailnet OpenAI-compatible API as primary runtime.
+- [#22](https://github.com/terisuke/note_maker/issues/22) — historical source acquisition for note, Zenn, Qiita, RSS, HTML, and GitHub Markdown.
+- [#23](https://github.com/terisuke/note_maker/issues/23) — format-specific prompt templates and validators.
+- [#24](https://github.com/terisuke/note_maker/issues/24) — built-in `terisuke` and `cloudia` persona seeds.
+- [#25](https://github.com/terisuke/note_maker/issues/25) — persona- and format-aware question templates plus the media matrix scenario.
+- [#38](https://github.com/terisuke/note_maker/issues/38) — Evo X2 Tailnet OpenAI-compatible API as the primary runtime.
 
 Open and active:
 
-- Phase A: [#19](https://github.com/terisuke/note_maker/issues/19).
-- Phase B remaining: [#22](https://github.com/terisuke/note_maker/issues/22), [#23](https://github.com/terisuke/note_maker/issues/23), [#24](https://github.com/terisuke/note_maker/issues/24), [#25](https://github.com/terisuke/note_maker/issues/25).
-- Phase C: [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28), extending [#14](https://github.com/terisuke/note_maker/issues/14).
-- Quality and packaging: [#13](https://github.com/terisuke/note_maker/issues/13), [#15](https://github.com/terisuke/note_maker/issues/15), [#29](https://github.com/terisuke/note_maker/issues/29), [#36](https://github.com/terisuke/note_maker/issues/36).
-- Runtime stabilization: [#40](https://github.com/terisuke/note_maker/issues/40) for primary Tailnet Evo X2 quality/metrics.
+- Memory/history: [#26](https://github.com/terisuke/note_maker/issues/26), [#14](https://github.com/terisuke/note_maker/issues/14).
+- History UI and readable artifacts: [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28).
+- Quality and coverage: [#29](https://github.com/terisuke/note_maker/issues/29), [#13](https://github.com/terisuke/note_maker/issues/13).
+- Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40).
+- Live media-matrix runner: [#57](https://github.com/terisuke/note_maker/issues/57), child of [#40](https://github.com/terisuke/note_maker/issues/40).
+- Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
 
-## Next target
+## Final evaluation target
 
-The ordering correction is now applied: [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) have landed. [#19](https://github.com/terisuke/note_maker/issues/19) is the final Phase A UX cut before Phase C persistence.
+The final integrated evaluation should use `cmd/scenario/media_matrix` as the input matrix, then run live Evo X2 Tailnet draft scenarios for:
 
-Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `1396.80s` and still missed quality gates. A spinner-only UI is not usable at that latency. Streaming, heartbeat, cancellation, and partial-result retention are the highest-leverage improvement before reshaping the transcript.
+| Case | Medium | Style | Primary source |
+|---|---|---|---|
+| `terisuke_note_essay` | note | reflective essay | `note:cor_instrument` |
+| `cor_blog_technical_report` | Cor.inc blog | technical report | `github:Cor-Incorporated/corsweb2024/src/content/blog/ja` |
+| `cor_blog_vision_sharing` | Cor.inc blog | vision sharing | `github:Cor-Incorporated/corsweb2024/src/content/blog/ja` |
+| `cloudia_zenn_tutorial` | Zenn | tutorial | `zenn:cloudia` |
+| `cloudia_qiita_how_to` | Qiita | practical how-to | `qiita:Cloudia_Cor_Inc` |
 
-## Implementation sequence
+The homepage section case remains in the matrix as a useful format check, but the user-facing publishing targets for the full Evo X2 run are note, Qiita, Zenn, and the company blog.
 
-1. **[#18] SSE streaming and cancellation**
-   - Add streaming to `internal/infrastructure/llamacpp`.
-   - Add status, heartbeat, token, done, and error event types.
-   - Support cancellation from browser disconnect and explicit Cancel.
-   - Keep non-streaming generation for tests and compatibility.
-   - Status: implemented and merged.
+Each live run must record:
 
-2. **[#17] Chat transcript and editable answers**
-   - Replace the bounded log with a transcript surface.
-   - Render existing fixed and deep-dive answers as bubbles.
-   - Add in-memory fork-on-edit endpoint first; persistence follows in Phase C.
-   - Status: implemented and merged.
+- endpoint and whether it was primary or fallback,
+- model per phase,
+- elapsed seconds,
+- generated runes,
+- style score and failed metrics,
+- final verification result,
+- output path and scenario case id.
 
-3. **[#20] Deep-dive rationale in transcript**
-   - Add parent-answer excerpts to prompt and UI.
-   - Ensure LLM and rule-based fallback paths produce the same contextual prefix.
-   - Status: implemented and merged.
+## Before the full Evo X2 media run
 
-4. **[#19] Editable draft and section regenerate**
-   - Make the Markdown draft editable after streaming lands.
-   - Add section anchor parsing and replacement tests.
-   - Regenerate one heading subtree at a time.
-   - Status: implemented in code; merge before moving to #26.
+There are three prerequisites before running the full multi-medium Evo X2 evaluation:
 
-5. **[#26] SQLite persistence**
-   - Persist answer forks, draft versions, guide versions, and project/article history.
+1. **Persistence first**: #26 must land so media-matrix drafts, evaluations, regenerated sections, answer forks, and style guides can be saved and reopened. Repeated Evo X2 runs are too expensive to leave only as loose files.
+2. **Handler coverage gate**: #29 should run in parallel with #26 and must close before more endpoint-heavy UI work. #17-#25 added real handler surface; the next phase should harden it instead of adding more unguarded routes.
+3. **Scenario ownership**: #40 owns the live Evo X2 media-matrix quality target. [#57](https://github.com/terisuke/note_maker/issues/57) owns the reusable runner/aggregate evaluator that executes the matrix and writes comparable reports.
 
-## Additional gap
+## Parallel implementation plan
 
-[#40](https://github.com/terisuke/note_maker/issues/40) tracks primary-runtime quality and runtime metrics. That work is separate from [#36](https://github.com/terisuke/note_maker/issues/36), which is only for local llama.cpp fallback quality. Do not block [#18](https://github.com/terisuke/note_maker/issues/18) on #40; streaming is needed precisely because these long primary-runtime runs can fail late and still need to preserve partial output.
+Use subagents with disjoint write scopes:
+
+| Lane | Issue | Subagent role | Write scope | Done when |
+|---|---|---|---|---|
+| A | [#26](https://github.com/terisuke/note_maker/issues/26) / [#14](https://github.com/terisuke/note_maker/issues/14) | SQLite worker | `internal/infrastructure/repository/sqlite`, repository interfaces, boot wiring, migrations | JSON store imports, sessions/guides/briefs/drafts persist, cross-persona tests pass |
+| B | [#29](https://github.com/terisuke/note_maker/issues/29) | Handler coverage worker | `internal/handlers/*_test.go`, coverage script/docs | `workflow.go` reaches the agreed coverage gate without real LLM/network |
+| C | [#57](https://github.com/terisuke/note_maker/issues/57), feeding [#40](https://github.com/terisuke/note_maker/issues/40) | Scenario metrics worker | `cmd/scenario/*`, `docs/validation/*`, Make targets | media-matrix live runner records endpoint/model/elapsed/score/runes/verification in aggregate JSON/Markdown |
+
+Lane A and Lane B can run immediately in parallel. Lane C can start by implementing offline/resumable runner mechanics now, but the full multi-case Evo X2 run should wait until Lane A provides persistence or until the user explicitly wants a one-off artifact-file run.
+
+## Recommended order
+
+1. Merge this docs alignment PR.
+2. Start #26 and #29 in parallel.
+3. Merge #29 as soon as handler coverage is sufficient.
+4. Merge #26 once JSON import, SQLite schema, and restart recovery are proven.
+5. Use #57/#40 to run one media-matrix case per implementation phase, then run the full note/Qiita/Zenn/company-blog pass after the persistence layer is stable.
+6. Start #27 and #28 after #26; both depend on persistent projects/sessions/guides.
+7. Start #13 after #27/#28 have enough browser surface to justify E2E tests.
+8. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
+
+## Why not run the full Evo X2 matrix now?
+
+The source and prompt matrix is ready, but full Evo X2 draft generation is expensive and can take 20+ minutes per run. Running all media cases before persistence would produce useful files but not durable product memory. The better sequence is to make the system capable of storing those expensive results, then use #40 to evaluate one varied slice per phase and finally run the full comparison table.

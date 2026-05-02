@@ -1,6 +1,6 @@
 # Issue and ADR guardrails
 
-Date: 2026-05-01 (last updated 2026-05-02)
+Date: 2026-05-01 (last updated 2026-05-03)
 
 This document maps GitHub issues to [ADR 0001](../adrs/0001-three-phase-local-article-generation.md) and [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) and defines implementation guardrails.
 
@@ -21,7 +21,8 @@ Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/00
 | [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
 | [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
 | [#36](https://github.com/terisuke/note_maker/issues/36) | local llama.cpp fallback quality | ADR 0001/0002 runtime validation | Non-blocking for Phase A. Do not promote fallback as production-quality until it passes strict draft thresholds. |
-| [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. |
+| [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. It now owns live runs from `cmd/scenario/media_matrix` across note, Qiita, Zenn, and Cor blog. |
+| [#57](https://github.com/terisuke/note_maker/issues/57) | Live media-matrix runner and aggregate evaluator | ADR 0001/0002 runtime validation | Child of #40. Offline mode remains default; live mode must require explicit env vars and must refuse accidental workstation-local fallback for primary Evo X2 validation. |
 
 Closed historical issues:
 
@@ -33,6 +34,10 @@ Closed historical issues:
 | [#6](https://github.com/terisuke/note_maker/issues/6) | API contract alignment | Existing compatibility endpoint remains while new workflow is added. |
 | [#11](https://github.com/terisuke/note_maker/issues/11) | Strict style threshold tuning | Threshold logic is in place; future persona-specific revisions must be tracked separately. |
 | [#21](https://github.com/terisuke/note_maker/issues/21) | Persona and OutputFormat domain concepts | B1 landed early; remaining B work must not expand persistence assumptions until Phase C. |
+| [#22](https://github.com/terisuke/note_maker/issues/22) | Historical source acquisition | Zenn/Qiita/Cor blog sources are available; Cor blog style analysis should prefer GitHub Markdown over RSS summaries. |
+| [#23](https://github.com/terisuke/note_maker/issues/23) | Format prompt templates and validators | Format guides and validators exist; new formats must add validator + guide + scenario sample. |
+| [#24](https://github.com/terisuke/note_maker/issues/24) | Seed `terisuke` and `cloudia` personas | Persona seeds are available; third-persona work must wait for SQLite persistence. |
+| [#25](https://github.com/terisuke/note_maker/issues/25) | Persona/format question templates | Server templates exist; frontend must not duplicate template questions when sending custom questions. |
 
 ## ADR 0002 Phase Map
 
@@ -40,9 +45,9 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 
 - Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
 - Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
-- Phase B (Persona / OutputFormat): introduces `internal/domain/persona` and `internal/domain/format`. The note.com host check moves out of application services into `internal/infrastructure/source/note` only.
+- Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
 - Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store becomes import/export utility.
-- Phase D (Quality): handler tests are mandatory before any further endpoint additions land. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
+- Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails
 
@@ -63,7 +68,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
    - SSH tunnels are allowed only as explicit developer diagnostics, not as the product default, because they depend on per-device SSH setup.
    - Local llama.cpp (`http://127.0.0.1:8081/v1`) is fallback only. Do not set `LLM_BASE_URL` to local Ollama or local llama.cpp for Evo X2 validation unless the test is explicitly measuring fallback behavior.
    - Runtime validation must report base URL, model, elapsed time, score, and draft length.
-   - Each implementation PR that touches interview, prompt, draft, or runtime behavior should add one scenario datapoint with a deliberately varied medium/persona/format. Do not force every PR to rerun every scenario; build averages by collecting one different slice per phase.
+   - Each implementation PR that touches interview, prompt, draft, or runtime behavior should add one scenario datapoint with a deliberately varied medium/persona/format. Do not force every PR to rerun every scenario; build averages by collecting one different slice per phase. Use `cmd/scenario/media_matrix` as the canonical matrix for final Note/Qiita/Zenn/Cor blog comparison.
    - Draft generation must run the lightweight final verification step before returning the final result; if verification reports NEEDS_REVIEW, surface the report instead of hiding it.
    - If fallback validation fails the strict draft thresholds, keep Evo X2 primary enabled and track fallback hardening separately (Issue [#36](https://github.com/terisuke/note_maker/issues/36)).
    - If Tailnet Evo X2 reaches the API but misses quality gates, track it under Issue [#40](https://github.com/terisuke/note_maker/issues/40), not as a transport regression.
@@ -140,6 +145,13 @@ Scenario tests and commands may require:
 - `RUN_LOCAL_LLM_SCENARIO=1`
 - `LLAMACPP_BASE_URL`
 - `LLAMACPP_MODEL=gemma4:31b`
+
+Current live-media evaluation flow:
+
+1. `go run ./cmd/scenario/media_matrix` creates the deterministic cross-media brief/prompt matrix.
+2. `RUN_SOURCE_FETCH_SCENARIO=1 ... go run ./cmd/scenario/source_fetch` validates current live sources.
+3. #57 implements the resumable live runner and aggregate report.
+4. #40 owns the Evo X2 Tailnet live draft results that fill in elapsed seconds, score, verification, and rune counts for each media-matrix case.
 
 ## Completion Criteria
 
