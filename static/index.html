@@ -20,6 +20,42 @@
     </header>
 
     <main class="workflow">
+      <section class="panel" id="config-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">0</span>
+            <h2>設定</h2>
+          </div>
+          <p>フェーズごとのモデルと取材質問を設定します。</p>
+        </div>
+
+        <div class="config-grid">
+          <div class="field-row">
+            <label for="style-model">文体分析モデル</label>
+            <select id="style-model"></select>
+          </div>
+          <div class="field-row">
+            <label for="brief-model">深掘り質問モデル</label>
+            <select id="brief-model"></select>
+          </div>
+          <div class="field-row">
+            <label for="draft-model">下書き生成モデル</label>
+            <select id="draft-model"></select>
+          </div>
+        </div>
+
+        <div class="question-config">
+          <div class="section-heading">
+            <h3>取材質問</h3>
+            <div class="button-row">
+              <button id="add-question-btn" class="secondary-btn" type="button">質問を追加</button>
+              <button id="reset-questions-btn" class="secondary-btn" type="button">初期値に戻す</button>
+            </div>
+          </div>
+          <div id="question-config-list" class="question-config-list"></div>
+        </div>
+      </section>
+
       <section class="panel" id="style-panel">
         <div class="panel-header">
           <div>

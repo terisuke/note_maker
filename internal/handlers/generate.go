@@ -63,7 +63,7 @@ func GenerateArticleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func newDefaultArticleService() (articleService, error) {
-	generator, err := llamacpp.NewClientFromEnv()
+	generator, err := llamacpp.NewClientFromEnvForPurpose("ARTICLE")
 	if err != nil {
 		return nil, err
 	}

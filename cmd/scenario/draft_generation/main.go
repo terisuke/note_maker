@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,31 +39,51 @@ func main() {
 	readJSON(guidePath, &guide)
 	readJSON(briefPath, &brief)
 
-	baseURL := envOrDefault("LLAMACPP_BASE_URL", "http://127.0.0.1:8081/v1")
-	model := envOrDefault("LLAMACPP_MODEL", "gemma4:31b")
-	client, err := llamacpp.NewClient(baseURL, model, &http.Client{Timeout: 12 * time.Minute})
+	baseURL := envFirst("http://127.0.0.1:8081/v1", "LLM_BASE_URL", "LLAMACPP_BASE_URL")
+	model := envFirst("gemma4:31b", "DRAFT_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
+	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
+	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
+	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
+	client, err := llamacpp.NewClientFromEnvForPurpose("DRAFT")
 	if err != nil {
 		fatalf("create local llm client: %v", err)
 	}
 	service := draftapp.NewService(client)
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
-	defer cancel()
 
-	result, err := service.Generate(ctx, draftapp.GenerateRequest{
-		StyleGuide:    guide,
-		Brief:         brief,
-		AuthorProfile: profile,
-	})
-	if err != nil {
-		fatalf("generate draft: %v", err)
+	var result draftapp.GenerateResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		result, err = service.Generate(ctx, draftapp.GenerateRequest{
+			StyleGuide:    guide,
+			Brief:         brief,
+			AuthorProfile: profile,
+		})
+		cancel()
+		if err != nil {
+			fatalf("generate draft attempt %d: %v", attempt, err)
+		}
+		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
+		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
+		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes {
+			break
+		}
 	}
 
 	writeFile(filepath.Join(outputDir, "draft.md"), result.Draft.Markdown()+"\n")
 	writeJSON(filepath.Join(outputDir, "evaluation.json"), result.Evaluation)
+	if result.Evaluation.Comparison.Score < minStyleScore {
+		fatalf("style score %.1f below scenario minimum %.1f", result.Evaluation.Comparison.Score, minStyleScore)
+	}
+	if runes := len([]rune(result.Draft.Markdown())); runes < minDraftRunes {
+		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
+	}
 
 	fmt.Printf("draft generation scenario completed\n")
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
+	fmt.Printf("runes=%d\n", len([]rune(result.Draft.Markdown())))
+	fmt.Printf("llm_base_url=%s\n", baseURL)
+	fmt.Printf("llm_model=%s\n", model)
 	fmt.Printf("draft=%s\n", filepath.Join(outputDir, "draft.md"))
 	fmt.Printf("evaluation=%s\n", filepath.Join(outputDir, "evaluation.json"))
 }
@@ -97,6 +117,39 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envFirst(fallback string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func envFloat(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func fatalf(format string, args ...any) {

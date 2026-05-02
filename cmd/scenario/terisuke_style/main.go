@@ -28,8 +28,8 @@ func main() {
 	defer cancel()
 
 	username := envOrDefault("TERISUKE_NOTE_USERNAME", defaultUsername)
-	baseURL := envOrDefault("LLAMACPP_BASE_URL", defaultBaseURL)
-	model := envOrDefault("LLAMACPP_MODEL", "gemma4:31b")
+	baseURL := envFirst(defaultBaseURL, "LLM_BASE_URL", "LLAMACPP_BASE_URL")
+	model := envFirst("gemma4:31b", "ARTICLE_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
 	outputDir := envOrDefault("SCENARIO_OUTPUT_DIR", defaultOutput)
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
@@ -244,6 +244,15 @@ func writeJSON(path string, value any) error {
 func envOrDefault(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
+	}
+	return fallback
+}
+
+func envFirst(fallback string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
 	}
 	return fallback
 }

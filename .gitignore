@@ -29,6 +29,7 @@ bin/
 dist/
 tmp/
 server
+data/
 
 # ログ関連
 *.log

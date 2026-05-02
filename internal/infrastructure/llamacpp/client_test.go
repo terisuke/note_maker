@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestGenerateCallsChatCompletions(t *testing.T) {
@@ -61,5 +62,86 @@ func TestListModels(t *testing.T) {
 	}
 	if len(models) != 1 || models[0] != "gemma4:31b" {
 		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestNewClientFromEnvUsesGenericLLMSettings(t *testing.T) {
+	t.Setenv("LLM_BASE_URL", "http://example.test/v1")
+	t.Setenv("LLM_MODEL", "gemma4:e2b")
+	t.Setenv("LLAMACPP_BASE_URL", "http://legacy.test/v1")
+	t.Setenv("LLAMACPP_MODEL", "legacy")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.baseURL != "http://example.test/v1" {
+		t.Fatalf("unexpected base URL: %s", client.baseURL)
+	}
+	if client.model != "gemma4:e2b" {
+		t.Fatalf("unexpected model: %s", client.model)
+	}
+}
+
+func TestNewClientFromEnvForPurposeUsesPhaseModel(t *testing.T) {
+	t.Setenv("LLM_BASE_URL", "http://example.test/v1")
+	t.Setenv("LLM_MODEL", "gemma4:e2b")
+	t.Setenv("DRAFT_LLM_MODEL", "gpt-oss:120b")
+	t.Setenv("LLM_TIMEOUT_SECONDS", "900")
+
+	client, err := NewClientFromEnvForPurpose("draft")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.model != "gpt-oss:120b" {
+		t.Fatalf("unexpected model: %s", client.model)
+	}
+	if client.httpClient.Timeout != 900*time.Second {
+		t.Fatalf("unexpected timeout: %s", client.httpClient.Timeout)
+	}
+}
+
+func TestNewClientFromEnvFallsBackToLegacySettings(t *testing.T) {
+	t.Setenv("LLAMACPP_BASE_URL", "http://legacy.test/v1")
+	t.Setenv("LLAMACPP_MODEL", "gemma4:31b")
+	t.Setenv("LLM_BASE_URL", "")
+	t.Setenv("LLM_MODEL", "")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.baseURL != "http://legacy.test/v1" {
+		t.Fatalf("unexpected base URL: %s", client.baseURL)
+	}
+	if client.model != "gemma4:31b" {
+		t.Fatalf("unexpected model: %s", client.model)
+	}
+}
+
+func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected fallback path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Fallback Draft"}}]}`))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+	t.Setenv("LLM_MODEL", "remote")
+	t.Setenv("FALLBACK_LLM_BASE_URL", fallbackServer.URL+"/v1")
+	t.Setenv("FALLBACK_LLM_MODEL", "gemma4:31b")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Fallback Draft" {
+		t.Fatalf("unexpected draft: %q", draft)
 	}
 }

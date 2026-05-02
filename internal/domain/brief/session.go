@@ -8,6 +8,7 @@ import (
 var deepDivePriority = []string{
 	QuestionIDOpeningEpisode,
 	QuestionIDMustInclude,
+	QuestionIDPersonalContext,
 	QuestionIDExpectedReaderAction,
 	QuestionIDToneStance,
 }
@@ -89,6 +90,28 @@ func (s ArticleBriefSession) DeepDiveAnswers() []BriefAnswer {
 	answers := make([]BriefAnswer, 0)
 	for _, answer := range s.Answers {
 		if answer.FlowType == QuestionFlowDeepDiveFollowUp {
+			answers = append(answers, answer)
+		}
+	}
+	return answers
+}
+
+// CustomAnswers returns answers to caller-defined questions that do not map to fixed brief fields.
+func (s ArticleBriefSession) CustomAnswers() []BriefAnswer {
+	fixed := map[string]bool{
+		QuestionIDTheme:                 true,
+		QuestionIDOpeningEpisode:        true,
+		QuestionIDReader:                true,
+		QuestionIDExpectedReaderAction:  true,
+		QuestionIDMustInclude:           true,
+		QuestionIDPersonalContext:       true,
+		QuestionIDExclusions:            true,
+		QuestionIDTargetLengthStructure: true,
+		QuestionIDToneStance:            true,
+	}
+	answers := make([]BriefAnswer, 0)
+	for _, answer := range s.Answers {
+		if answer.FlowType == QuestionFlowMain && !fixed[answer.QuestionID] {
 			answers = append(answers, answer)
 		}
 	}
@@ -182,6 +205,11 @@ func FallbackFollowUpText(target ArticleQuestion, answer BriefAnswer, followUpIn
 			return "Which included point needs the most concrete detail, and what detail should be used?"
 		}
 		return "What lesson should the reader take from that required point?"
+	case QuestionIDPersonalContext:
+		if followUpIndex == 1 {
+			return "Which personal experience should be connected most directly to the article's argument?"
+		}
+		return "What personal value or hesitation should the article make visible?"
 	case QuestionIDExpectedReaderAction:
 		if followUpIndex == 1 {
 			return "What reason should make the reader want to take that action?"
@@ -234,6 +262,8 @@ func (s ArticleBriefSession) CanComplete() bool {
 		QuestionIDReader,
 		QuestionIDExpectedReaderAction,
 		QuestionIDMustInclude,
+		QuestionIDPersonalContext,
+		QuestionIDTargetLengthStructure,
 	}
 	for _, questionID := range required {
 		answer, ok := s.AnswerForQuestion(questionID)
@@ -278,10 +308,12 @@ func (s ArticleBriefSession) AssembleBrief() ArticleBrief {
 		Reader:                get(QuestionIDReader),
 		ExpectedReaderAction:  get(QuestionIDExpectedReaderAction),
 		MustInclude:           get(QuestionIDMustInclude),
+		PersonalContext:       get(QuestionIDPersonalContext),
 		Exclusions:            get(QuestionIDExclusions),
 		TargetLengthStructure: targetLengthStructure,
 		ToneStance:            get(QuestionIDToneStance),
 		DeepDives:             s.DeepDiveAnswers(),
+		CustomAnswers:         s.CustomAnswers(),
 	}
 }
 

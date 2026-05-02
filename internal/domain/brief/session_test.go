@@ -10,19 +10,21 @@ func TestFixedQuestionsAreDeterministic(t *testing.T) {
 		QuestionIDReader,
 		QuestionIDExpectedReaderAction,
 		QuestionIDMustInclude,
+		QuestionIDPersonalContext,
 		QuestionIDExclusions,
 		QuestionIDTargetLengthStructure,
 		QuestionIDToneStance,
 	}
 	wantText := []string{
-		"What is the article's core theme?",
-		"What concrete experience or episode should open the article?",
-		"Who is the reader?",
-		"What should the reader feel or do after reading?",
-		"What must be included?",
-		"What must be excluded?",
-		"What target length and structure should be used?",
-		"Should the article be more introspective, technical, narrative, or practical?",
+		"記事の中心テーマは何ですか？",
+		"記事の導入に置く具体的な体験や場面は何ですか？",
+		"この記事を届けたい読者は誰ですか？",
+		"読後に読者へどんな変化や行動を起こしてほしいですか？",
+		"記事に必ず含める論点、事実、手順は何ですか？",
+		"著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？",
+		"記事に含めないこと、避けたい表現、断言しないことは何ですか？",
+		"目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。",
+		"記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。",
 	}
 	if len(questions) != len(wantIDs) {
 		t.Fatalf("question count = %d, want %d", len(questions), len(wantIDs))
@@ -44,6 +46,7 @@ func TestSelectDeepDiveTargetsUsesHighValueDeterministicOrder(t *testing.T) {
 	session := answeredFixedSession(t, map[string]string{
 		QuestionIDOpeningEpisode:        "The article opens on a late night debugging session.",
 		QuestionIDMustInclude:           "Include local LLM latency numbers.",
+		QuestionIDPersonalContext:       "Include the author's background as a musician and engineer.",
 		QuestionIDExpectedReaderAction:  "Try the workflow on one small article.",
 		QuestionIDToneStance:            "Practical but reflective.",
 		QuestionIDTargetLengthStructure: "1200 words",
@@ -53,6 +56,7 @@ func TestSelectDeepDiveTargetsUsesHighValueDeterministicOrder(t *testing.T) {
 	want := []string{
 		QuestionIDOpeningEpisode,
 		QuestionIDMustInclude,
+		QuestionIDPersonalContext,
 		QuestionIDExpectedReaderAction,
 		QuestionIDToneStance,
 	}
@@ -137,7 +141,7 @@ func TestCompletionRules(t *testing.T) {
 
 func TestAssembleBriefIncludesFixedAndDeepDiveAnswers(t *testing.T) {
 	session := answeredFixedSession(t, map[string]string{
-		QuestionIDTargetLengthStructure: "",
+		QuestionIDTargetLengthStructure: "3000字前後、導入・背景・実装・検証・結論",
 		QuestionIDExclusions:            "Do not mention hosted SaaS.",
 	})
 	if _, err := session.RecordAnswer("Show the screen going from timeout to a usable draft."); err != nil {
@@ -154,11 +158,14 @@ func TestAssembleBriefIncludesFixedAndDeepDiveAnswers(t *testing.T) {
 	if articleBrief.Theme != "Local article generation with a small deterministic workflow." {
 		t.Fatalf("theme = %q", articleBrief.Theme)
 	}
-	if articleBrief.TargetLengthStructure != DefaultTargetLengthStructure {
-		t.Fatalf("target length default = %q, want %q", articleBrief.TargetLengthStructure, DefaultTargetLengthStructure)
+	if articleBrief.TargetLengthStructure != "3000字前後、導入・背景・実装・検証・結論" {
+		t.Fatalf("target length = %q", articleBrief.TargetLengthStructure)
 	}
 	if articleBrief.Exclusions != "Do not mention hosted SaaS." {
 		t.Fatalf("exclusions = %q", articleBrief.Exclusions)
+	}
+	if articleBrief.PersonalContext == "" {
+		t.Fatal("personal context should be assembled")
 	}
 	if len(articleBrief.DeepDives) != 1 {
 		t.Fatalf("deep dives = %d, want 1", len(articleBrief.DeepDives))
@@ -196,8 +203,9 @@ func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBrie
 		QuestionIDReader:                "Solo developers who write note.com articles with local tools.",
 		QuestionIDExpectedReaderAction:  "They should try a three-phase workflow before drafting.",
 		QuestionIDMustInclude:           "Mention style analysis, brief interviews, and final draft checks.",
+		QuestionIDPersonalContext:       "Use the author's background as a musician, engineer, and public speaker.",
 		QuestionIDExclusions:            "Avoid cloud-only assumptions.",
-		QuestionIDTargetLengthStructure: "1800 words with three sections.",
+		QuestionIDTargetLengthStructure: "3000字前後 with six sections.",
 		QuestionIDToneStance:            "Practical and introspective.",
 	}
 	for key, value := range overrides {
