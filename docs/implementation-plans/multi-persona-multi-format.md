@@ -131,23 +131,26 @@ Acceptance:
 
 Files:
 
-- `internal/application/draft/templates/note_article.go`
-- `internal/application/draft/templates/markdown_blog.go`
-- `internal/application/draft/templates/zenn_article.go`
-- `internal/application/draft/templates/qiita_article.go`
-- `internal/application/draft/templates/homepage_section.go`
+- `internal/domain/format/format.go`
+- `internal/application/draft/format_guides/note.md`
+- `internal/application/draft/format_guides/markdown_blog.md`
+- `internal/application/draft/format_guides/zenn.md`
+- `internal/application/draft/format_guides/qiita.md`
+- `internal/application/draft/format_guides/homepage_section.md`
+- `internal/application/draft/format_guides.go`
 
-Validators (in `internal/domain/format/validators/`):
+Validators (in `internal/domain/format`):
 
-- `NoteValidator` — current rules: `# ` first line, no fences, `ですます調` recommendation.
-- `MarkdownBlogValidator` — frontmatter optional, `# ` or `## ` first heading, fences allowed.
-- `ZennValidator` — frontmatter required (`title`, `emoji`, `type ∈ {tech, idea}`, `topics: [...]`, `published: bool`), code fences allowed, no `# ` (Zenn auto-renders title from frontmatter).
-- `QiitaValidator` — frontmatter required (`title`, `tags: [...]`), code fences allowed.
+- `NoteValidator` — `# ` first line, no frontmatter, no Zenn/Qiita-specific extended Markdown; plain fences allowed only when needed.
+- `MarkdownBlogValidator` — `corsweb2024` Astro frontmatter required, `lang: ja`, category limited to `ai | engineering | founder | lab`, `# ` or `## ` first heading, code fences require language.
+- `ZennValidator` — frontmatter required (`title`, `emoji`, `type ∈ {tech, idea}`, `topics: [...]`, `published: bool`), rejects Qiita `:::note` and `diff_language`.
+- `QiitaValidator` — frontmatter required (`title`, `tags: [...]`), rejects Zenn `:::message`, `:::details`, `@[card]`, and `diff language`.
 - `HomepageSectionValidator` — output is HTML, no `# `, requires at least one `<h2>` and one `<p>`, optional CTA `<a>` block.
 
 Acceptance:
 
 - Each validator has a positive and negative unit test.
+- Each registered format has an embedded Markdown guide injected into the final draft prompt.
 - Generating the same brief under different formats produces visibly different drafts: Zenn has frontmatter + many code fences; note has narrative paragraphs and ですます調; homepage_section is HTML with no `# `.
 
 ### B4 — Persona library seed

@@ -22,6 +22,8 @@ type InterviewService struct {
 type StartSessionInput struct {
 	SessionID      string
 	StyleProfileID string
+	PersonaID      string
+	OutputFormatID string
 	Questions      []domain.ArticleQuestion
 }
 
@@ -43,7 +45,7 @@ func (s *InterviewService) StartSession(input StartSessionInput) (InterviewResul
 	if len(input.Questions) == 0 {
 		input.Questions = domain.FixedQuestions()
 	}
-	session, err := domain.NewArticleBriefSessionWithQuestions(input.SessionID, input.StyleProfileID, input.Questions)
+	session, err := domain.NewArticleBriefSessionWithOptions(input.SessionID, input.StyleProfileID, input.PersonaID, input.OutputFormatID, "", input.Questions)
 	if err != nil {
 		return InterviewResult{}, err
 	}

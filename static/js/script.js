@@ -18,10 +18,15 @@ document.addEventListener('DOMContentLoaded', () => {
     sessionId: '',
     nextQuestion: null,
     completedBrief: null,
+    personas: [],
+    formats: [],
   };
 
   const el = {
     modelStatus: document.getElementById('model-status'),
+    personaSelect: document.getElementById('persona-select'),
+    formatSelect: document.getElementById('format-select'),
+    modeSummary: document.getElementById('mode-summary'),
     styleModel: document.getElementById('style-model'),
     briefModel: document.getElementById('brief-model'),
     draftModel: document.getElementById('draft-model'),
@@ -31,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     username: document.getElementById('style-username'),
     limit: document.getElementById('style-limit'),
     analyzeStyle: document.getElementById('analyze-style-btn'),
+    usePresetStyle: document.getElementById('use-preset-style-btn'),
     styleResult: document.getElementById('style-result'),
     profileId: document.getElementById('profile-id'),
     guideId: document.getElementById('guide-id'),
@@ -57,14 +63,18 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   renderQuestionConfig();
+  initializeModeControls();
   checkModels();
 
+  el.personaSelect.addEventListener('change', onPersonaChange);
+  el.formatSelect.addEventListener('change', onFormatChange);
   el.styleModel.addEventListener('change', saveModelConfig);
   el.briefModel.addEventListener('change', saveModelConfig);
   el.draftModel.addEventListener('change', saveModelConfig);
   el.addQuestion.addEventListener('click', addQuestion);
   el.resetQuestions.addEventListener('click', resetQuestions);
   el.analyzeStyle.addEventListener('click', analyzeStyle);
+  el.usePresetStyle.addEventListener('click', usePresetStyle);
   el.startInterview.addEventListener('click', startInterview);
   el.submitAnswer.addEventListener('click', submitAnswer);
   el.skipDeepDive.addEventListener('click', skipDeepDive);
@@ -74,6 +84,23 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tab-btn').forEach((button) => {
     button.addEventListener('click', () => setActiveTab(button.dataset.tab));
   });
+
+  async function initializeModeControls() {
+    try {
+      const [personas, formats] = await Promise.all([
+        requestJSON('/api/personas'),
+        requestJSON('/api/formats'),
+      ]);
+      state.personas = personas;
+      state.formats = formats;
+      populatePersonaSelect();
+      populateFormatSelect();
+      applyPersonaDefaults(false);
+      renderModeSummary();
+    } catch (error) {
+      showError(`書き分け設定の取得に失敗しました: ${error.message}`);
+    }
+  }
 
   async function checkModels() {
     try {
@@ -105,19 +132,42 @@ document.addEventListener('DOMContentLoaded', () => {
           style_model: el.styleModel.value,
         },
       });
-      state.profileId = data.profile_id;
-      el.profileId.textContent = data.profile_id;
-      el.guideId.textContent = data.guide_id;
-      el.articleCount.textContent = String(data.article_count);
-      el.guidePreview.textContent = data.guide_markdown;
-      el.styleResult.classList.remove('hidden');
-      el.startInterview.disabled = false;
+      applyStyleResult(data);
       el.startInterview.focus();
     } catch (error) {
       showError(`文体分析に失敗しました: ${error.message}`);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function usePresetStyle() {
+    clearError();
+    setLoading(true, '選択中の書き手プリセットを準備しています...');
+    try {
+      const data = await requestJSON('/api/author-style/seed', {
+        method: 'POST',
+        body: {
+          persona_id: currentPersonaId(),
+        },
+      });
+      applyStyleResult(data);
+      el.startInterview.focus();
+    } catch (error) {
+      showError(`プリセット文体の準備に失敗しました: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function applyStyleResult(data) {
+    state.profileId = data.profile_id;
+    el.profileId.textContent = data.profile_id;
+    el.guideId.textContent = data.guide_id;
+    el.articleCount.textContent = String(data.article_count);
+    el.guidePreview.textContent = data.guide_markdown;
+    el.styleResult.classList.remove('hidden');
+    el.startInterview.disabled = false;
   }
 
   async function startInterview() {
@@ -132,6 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         body: {
           style_profile_id: state.profileId,
+          persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
           brief_model: el.briefModel.value,
           questions: currentQuestions(),
         },
@@ -204,6 +256,8 @@ document.addEventListener('DOMContentLoaded', () => {
         body: {
           style_profile_id: state.profileId,
           session_id: state.sessionId,
+          persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
           draft_model: el.draftModel.value,
         },
       });
@@ -234,6 +288,77 @@ document.addEventListener('DOMContentLoaded', () => {
     setOptions(el.briefModel, available, defaults.brief);
     setOptions(el.draftModel, available, defaults.draft);
     saveModelConfig();
+  }
+
+  function populatePersonaSelect() {
+    el.personaSelect.innerHTML = '';
+    state.personas.forEach((persona) => {
+      const option = document.createElement('option');
+      option.value = persona.id;
+      option.textContent = persona.display_name;
+      option.selected = persona.id === config.mode.persona;
+      el.personaSelect.appendChild(option);
+    });
+    if (!el.personaSelect.value && state.personas[0]) {
+      el.personaSelect.value = state.personas[0].id;
+    }
+  }
+
+  function populateFormatSelect() {
+    el.formatSelect.innerHTML = '';
+    state.formats.forEach((format) => {
+      const option = document.createElement('option');
+      option.value = format.id;
+      option.textContent = format.display_name;
+      option.selected = format.id === config.mode.format;
+      el.formatSelect.appendChild(option);
+    });
+  }
+
+  function onPersonaChange() {
+    config.mode.persona = currentPersonaId();
+    applyPersonaDefaults(true);
+    saveConfig();
+    renderModeSummary();
+  }
+
+  function onFormatChange() {
+    config.mode.format = currentFormatId();
+    saveConfig();
+    renderModeSummary();
+    renderQuestionConfig();
+  }
+
+  function applyPersonaDefaults(forceFormat) {
+    const persona = currentPersona();
+    if (!persona) {
+      return;
+    }
+    const noteSource = (persona.sources || []).find((source) => source.kind === 'note' && source.ref);
+    if (noteSource && el.username.value.trim() === 'cor_instrument') {
+      el.username.value = noteSource.ref;
+    }
+    if ((forceFormat || !el.formatSelect.value) && persona.default_format) {
+      el.formatSelect.value = persona.default_format;
+      config.mode.format = persona.default_format;
+    }
+    renderQuestionConfig();
+  }
+
+  function renderModeSummary() {
+    const persona = currentPersona();
+    const format = currentFormat();
+    if (!persona || !format) {
+      el.modeSummary.textContent = '';
+      return;
+    }
+    const firstPerson = persona.voice_notes?.first_person?.join(' / ') || '';
+    const sources = (persona.sources || []).map((source) => source.kind).join(' + ');
+    el.modeSummary.innerHTML = `
+      <strong>${escapeHTML(persona.display_name)} × ${escapeHTML(format.display_name)}</strong>
+      <span>${escapeHTML(persona.description || '')}</span>
+      <span>一人称: ${escapeHTML(firstPerson || '文体ガイド優先')} / source: ${escapeHTML(sources || 'manual')}</span>
+    `;
   }
 
   function setOptions(select, models, selected) {
@@ -305,7 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function currentQuestions() {
-    return config.questions
+    return [...config.questions, ...formatQuestions(currentFormatId())]
       .map((question) => ({
         id: question.id,
         text: question.text.trim(),
@@ -315,12 +440,57 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter((question) => question.id && question.text);
   }
 
+  function formatQuestions(formatId) {
+    if (formatId === 'markdown_blog') {
+      return [
+        { id: 'cor_blog_purpose', text: '会社ブログとしての主目的は何ですか？例: 技術知見の報告、実装判断の共有、社員へのビジョン共有。', flow_type: 'main', target_field: 'custom' },
+        { id: 'cor_blog_category', text: 'カテゴリは ai / engineering / founder / lab のどれにしますか？理由も教えてください。', flow_type: 'main', target_field: 'custom' },
+        { id: 'cor_blog_metadata', text: 'slug候補、タグ3-5個、featuredの有無、画像パスがあれば指定してください。', flow_type: 'main', target_field: 'custom' },
+        { id: 'cor_blog_evidence', text: '本文に入れる具体的な実装、検証結果、数値、意思決定の根拠は何ですか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'cor_blog_next_action', text: '社員や読者に、この記事を読んだ後どんな判断や行動をしてほしいですか？', flow_type: 'main', target_field: 'custom' },
+      ];
+    }
+    if (formatId === 'zenn_article' || formatId === 'qiita_article') {
+      return [
+        { id: 'target_stack', text: '対象技術スタック、バージョン、実行環境は何ですか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'prerequisite_knowledge', text: '読者に前提として求める知識と、説明を厚くする箇所はどこですか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'code_examples', text: '必ず入れるコード例、コマンド、設定ファイルは何ですか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'references', text: '参照すべき公式ドキュメント、記事、リポジトリURLはありますか？', flow_type: 'main', target_field: 'custom' },
+      ];
+    }
+    if (formatId === 'homepage_section') {
+      return [
+        { id: 'target_conversion', text: 'このHTMLセクションで読者に起こしてほしい行動は何ですか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'primary_cta', text: 'CTAの文言とリンク先は何にしますか？', flow_type: 'main', target_field: 'custom' },
+        { id: 'brand_voice', text: '会社サイトとして守りたい言い回し、避けたい表現はありますか？', flow_type: 'main', target_field: 'custom' },
+      ];
+    }
+    return [];
+  }
+
+  function currentPersonaId() {
+    return el.personaSelect.value || config.mode.persona || 'terisuke';
+  }
+
+  function currentFormatId() {
+    return el.formatSelect.value || config.mode.format || 'note_article';
+  }
+
+  function currentPersona() {
+    return state.personas.find((persona) => persona.id === currentPersonaId());
+  }
+
+  function currentFormat() {
+    return state.formats.find((format) => format.id === currentFormatId());
+  }
+
   function isFixedQuestion(id) {
     return defaultQuestions.some((question) => question.id === id);
   }
 
   function loadConfig() {
     const fallback = {
+      mode: { persona: 'terisuke', format: 'note_article' },
       models: { style: 'gemma4:latest', brief: 'gemma4:e2b', draft: 'gemma4:31b' },
       questions: cloneQuestions(defaultQuestions),
     };
@@ -328,6 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const saved = JSON.parse(localStorage.getItem(configStorageKey) || '{}');
       return {
         models: { ...fallback.models, ...(saved.models || {}) },
+        mode: { ...fallback.mode, ...(saved.mode || {}) },
         questions: Array.isArray(saved.questions) && saved.questions.length
           ? saved.questions
           : fallback.questions,
@@ -351,6 +522,15 @@ document.addEventListener('DOMContentLoaded', () => {
     item.textContent = text;
     el.questionLog.appendChild(item);
     el.questionLog.scrollTop = el.questionLog.scrollHeight;
+  }
+
+  function escapeHTML(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   }
 
   function renderDraft(data) {

@@ -4,6 +4,8 @@ import (
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 // WritingStyleGuide is the compact author style guide used for draft generation.
@@ -23,6 +25,8 @@ type GenerateRequest struct {
 	StyleGuide    WritingStyleGuide
 	Brief         ArticleBrief
 	AuthorProfile AuthorStyleProfile
+	Persona       personadomain.Persona
+	OutputFormat  outputformat.OutputFormat
 }
 
 // GenerateResult returns the validated draft and its strict style evaluation.

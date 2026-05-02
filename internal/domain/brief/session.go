@@ -303,6 +303,8 @@ func (s ArticleBriefSession) AssembleBrief() ArticleBrief {
 	}
 	return ArticleBrief{
 		StyleProfileID:        s.StyleProfileID,
+		PersonaID:             s.PersonaID,
+		OutputFormatID:        s.OutputFormatID,
 		Theme:                 get(QuestionIDTheme),
 		OpeningEpisode:        get(QuestionIDOpeningEpisode),
 		Reader:                get(QuestionIDReader),

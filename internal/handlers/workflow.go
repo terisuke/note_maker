@@ -15,7 +15,11 @@ import (
 	authorstyleapp "github.com/teradakousuke/note_maker/internal/application/authorstyle"
 	briefapp "github.com/teradakousuke/note_maker/internal/application/brief"
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
+	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
+	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
 	notenote "github.com/teradakousuke/note_maker/internal/infrastructure/note"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/repository/memory"
@@ -42,6 +46,10 @@ type analyzeAuthorStyleRequest struct {
 	StyleModel  string   `json:"style_model"`
 }
 
+type seedAuthorStyleRequest struct {
+	PersonaID string `json:"persona_id"`
+}
+
 type authorStyleResponse struct {
 	ID            string `json:"id"`
 	ProfileID     string `json:"profile_id"`
@@ -56,6 +64,8 @@ type authorStyleResponse struct {
 type createBriefSessionRequest struct {
 	StyleProfileID string                `json:"style_profile_id"`
 	SessionID      string                `json:"session_id"`
+	PersonaID      string                `json:"persona_id"`
+	OutputFormatID string                `json:"output_format_id"`
 	BriefModel     string                `json:"brief_model"`
 	Questions      []articleQuestionJSON `json:"questions"`
 }
@@ -67,13 +77,16 @@ type answerBriefSessionRequest struct {
 }
 
 type briefSessionResponse struct {
-	SessionID      string                    `json:"session_id"`
-	StyleProfileID string                    `json:"style_profile_id"`
-	Phase          string                    `json:"phase"`
-	Completed      bool                      `json:"completed"`
-	NextQuestion   *articleQuestionJSON      `json:"next_question,omitempty"`
-	Brief          *briefdomain.ArticleBrief `json:"brief,omitempty"`
-	Answers        []briefdomain.BriefAnswer `json:"answers"`
+	SessionID       string                    `json:"session_id"`
+	StyleProfileID  string                    `json:"style_profile_id"`
+	PersonaID       string                    `json:"persona_id"`
+	OutputFormatID  string                    `json:"output_format_id"`
+	ParentSessionID string                    `json:"parent_session_id,omitempty"`
+	Phase           string                    `json:"phase"`
+	Completed       bool                      `json:"completed"`
+	NextQuestion    *articleQuestionJSON      `json:"next_question,omitempty"`
+	Brief           *briefdomain.ArticleBrief `json:"brief,omitempty"`
+	Answers         []briefdomain.BriefAnswer `json:"answers"`
 }
 
 type articleQuestionJSON struct {
@@ -88,12 +101,48 @@ type articleQuestionJSON struct {
 type generateDraftRequest struct {
 	StyleProfileID string `json:"style_profile_id"`
 	SessionID      string `json:"session_id"`
+	PersonaID      string `json:"persona_id"`
+	OutputFormatID string `json:"output_format_id"`
 	DraftModel     string `json:"draft_model"`
 }
 
 type generateDraftResponse struct {
 	Draft      string                   `json:"draft"`
 	Evaluation draftapp.StyleEvaluation `json:"evaluation"`
+}
+
+// ListPersonasHandler returns built-in writing personas.
+func ListPersonasHandler(w http.ResponseWriter, r *http.Request) {
+	respondWithJSON(w, http.StatusOK, personadomain.DefaultRegistry().List())
+}
+
+// ListFormatsHandler returns built-in output formats.
+func ListFormatsHandler(w http.ResponseWriter, r *http.Request) {
+	respondWithJSON(w, http.StatusOK, outputformat.DefaultRegistry().List())
+}
+
+// SeedAuthorStyleHandler stores a practical persona preset as a style guide.
+func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
+	var req seedAuthorStyleRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
+		return
+	}
+	result, err := buildPresetAuthorStyle(persona)
+	if err != nil {
+		respondWithError(w, "AUTHOR_STYLE_PRESET_FAILED", "Failed to build persona preset", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := workflowStore.SaveAuthorStyle(result); err != nil {
+		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, toAuthorStyleResponse(result))
 }
 
 // AnalyzeAuthorStyleHandler analyzes a note author and stores the resulting style assets.
@@ -155,6 +204,74 @@ func refineStyleGuideWithModel(ctx context.Context, result authorstyleapp.Analyz
 	return generator.Generate(ctx, prompt)
 }
 
+func buildPresetAuthorStyle(persona personadomain.Persona) (authorstyleapp.AnalyzeResult, error) {
+	fetchedAt := time.Now().UTC()
+	content := strings.Join([]string{
+		persona.Description,
+		persona.VoiceNotes.Tone,
+		strings.Join(persona.VoiceNotes.FirstPerson, " "),
+		strings.Join(persona.VoiceNotes.TitlePatterns, " "),
+		strings.Repeat(" "+strings.Join(persona.VoiceNotes.AntiPatterns, " "), 2),
+	}, "\n\n")
+	if strings.TrimSpace(content) == "" {
+		content = persona.DisplayName + " writing preset"
+	}
+	articleURL := "preset://" + persona.ID
+	if len(persona.Sources) > 0 && strings.TrimSpace(persona.Sources[0].URL) != "" {
+		articleURL = persona.Sources[0].URL
+	}
+	article := articledomain.Article{
+		URL:     articleURL,
+		Title:   persona.DisplayName + " preset",
+		Content: strings.Repeat(content+"\n\n", 8),
+	}
+	source := authordomain.AuthorSource{
+		Username: persona.ID,
+		Articles: []authordomain.SourceArticle{{
+			ID:    persona.ID + "_preset",
+			URL:   articleURL,
+			Title: article.Title,
+			At:    fetchedAt,
+		}},
+		FetchedAt: fetchedAt,
+	}
+	profile, err := authordomain.BuildAuthorStyleProfile(source, []articledomain.Article{article})
+	if err != nil {
+		return authorstyleapp.AnalyzeResult{}, err
+	}
+	if len(persona.VoiceNotes.FirstPerson) > 0 {
+		profile.PreferredFirstPerson = persona.VoiceNotes.FirstPerson[0]
+	}
+	guide, err := authordomain.BuildWritingStyleGuide(profile)
+	if err != nil {
+		return authorstyleapp.AnalyzeResult{}, err
+	}
+	if len(persona.VoiceNotes.FirstPerson) > 0 {
+		guide.PreferredFirstPerson = persona.VoiceNotes.FirstPerson[0]
+	}
+	guide.RecurringThemes = append([]string(nil), persona.VoiceNotes.TitlePatterns...)
+	if len(guide.RecurringThemes) == 0 {
+		guide.RecurringThemes = []string{persona.DisplayName, "技術", "体験"}
+	}
+	guide.ParagraphRhythm = persona.VoiceNotes.Tone
+	guide.HeadingGuidance = "出力先の形式に合わせ、読者が流れを追いやすい見出しを置く"
+	guide.OpeningPatterns = append([]string(nil), persona.VoiceNotes.TitlePatterns...)
+	guide.ConclusionPatterns = []string{"読者が次に試せる具体的な一歩で締める"}
+	guide.Warnings = append([]string{"persona_preset_without_live_fetch"}, persona.VoiceNotes.AntiPatterns...)
+	guide.Markdown = authordomain.GuideMarkdown(guide)
+	if err := guide.Validate(); err != nil {
+		return authorstyleapp.AnalyzeResult{}, err
+	}
+	return authorstyleapp.AnalyzeResult{
+		ID:           authorstyleapp.ResultID(source, profile.ID, guide.ID),
+		Source:       source,
+		Profile:      profile,
+		Guide:        guide,
+		ArticleCount: 1,
+		CreatedAt:    fetchedAt,
+	}, nil
+}
+
 // GetAuthorStyleHandler returns a stored author style analysis result.
 func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 	id := pathValue(r, "id")
@@ -184,11 +301,26 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.SessionID) == "" {
 		req.SessionID = newID("abs")
 	}
+	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
+		return
+	}
+	formatID := outputformat.NormalizeID(req.OutputFormatID)
+	if strings.TrimSpace(req.OutputFormatID) == "" {
+		formatID = persona.DefaultFormat
+	}
+	if _, ok := outputformat.DefaultRegistry().Get(formatID); !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", formatID, http.StatusBadRequest)
+		return
+	}
 
 	service := newBriefInterviewService(req.BriefModel)
 	result, err := service.StartSession(briefapp.StartSessionInput{
 		SessionID:      req.SessionID,
 		StyleProfileID: req.StyleProfileID,
+		PersonaID:      persona.ID,
+		OutputFormatID: formatID,
 		Questions:      toDomainQuestions(req.Questions),
 	})
 	if err != nil {
@@ -284,6 +416,29 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		articleBrief = session.AssembleBrief()
 	}
+	personaID := strings.TrimSpace(req.PersonaID)
+	formatID := strings.TrimSpace(req.OutputFormatID)
+	if personaID == "" {
+		personaID = articleBrief.PersonaID
+	}
+	if formatID == "" {
+		formatID = articleBrief.OutputFormatID
+	}
+	persona, ok := personadomain.DefaultRegistry().Get(personaID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", personaID, http.StatusBadRequest)
+		return
+	}
+	if formatID == "" {
+		formatID = persona.DefaultFormat
+	}
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", formatID, http.StatusBadRequest)
+		return
+	}
+	articleBrief.PersonaID = persona.ID
+	articleBrief.OutputFormatID = format.ID
 
 	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("DRAFT", req.DraftModel)
 	if err != nil {
@@ -295,6 +450,8 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		StyleGuide:    guide,
 		Brief:         articleBrief,
 		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
 	})
 	if err != nil {
 		respondWithError(w, "DRAFT_GENERATION_FAILED", "Failed to generate draft", err.Error(), http.StatusInternalServerError)
@@ -344,13 +501,16 @@ func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionRespons
 		}
 	}
 	return briefSessionResponse{
-		SessionID:      result.Session.ID,
-		StyleProfileID: result.Session.StyleProfileID,
-		Phase:          string(result.Session.Phase),
-		Completed:      result.Completed || result.Session.Completed,
-		NextQuestion:   question,
-		Brief:          result.Brief,
-		Answers:        result.Session.Answers,
+		SessionID:       result.Session.ID,
+		StyleProfileID:  result.Session.StyleProfileID,
+		PersonaID:       result.Session.PersonaID,
+		OutputFormatID:  result.Session.OutputFormatID,
+		ParentSessionID: result.Session.ParentSessionID,
+		Phase:           string(result.Session.Phase),
+		Completed:       result.Completed || result.Session.Completed,
+		NextQuestion:    question,
+		Brief:           result.Brief,
+		Answers:         result.Session.Answers,
 	}
 }
 

@@ -31,6 +31,14 @@
 
         <div class="config-grid">
           <div class="field-row">
+            <label for="persona-select">書き手</label>
+            <select id="persona-select"></select>
+          </div>
+          <div class="field-row">
+            <label for="format-select">出力先</label>
+            <select id="format-select"></select>
+          </div>
+          <div class="field-row">
             <label for="style-model">文体分析モデル</label>
             <select id="style-model"></select>
           </div>
@@ -43,6 +51,7 @@
             <select id="draft-model"></select>
           </div>
         </div>
+        <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
 
         <div class="question-config">
           <div class="section-heading">
@@ -60,9 +69,9 @@
         <div class="panel-header">
           <div>
             <span class="step-label">1</span>
-            <h2>文体分析</h2>
+            <h2>文体分析 / プリセット</h2>
           </div>
-          <p>Note記事を収集し、再利用できる文体ガイドを作ります。</p>
+          <p>note記事の分析、または書き手プリセットから再利用できる文体ガイドを作ります。</p>
         </div>
 
         <div class="field-row">
@@ -78,7 +87,10 @@
             <option value="8">8</option>
           </select>
         </div>
-        <button id="analyze-style-btn" class="primary-btn">文体を分析</button>
+        <div class="button-row">
+          <button id="analyze-style-btn" class="primary-btn">文体を分析</button>
+          <button id="use-preset-style-btn" class="secondary-btn" type="button">選択中の書き手プリセットを使う</button>
+        </div>
 
         <div id="style-result" class="result-box hidden">
           <div class="result-grid">
