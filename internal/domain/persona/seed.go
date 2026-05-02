@@ -12,7 +12,7 @@ func Terisuke() Persona {
 		Sources: []AuthorSource{
 			{Kind: "note", Ref: "cor_instrument", URL: "https://note.com/cor_instrument/rss"},
 			{Kind: "rss", Ref: "cor-jp-blog", URL: "https://cor-jp.com/rss.xml"},
-			{Kind: "github", Ref: "corsweb2024-blog", URL: "https://github.com/Cor-Incorporated/corsweb2024/tree/main/src/content/blog/ja"},
+			{Kind: "github", Ref: "Cor-Incorporated/corsweb2024/src/content/blog/ja", URL: "https://github.com/Cor-Incorporated/corsweb2024/tree/main/src/content/blog/ja"},
 		},
 		VoiceNotes: VoiceNotes{
 			FirstPerson:   []string{"僕", "私"},

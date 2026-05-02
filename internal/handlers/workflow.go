@@ -58,14 +58,18 @@ func newWorkflowStore() workflowStoreBackend {
 }
 
 type analyzeAuthorStyleRequest struct {
-	Username    string   `json:"username"`
-	ArticleURLs []string `json:"article_urls"`
-	Limit       int      `json:"limit"`
-	StyleModel  string   `json:"style_model"`
+	Username       string   `json:"username"`
+	SourceSelector string   `json:"source_selector"`
+	ArticleURLs    []string `json:"article_urls"`
+	Limit          int      `json:"limit"`
+	StyleModel     string   `json:"style_model"`
+	PersonaID      string   `json:"persona_id"`
+	OutputFormatID string   `json:"output_format_id"`
 }
 
 type seedAuthorStyleRequest struct {
-	PersonaID string `json:"persona_id"`
+	PersonaID      string `json:"persona_id"`
+	OutputFormatID string `json:"output_format_id"`
 }
 
 type authorStyleResponse struct {
@@ -203,7 +207,16 @@ func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
 	}
-	result, err := buildPresetAuthorStyle(persona)
+	formatID := req.OutputFormatID
+	if strings.TrimSpace(formatID) == "" {
+		formatID = persona.DefaultFormat
+	}
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", formatID, http.StatusBadRequest)
+		return
+	}
+	result, err := buildPresetAuthorStyle(persona, format)
 	if err != nil {
 		respondWithError(w, "AUTHOR_STYLE_PRESET_FAILED", "Failed to build persona preset", err.Error(), http.StatusInternalServerError)
 		return
@@ -215,7 +228,7 @@ func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, toAuthorStyleResponse(result))
 }
 
-// AnalyzeAuthorStyleHandler analyzes a note author and stores the resulting style assets.
+// AnalyzeAuthorStyleHandler analyzes a writing source and stores the resulting style assets.
 func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 	var req analyzeAuthorStyleRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
@@ -223,9 +236,25 @@ func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
+		return
+	}
+	formatID := req.OutputFormatID
+	if strings.TrimSpace(formatID) == "" {
+		formatID = persona.DefaultFormat
+	}
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", formatID, http.StatusBadRequest)
+		return
+	}
+	sourceSelector := firstNonEmpty(req.SourceSelector, req.Username, defaultStyleSourceSelector(persona, format))
+
 	service := authorstyleapp.NewAnalyzeAuthorStyleService(sourcefetch.NewAuthorStyleFetcher(), nil)
 	result, err := service.Analyze(r.Context(), authorstyleapp.AnalyzeRequest{
-		Username:    req.Username,
+		Username:    sourceSelector,
 		ArticleURLs: req.ArticleURLs,
 		Limit:       req.Limit,
 	})
@@ -274,11 +303,89 @@ func refineStyleGuideWithModel(ctx context.Context, result authorstyleapp.Analyz
 	return generator.Generate(ctx, prompt)
 }
 
-func buildPresetAuthorStyle(persona personadomain.Persona) (authorstyleapp.AnalyzeResult, error) {
+func defaultStyleSourceSelector(persona personadomain.Persona, format outputformat.OutputFormat) string {
+	source := defaultStyleSource(persona, format)
+	if strings.TrimSpace(source.Kind) == "" {
+		return ""
+	}
+	if strings.TrimSpace(source.Ref) != "" {
+		return source.Kind + ":" + source.Ref
+	}
+	if strings.TrimSpace(source.URL) != "" {
+		return source.Kind + ":" + source.URL
+	}
+	return ""
+}
+
+func defaultStyleSource(persona personadomain.Persona, format outputformat.OutputFormat) personadomain.AuthorSource {
+	switch format.ID {
+	case outputformat.IDMarkdownBlog, outputformat.IDHomepageSection:
+		if source, ok := findPersonaSource(persona, "github"); ok {
+			return source
+		}
+		if source, ok := findPersonaSource(persona, "rss"); ok {
+			return source
+		}
+	case outputformat.IDZennArticle:
+		if source, ok := findPersonaSource(persona, "zenn"); ok {
+			return source
+		}
+	case outputformat.IDQiitaArticle:
+		if source, ok := findPersonaSource(persona, "qiita"); ok {
+			return source
+		}
+	case outputformat.IDNoteArticle:
+		if source, ok := findPersonaSource(persona, "note"); ok {
+			return source
+		}
+	}
+	if len(persona.Sources) > 0 {
+		return persona.Sources[0]
+	}
+	return personadomain.AuthorSource{}
+}
+
+func findPersonaSource(persona personadomain.Persona, kind string) (personadomain.AuthorSource, bool) {
+	for _, source := range persona.Sources {
+		if strings.EqualFold(strings.TrimSpace(source.Kind), kind) {
+			return source, true
+		}
+	}
+	return personadomain.AuthorSource{}, false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if cleaned := strings.TrimSpace(value); cleaned != "" {
+			return cleaned
+		}
+	}
+	return ""
+}
+
+func formatSpecificPresetNote(formatID string) string {
+	switch formatID {
+	case outputformat.IDMarkdownBlog:
+		return "自社ブログでは、技術的な知見の報告、実装判断、検証結果、社員へのビジョン共有を中心に、断定口調で具体的に書く。"
+	case outputformat.IDZennArticle:
+		return "Zennでは、技術の前提、手順、コード、つまずき、検証結果を開発者向けに整理して書く。"
+	case outputformat.IDQiitaArticle:
+		return "Qiitaでは、再現手順、環境、コード例、結果、参考リンクを実用重視で書く。"
+	case outputformat.IDHomepageSection:
+		return "ホームページでは、会社としての信頼、価値提案、次の行動がすぐ伝わる短いHTMLセクションとして書く。"
+	default:
+		return "noteでは、体験、違和感、技術的な試み、読者への提案を読み物として自然につなぐ。"
+	}
+}
+
+func buildPresetAuthorStyle(persona personadomain.Persona, format outputformat.OutputFormat) (authorstyleapp.AnalyzeResult, error) {
 	fetchedAt := time.Now().UTC()
 	content := strings.Join([]string{
 		persona.Description,
 		persona.VoiceNotes.Tone,
+		format.DisplayName + ": " + format.Description,
+		format.PromptFragment,
+		formatSpecificPresetNote(format.ID),
 		strings.Join(persona.VoiceNotes.FirstPerson, " "),
 		strings.Join(persona.VoiceNotes.TitlePatterns, " "),
 		strings.Repeat(" "+strings.Join(persona.VoiceNotes.AntiPatterns, " "), 2),
@@ -286,13 +393,13 @@ func buildPresetAuthorStyle(persona personadomain.Persona) (authorstyleapp.Analy
 	if strings.TrimSpace(content) == "" {
 		content = persona.DisplayName + " writing preset"
 	}
-	articleURL := "preset://" + persona.ID
-	if len(persona.Sources) > 0 && strings.TrimSpace(persona.Sources[0].URL) != "" {
-		articleURL = persona.Sources[0].URL
+	articleURL := "preset://" + persona.ID + "/" + format.ID
+	if source := defaultStyleSource(persona, format); strings.TrimSpace(source.URL) != "" {
+		articleURL = source.URL
 	}
 	article := articledomain.Article{
 		URL:     articleURL,
-		Title:   persona.DisplayName + " preset",
+		Title:   persona.DisplayName + " / " + format.DisplayName + " preset",
 		Content: strings.Repeat(content+"\n\n", 8),
 	}
 	source := authordomain.AuthorSource{
@@ -323,8 +430,8 @@ func buildPresetAuthorStyle(persona personadomain.Persona) (authorstyleapp.Analy
 	if len(guide.RecurringThemes) == 0 {
 		guide.RecurringThemes = []string{persona.DisplayName, "技術", "体験"}
 	}
-	guide.ParagraphRhythm = persona.VoiceNotes.Tone
-	guide.HeadingGuidance = "出力先の形式に合わせ、読者が流れを追いやすい見出しを置く"
+	guide.ParagraphRhythm = persona.VoiceNotes.Tone + "\n" + formatSpecificPresetNote(format.ID)
+	guide.HeadingGuidance = "出力先「" + format.DisplayName + "」の形式に合わせ、読者が流れを追いやすい見出しを置く"
 	guide.OpeningPatterns = append([]string(nil), persona.VoiceNotes.TitlePatterns...)
 	guide.ConclusionPatterns = []string{"読者が次に試せる具体的な一歩で締める"}
 	guide.Warnings = append([]string{"persona_preset_without_live_fetch"}, persona.VoiceNotes.AntiPatterns...)
