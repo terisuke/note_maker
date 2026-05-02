@@ -433,6 +433,31 @@ pre {
     margin-bottom: 12px;
 }
 
+#copy-preview-btn {
+    margin-top: 12px;
+}
+
+.section-candidate {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--primary);
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.section-candidate h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+#section-candidate-output {
+    min-height: 220px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .hidden {
     display: none !important;
 }

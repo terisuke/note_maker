@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lastSubmittedAnswer: '',
     answerAbortController: null,
     draftAbortController: null,
+    pendingSectionReplacement: null,
   };
 
   const el = {
@@ -67,6 +68,13 @@ document.addEventListener('DOMContentLoaded', () => {
     previewContent: document.getElementById('preview-content'),
     markdownOutput: document.getElementById('markdown-output'),
     copy: document.getElementById('copy-btn'),
+    copyPreview: document.getElementById('copy-preview-btn'),
+    regenerateSection: document.getElementById('regenerate-section-btn'),
+    sectionStatus: document.getElementById('section-status'),
+    sectionCandidate: document.getElementById('section-candidate'),
+    sectionCandidateOutput: document.getElementById('section-candidate-output'),
+    acceptSection: document.getElementById('accept-section-btn'),
+    rejectSection: document.getElementById('reject-section-btn'),
     loading: document.getElementById('loading'),
     loadingText: document.getElementById('loading-text'),
     errorArea: document.getElementById('error-message-area'),
@@ -94,6 +102,14 @@ document.addEventListener('DOMContentLoaded', () => {
   el.generateDraft.addEventListener('click', generateDraft);
   el.cancelDraft.addEventListener('click', () => state.draftAbortController?.abort());
   el.copy.addEventListener('click', copyMarkdown);
+  el.copyPreview.addEventListener('click', copyPreviewText);
+  el.markdownOutput.addEventListener('input', syncDraftEditor);
+  el.markdownOutput.addEventListener('keyup', updateSectionControls);
+  el.markdownOutput.addEventListener('click', updateSectionControls);
+  el.markdownOutput.addEventListener('select', updateSectionControls);
+  el.regenerateSection.addEventListener('click', regenerateCurrentSection);
+  el.acceptSection.addEventListener('click', acceptSectionCandidate);
+  el.rejectSection.addEventListener('click', rejectSectionCandidate);
 
   document.querySelectorAll('.tab-btn').forEach((button) => {
     button.addEventListener('click', () => setActiveTab(button.dataset.tab));
@@ -329,6 +345,8 @@ document.addEventListener('DOMContentLoaded', () => {
     el.previewContent.innerHTML = '';
     el.evaluationSummary.textContent = '';
     el.verificationSummary.textContent = '';
+    el.sectionStatus.textContent = '';
+    rejectSectionCandidate();
     el.draftResult.classList.remove('hidden');
     setActiveTab('markdown');
     try {
@@ -355,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (event === 'chunk') {
             draftBuffer += data.text || '';
             el.markdownOutput.value = draftBuffer;
-            el.previewContent.innerHTML = marked.parse(draftBuffer);
+            syncDraftEditor();
             return;
           }
           if (event === 'result') {
@@ -879,9 +897,168 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     renderVerification(data.verification);
     el.markdownOutput.value = data.draft;
-    el.previewContent.innerHTML = marked.parse(data.draft);
+    syncDraftEditor();
     el.draftResult.classList.remove('hidden');
     setActiveTab('preview');
+  }
+
+  function syncDraftEditor() {
+    el.previewContent.innerHTML = marked.parse(el.markdownOutput.value || '');
+    updateSectionControls();
+  }
+
+  function updateSectionControls() {
+    const section = currentMarkdownSection();
+    el.regenerateSection.disabled = !section || !state.profileId || !state.sessionId;
+    if (!el.markdownOutput.value.trim()) {
+      el.sectionStatus.textContent = '';
+      return;
+    }
+    el.sectionStatus.textContent = section
+      ? `選択中のセクション: ## ${section.heading}`
+      : '再生成するには Markdown タブで ## 見出し配下にカーソルを置いてください。';
+  }
+
+  async function regenerateCurrentSection() {
+    clearError();
+    const section = currentMarkdownSection();
+    if (!section) {
+      showError('再生成する ## セクションにカーソルを置いてください');
+      return;
+    }
+    el.regenerateSection.disabled = true;
+    el.sectionStatus.textContent = `## ${section.heading} を再生成しています。`;
+    rejectSectionCandidate();
+    try {
+      const data = await requestJSON(`/api/drafts/${encodeURIComponent(state.sessionId)}/regenerate-section`, {
+        method: 'POST',
+        body: {
+          style_profile_id: state.profileId,
+          session_id: state.sessionId,
+          persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
+          draft_model: el.draftModel.value,
+          draft_markdown: el.markdownOutput.value,
+          section_anchor: section.anchor,
+        },
+      });
+      state.pendingSectionReplacement = data;
+      el.sectionCandidateOutput.value = data.replacement_markdown || '';
+      el.sectionCandidate.classList.remove('hidden');
+      el.sectionStatus.textContent = `## ${section.heading} の再生成候補を確認してください。`;
+      setActiveTab('markdown');
+      el.sectionCandidateOutput.focus();
+    } catch (error) {
+      showError(`セクション再生成に失敗しました: ${error.message}`);
+      updateSectionControls();
+    } finally {
+      el.regenerateSection.disabled = !currentMarkdownSection();
+    }
+  }
+
+  function acceptSectionCandidate() {
+    if (!state.pendingSectionReplacement) {
+      return;
+    }
+    const responseSection = state.pendingSectionReplacement.section || {};
+    const section = markdownSections(el.markdownOutput.value).find((candidate) => candidate.anchor === responseSection.anchor)
+      || currentMarkdownSection();
+    const updated = replaceMarkdownSection(el.markdownOutput.value, section, el.sectionCandidateOutput.value);
+    if (!updated) {
+      showError('候補の反映に失敗しました。対象セクションを再選択して再生成してください。');
+      return;
+    }
+    el.markdownOutput.value = updated;
+    rejectSectionCandidate();
+    syncDraftEditor();
+    el.markdownOutput.focus();
+  }
+
+  function rejectSectionCandidate() {
+    state.pendingSectionReplacement = null;
+    el.sectionCandidate.classList.add('hidden');
+    el.sectionCandidateOutput.value = '';
+  }
+
+  function currentMarkdownSection() {
+    return sectionAtOffset(el.markdownOutput.value, el.markdownOutput.selectionStart || 0);
+  }
+
+  function sectionAtOffset(markdown, offset) {
+    const sections = markdownSections(markdown);
+    return sections.find((section) => offset >= section.start && offset < section.end)
+      || sections.find((section) => offset === section.end)
+      || null;
+  }
+
+  function markdownSections(markdown) {
+    const headings = [];
+    let offset = 0;
+    const lines = markdown.match(/[^\n]*(?:\n|$)/g) || [];
+    lines.forEach((line) => {
+      if (!line) {
+        return;
+      }
+      const trimmed = line.replace(/\n$/, '').trim();
+      if (trimmed.startsWith('## ') && !trimmed.startsWith('### ')) {
+        const heading = trimmed.slice(3).trim();
+        headings.push({ offset, heading });
+      }
+      offset += line.length;
+    });
+    return headings.map((heading, index) => {
+      const end = index + 1 < headings.length ? headings[index + 1].offset : markdown.length;
+      return {
+        anchor: sectionAnchor(heading.heading),
+        heading: heading.heading,
+        start: heading.offset,
+        end,
+        content: markdown.slice(heading.offset, end),
+      };
+    });
+  }
+
+  function replaceMarkdownSection(markdown, section, replacement) {
+    if (!section || section.start < 0 || section.end < section.start || section.end > markdown.length) {
+      return '';
+    }
+    const candidate = normalizeReplacementSection(replacement, section.heading);
+    if (!candidate) {
+      return '';
+    }
+    return markdown.slice(0, section.start) + candidate + markdown.slice(section.end);
+  }
+
+  function normalizeReplacementSection(replacement, heading) {
+    let candidate = String(replacement || '').trim();
+    if (!candidate) {
+      return '';
+    }
+    if (!candidate.startsWith('## ')) {
+      candidate = `## ${heading}\n\n${candidate}`;
+    }
+    if (!candidate.endsWith('\n')) {
+      candidate += '\n';
+    }
+    const sections = markdownSections(candidate);
+    if (sections.length !== 1 || sections[0].anchor !== sectionAnchor(heading)) {
+      return '';
+    }
+    return candidate;
+  }
+
+  function sectionAnchor(heading) {
+    return String(heading || '')
+      .trim()
+      .replace(/^##\s+/, '')
+      .toLowerCase()
+      .replaceAll(' ', '-')
+      .replaceAll('　', '-')
+      .replaceAll('_', '-')
+      .replaceAll('/', '-')
+      .replace(/[:"'`?!：？！]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
   }
 
   function renderVerification(verification) {
@@ -1020,6 +1197,16 @@ document.addEventListener('DOMContentLoaded', () => {
       el.copy.textContent = 'コピーしました';
       setTimeout(() => {
         el.copy.textContent = original;
+      }, 1600);
+    });
+  }
+
+  function copyPreviewText() {
+    navigator.clipboard.writeText(el.previewContent.innerText || '').then(() => {
+      const original = el.copyPreview.textContent;
+      el.copyPreview.textContent = 'コピーしました';
+      setTimeout(() => {
+        el.copyPreview.textContent = original;
       }, 1600);
     });
   }

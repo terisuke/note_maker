@@ -113,10 +113,26 @@ type generateDraftRequest struct {
 	VerifyModel    string `json:"verify_model"`
 }
 
+type regenerateDraftSectionRequest struct {
+	StyleProfileID string `json:"style_profile_id"`
+	SessionID      string `json:"session_id"`
+	PersonaID      string `json:"persona_id"`
+	OutputFormatID string `json:"output_format_id"`
+	DraftModel     string `json:"draft_model"`
+	DraftMarkdown  string `json:"draft_markdown"`
+	SectionAnchor  string `json:"section_anchor"`
+}
+
 type generateDraftResponse struct {
 	Draft        string                     `json:"draft"`
 	Evaluation   draftapp.StyleEvaluation   `json:"evaluation"`
 	Verification draftapp.FinalVerification `json:"verification"`
+}
+
+type regenerateDraftSectionResponse struct {
+	Section              draftapp.MarkdownSection `json:"section"`
+	ReplacementMarkdown  string                   `json:"replacement_markdown"`
+	UpdatedDraftMarkdown string                   `json:"updated_draft_markdown"`
 }
 
 // ListPersonasHandler returns built-in writing personas.
@@ -597,6 +613,90 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 		Verification: result.Verification,
 	})
 	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
+}
+
+// RegenerateDraftSectionHandler rewrites only one h2 subtree of the current draft.
+func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
+	var req regenerateDraftSectionRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		req.SessionID = pathValue(r, "id")
+	}
+	profile, guide, articleBrief, persona, format, ok := draftContextFromRequest(req.StyleProfileID, req.SessionID, req.PersonaID, req.OutputFormatID)
+	if !ok {
+		respondWithError(w, "DRAFT_CONTEXT_NOT_FOUND", "Draft context was not found", "", http.StatusBadRequest)
+		return
+	}
+	generator, err := llamacpp.NewClientFromEnvForPurposeWithModel("DRAFT", req.DraftModel)
+	if err != nil {
+		respondWithError(w, "GENERATOR_INITIALIZATION_FAILED", "Failed to initialize local LLM client", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	service := draftapp.NewService(generator)
+	result, err := service.RegenerateSection(r.Context(), draftapp.RegenerateSectionRequest{
+		GenerateRequest: draftapp.GenerateRequest{
+			StyleGuide:    guide,
+			Brief:         articleBrief,
+			AuthorProfile: profile,
+			Persona:       persona,
+			OutputFormat:  format,
+		},
+		DraftMarkdown: req.DraftMarkdown,
+		SectionAnchor: req.SectionAnchor,
+	})
+	if err != nil {
+		respondWithError(w, "DRAFT_SECTION_REGENERATE_FAILED", "Failed to regenerate draft section", err.Error(), http.StatusBadRequest)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, regenerateDraftSectionResponse{
+		Section:              result.Section,
+		ReplacementMarkdown:  result.ReplacementMarkdown,
+		UpdatedDraftMarkdown: result.UpdatedDraftMarkdown,
+	})
+}
+
+func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, briefdomain.ArticleBrief, personadomain.Persona, outputformat.OutputFormat, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if strings.TrimSpace(styleProfileID) == "" && sessionID != "" {
+		if session, ok := workflowStore.GetSession(sessionID); ok {
+			styleProfileID = session.StyleProfileID
+		}
+	}
+	profile, guide, ok := workflowStore.GetProfileAndGuide(styleProfileID)
+	if !ok {
+		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
+	}
+	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	if !ok {
+		session, sessionOK := workflowStore.GetSession(sessionID)
+		if !sessionOK || !session.Completed {
+			return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
+		}
+		articleBrief = session.AssembleBrief()
+	}
+	if strings.TrimSpace(personaID) == "" {
+		personaID = articleBrief.PersonaID
+	}
+	persona, ok := personadomain.DefaultRegistry().Get(personaID)
+	if !ok {
+		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
+	}
+	if strings.TrimSpace(formatID) == "" {
+		formatID = articleBrief.OutputFormatID
+	}
+	if strings.TrimSpace(formatID) == "" {
+		formatID = persona.DefaultFormat
+	}
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
+	}
+	articleBrief.PersonaID = persona.ID
+	articleBrief.OutputFormatID = format.ID
+	return profile, guide, articleBrief, persona, format, true
 }
 
 func newDraftServiceWithVerifier(generator draftapp.TextGenerator, model string) (*draftapp.Service, error) {

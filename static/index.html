@@ -169,10 +169,23 @@
           </div>
           <div id="preview-tab" class="tab-pane active">
             <div id="preview-content"></div>
+            <button id="copy-preview-btn" class="secondary-btn" type="button">プレビューをコピー</button>
           </div>
           <div id="markdown-tab" class="tab-pane">
-            <textarea id="markdown-output" readonly></textarea>
-            <button id="copy-btn" class="secondary-btn">コピー</button>
+            <textarea id="markdown-output"></textarea>
+            <div class="button-row">
+              <button id="copy-btn" class="secondary-btn" type="button">Markdownをコピー</button>
+              <button id="regenerate-section-btn" class="secondary-btn" type="button" disabled>このセクションを再生成</button>
+            </div>
+            <div id="section-status" class="status-line"></div>
+            <div id="section-candidate" class="section-candidate hidden">
+              <h3>再生成候補</h3>
+              <textarea id="section-candidate-output" rows="10"></textarea>
+              <div class="button-row">
+                <button id="accept-section-btn" class="primary-btn" type="button">候補を反映</button>
+                <button id="reject-section-btn" class="secondary-btn" type="button">破棄</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
