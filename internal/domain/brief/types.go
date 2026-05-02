@@ -18,6 +18,12 @@ const (
 	QuestionIDExclusions            = "exclusions"
 	QuestionIDTargetLengthStructure = "target_length_structure"
 	QuestionIDToneStance            = "tone_stance"
+	QuestionIDStoryArc              = "story_arc"
+	QuestionIDTargetStack           = "target_stack"
+	QuestionIDTechnicalProof        = "technical_proof"
+	QuestionIDHomepageCTA           = "homepage_cta"
+	QuestionIDHomepageTrust         = "homepage_trust"
+	QuestionIDCloudiaViewpoint      = "cloudia_viewpoint"
 
 	MaxFollowUpsPerTarget = 2
 	MaxTotalFollowUps     = 4
@@ -220,5 +226,104 @@ func FixedQuestions() []ArticleQuestion {
 			Required:    true,
 			TargetField: "tone_stance",
 		},
+	}
+}
+
+// ComposeFixedQuestions returns the server-side interview template for a persona and output format.
+func ComposeFixedQuestions(personaID, outputFormatID string) []ArticleQuestion {
+	personaID = persona.NormalizeID(personaID)
+	if strings.TrimSpace(outputFormatID) == "" {
+		if item, ok := persona.DefaultRegistry().Get(personaID); ok {
+			outputFormatID = item.DefaultFormat
+		}
+	}
+	outputFormatID = outputformat.NormalizeID(outputFormatID)
+	if personaID == persona.IDTerisuke && outputFormatID == outputformat.IDNoteArticle {
+		return FixedQuestions()
+	}
+
+	questions := FixedQuestions()
+	questions = append(questions, formatExtensionQuestions(outputFormatID)...)
+	questions = append(questions, personaExtensionQuestions(personaID)...)
+	return NormalizeQuestions(questions)
+}
+
+func formatExtensionQuestions(outputFormatID string) []ArticleQuestion {
+	switch outputFormatID {
+	case outputformat.IDNoteArticle:
+		return narrativeExtensionQuestions()
+	case outputformat.IDMarkdownBlog, outputformat.IDZennArticle, outputformat.IDQiitaArticle:
+		return technicalExtensionQuestions()
+	case outputformat.IDHomepageSection:
+		return homepageExtensionQuestions()
+	default:
+		return nil
+	}
+}
+
+func narrativeExtensionQuestions() []ArticleQuestion {
+	return []ArticleQuestion{
+		{
+			ID:          QuestionIDStoryArc,
+			Text:        "読み物として印象に残すため、どんな感情の流れやオチを置きますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+	}
+}
+
+func technicalExtensionQuestions() []ArticleQuestion {
+	return []ArticleQuestion{
+		{
+			ID:          QuestionIDTargetStack,
+			Text:        "対象にする技術スタック、言語、ライブラリ、実行環境、前提バージョンは何ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    true,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDTechnicalProof,
+			Text:        "記事内で示す再現手順、コード例、検証結果、失敗例は何ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+	}
+}
+
+func homepageExtensionQuestions() []ArticleQuestion {
+	return []ArticleQuestion{
+		{
+			ID:          QuestionIDHomepageCTA,
+			Text:        "このWebセクションを読んだ人に押してほしいCTAや次の行動は何ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    true,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDHomepageTrust,
+			Text:        "サービスや会社への信頼につながる実績、根拠、約束として何を入れますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+	}
+}
+
+func personaExtensionQuestions(personaID string) []ArticleQuestion {
+	switch personaID {
+	case persona.IDCloudia:
+		return []ArticleQuestion{
+			{
+				ID:          QuestionIDCloudiaViewpoint,
+				Text:        "クラウディアならではの視点や感想として、どんな驚き、楽しさ、つまずきを入れますか？",
+				FlowType:    QuestionFlowMain,
+				Required:    false,
+				TargetField: "custom",
+			},
+		}
+	default:
+		return nil
 	}
 }

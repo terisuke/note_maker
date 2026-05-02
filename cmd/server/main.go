@@ -37,6 +37,7 @@ func main() {
 	r.HandleFunc("/api/author-style/seed", handlers.SeedAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/analyze", handlers.AnalyzeAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/{id}", handlers.GetAuthorStyleHandler).Methods("GET")
+	r.HandleFunc("/api/brief-sessions/templates", handlers.GetBriefSessionTemplateHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions", handlers.CreateBriefSessionHandler).Methods("POST")
 	r.HandleFunc("/api/brief-sessions/{id}", handlers.GetBriefSessionHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions/{id}/answers", handlers.AnswerBriefSessionHandler).Methods("POST")

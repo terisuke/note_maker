@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	domain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 // FollowUpGenerator can phrase deep-dive questions; services fall back to domain rules on error.
@@ -53,10 +55,16 @@ func NewInterviewService(followUpGenerator FollowUpGenerator) *InterviewService 
 
 // StartSession creates a session and returns the first fixed question.
 func (s *InterviewService) StartSession(input StartSessionInput) (InterviewResult, error) {
-	if len(input.Questions) == 0 {
-		input.Questions = domain.FixedQuestions()
+	personaID := personadomain.NormalizeID(input.PersonaID)
+	formatID := outputformat.NormalizeID(input.OutputFormatID)
+	if strings.TrimSpace(input.OutputFormatID) == "" {
+		if persona, ok := personadomain.DefaultRegistry().Get(personaID); ok {
+			formatID = persona.DefaultFormat
+		}
 	}
-	session, err := domain.NewArticleBriefSessionWithOptions(input.SessionID, input.StyleProfileID, input.PersonaID, input.OutputFormatID, "", input.Questions)
+	questions := domain.ComposeFixedQuestions(personaID, formatID)
+	questions = append(questions, input.Questions...)
+	session, err := domain.NewArticleBriefSessionWithOptions(input.SessionID, input.StyleProfileID, personaID, formatID, "", questions)
 	if err != nil {
 		return InterviewResult{}, err
 	}

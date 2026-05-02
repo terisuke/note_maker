@@ -157,6 +157,7 @@ Additions:
 
 - `GET /api/personas` / `POST /api/personas` / `PATCH /api/personas/{id}` — persona CRUD.
 - `GET /api/formats` — read-only registry of available formats.
+- `GET /api/brief-sessions/templates?persona_id=X&format_id=Y` — composed fixed-question template for the selected persona and output format.
 - `POST /api/projects` / `GET /api/projects` / `GET /api/projects/{id}` — project management.
 - `GET /api/sessions/{id}/transcript` — chat-style transcript including parent links.
 - `POST /api/sessions/{id}/answers/{answer_id}/edit` — fork-on-edit for past answers.
@@ -209,6 +210,7 @@ Current implementation status as of 2026-05-02:
 - Phase A4 is implemented and merged: follow-up prompts include parent question, parent answer, and active style guide context; rule-based fallback questions use the same quoted parent-answer prefix; the transcript labels the parent answer as the deep-dive rationale ([#20](https://github.com/terisuke/note_maker/issues/20)). Validation is recorded in [Issue 20 deep-dive rationale validation](../validation/issue-20-deep-dive-rationale-2026-05-02.md).
 - Phase A3 is implemented in code: the generated Markdown textarea is editable, preview rendering live-syncs through `marked`, both preview and Markdown tabs can copy content, and `POST /api/drafts/{id}/regenerate-section` rewrites exactly one `## ` subtree while preserving the rest of the draft byte-for-byte ([#19](https://github.com/terisuke/note_maker/issues/19)). Validation is recorded in [Issue 19 section regeneration validation](../validation/issue-19-section-regeneration-2026-05-02.md).
 - Phase B3/B4 are implemented for the in-repo registry surface: all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Deterministic scenario validation is recorded in [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md). Live source-derived guide rebuilding for Zenn/Qiita/RSS remains part of source acquisition work in [#22](https://github.com/terisuke/note_maker/issues/22).
+- Phase B5 is implemented: fixed interview questions are composed server-side by `persona_id × output_format_id`, Cloudia technical modes include extra viewpoint/context prompts, the frontend reads `GET /api/brief-sessions/templates`, and `cmd/scenario/media_matrix` produces a six-case cross-media evaluation matrix for note, Cor blog, Zenn, Qiita, and homepage output ([#25](https://github.com/terisuke/note_maker/issues/25)).
 
 Near-term execution order:
 
