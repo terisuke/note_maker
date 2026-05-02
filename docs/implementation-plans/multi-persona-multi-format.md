@@ -32,6 +32,8 @@ Current status after the 2026-05-02 merges:
 
 - [#11](https://github.com/terisuke/note_maker/issues/11) strict Terisuke style tuning is closed.
 - [#21](https://github.com/terisuke/note_maker/issues/21) B1 landed early: persona/format domain concepts, prompt dispatch, selectors, and validators exist.
+- [#23](https://github.com/terisuke/note_maker/issues/23) is implemented for the in-repo generation surface: every registered format has a prompt fragment, embedded guide, validator, unit coverage, and deterministic sample validation.
+- [#24](https://github.com/terisuke/note_maker/issues/24) is implemented for built-in seeds: `terisuke` and `cloudia` have distinct source bundles, default formats, prompt hints, and unit/scenario coverage. Live source-derived guide rebuilding remains dependent on [#22](https://github.com/terisuke/note_maker/issues/22).
 - [#38](https://github.com/terisuke/note_maker/issues/38) Tailnet OpenAI-compatible API is now the Evo X2 primary path. SSH tunnel access is diagnostic-only.
 - [#36](https://github.com/terisuke/note_maker/issues/36) remains open for local llama.cpp fallback quality; it does not block Phase A work.
 - [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization.
@@ -187,6 +189,8 @@ Acceptance:
 - Each registered format has an embedded Markdown guide injected into the final draft prompt.
 - Generating the same brief under different formats produces visibly different drafts: Zenn has frontmatter + many code fences; note has narrative paragraphs and ですます調; homepage_section is HTML with no `# `.
 
+Implementation note as of 2026-05-02: #23 is implemented for deterministic generation validation. `cmd/scenario/format_persona_seed` writes one validated sample per registered format and confirms that prompt construction injects the selected embedded guide. The scenario avoids live LLM calls so it can run in `go test ./...`-adjacent validation without touching source fetchers.
+
 ### B4 — Persona library seed
 
 Seed file: `internal/domain/persona/seed.go` (or YAML under `data/personas/`).
@@ -225,6 +229,8 @@ Acceptance:
 
 - A scenario command runs `analyze` for both personas and writes two distinct `WritingStyleGuide` files to `tmp/personas/`.
 - Cross-style score: rebuilding Cloudia's guide from Terisuke's articles produces lower style-similarity than Cloudia's own articles (sanity check that the personas are actually distinct).
+
+Implementation note as of 2026-05-02: #24's built-in seed library is implemented and validated without expanding source acquisition. The registry ships `terisuke` and `cloudia` with distinct default formats, source kinds, first-person options, title patterns, and anti-patterns. Source-derived guide rebuilding for Zenn/Qiita/RSS remains blocked on #22, so the original live-analyze scenario acceptance moves with that source-fetcher work rather than being claimed here.
 
 ### B5 — Format- and persona-aware fixed questions
 
@@ -316,4 +322,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) are merged. [#19](https://github.com/terisuke/note_maker/issues/19) is implemented in code; after merging it, continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) so editable draft state and regeneration history survive restarts.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) are merged. [#19](https://github.com/terisuke/note_maker/issues/19) is implemented in code. [#23](https://github.com/terisuke/note_maker/issues/23) and [#24](https://github.com/terisuke/note_maker/issues/24) are implemented for the registry/prompt/validator/seed scope and validated in [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md). Continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) so editable draft state and regeneration history survive restarts; source acquisition remains under [#22](https://github.com/terisuke/note_maker/issues/22).

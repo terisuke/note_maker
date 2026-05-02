@@ -89,6 +89,11 @@ func TestPlatformSpecificNotationIsNotMixed(t *testing.T) {
 	if err := (NoteValidator{}).Validate(noteWithFilenameFence); err == nil {
 		t.Fatal("expected note validator to reject filename code fence")
 	}
+
+	noteWithHTML := "# タイトル\n\n<section><h2>見出し</h2><p>本文</p></section>"
+	if err := (NoteValidator{}).Validate(noteWithHTML); err == nil {
+		t.Fatal("expected note validator to reject HTML blocks")
+	}
 }
 
 func TestMarkdownBlogRejectsUnsupportedCorBlogMetadata(t *testing.T) {
@@ -107,5 +112,57 @@ featured: false
 
 	if err := (MarkdownBlogValidator{}).Validate(invalid); err == nil {
 		t.Fatal("expected invalid company blog metadata to be rejected")
+	}
+}
+
+func TestZennValidatorEnforcesMetadataShape(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "published is boolean",
+			input: "---\ntitle: \"T\"\nemoji: \"📝\"\ntype: \"tech\"\ntopics: [\"go\"]\npublished: \"no\"\n---\n\n## 本文",
+		},
+		{
+			name:  "topics are inline list",
+			input: "---\ntitle: \"T\"\nemoji: \"📝\"\ntype: \"tech\"\ntopics:\n  - go\npublished: false\n---\n\n## 本文",
+		},
+		{
+			name:  "topics capped at five",
+			input: "---\ntitle: \"T\"\nemoji: \"📝\"\ntype: \"tech\"\ntopics: [\"go\", \"ai\", \"llm\", \"zenn\", \"test\", \"cli\"]\npublished: false\n---\n\n## 本文",
+		},
+		{
+			name:  "html details is qiita style",
+			input: "---\ntitle: \"T\"\nemoji: \"📝\"\ntype: \"tech\"\ntopics: [\"go\"]\npublished: false\n---\n\n<details><summary>詳細</summary></details>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := (ZennValidator{}).Validate(tt.input); err == nil {
+				t.Fatal("expected invalid zenn article to be rejected")
+			}
+		})
+	}
+}
+
+func TestQiitaValidatorRejectsEmptyTags(t *testing.T) {
+	invalid := "---\ntitle: \"T\"\ntags: []\n---\n\n## 本文"
+	if err := (QiitaValidator{}).Validate(invalid); err == nil {
+		t.Fatal("expected empty Qiita tags to be rejected")
+	}
+}
+
+func TestHomepageSectionRejectsMarkdownScaffolding(t *testing.T) {
+	tests := []string{
+		"---\ntitle: \"T\"\n---\n<section><h2>見出し</h2><p>本文</p></section>",
+		"<section><h2>見出し</h2><p>本文</p></section>\n\n```html\n<p>余分</p>\n```",
+		"<section><h2>見出し</h2><p>本文</p>\n## Markdown見出し\n</section>",
+	}
+	for _, input := range tests {
+		if err := (HomepageSectionValidator{}).Validate(input); err == nil {
+			t.Fatalf("expected homepage section to reject:\n%s", input)
+		}
 	}
 }
