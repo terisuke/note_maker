@@ -43,6 +43,7 @@ func main() {
 	r.HandleFunc("/api/brief-sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
 	r.HandleFunc("/api/sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
 	r.HandleFunc("/api/drafts", handlers.GenerateDraftHandler).Methods("POST")
+	r.HandleFunc("/api/drafts/{id}/regenerate-section", handlers.RegenerateDraftSectionHandler).Methods("POST")
 
 	// ルートパスへのアクセスはindex.htmlにリダイレクト
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

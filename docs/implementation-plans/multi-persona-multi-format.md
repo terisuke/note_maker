@@ -92,6 +92,9 @@ Acceptance:
 
 - Editing the textarea immediately updates the preview.
 - Regenerating section "## 実装" replaces only that subtree of the Markdown; the other sections remain byte-identical.
+- Regenerated candidates are shown as a text-only preview with accept/reject controls; accepting can still be manually edited before insertion.
+
+Implementation note as of 2026-05-02: #19 is implemented in code. The Phase A route uses the existing `session_id` as the draft identifier until Phase C adds versioned draft records. The canonical endpoint is `POST /api/drafts/{id}/regenerate-section`; it loads the stored style guide and brief, applies the current persona/output-format strategy, rejects replacement candidates containing multiple `## ` sections, and returns both the candidate section and the full updated draft. Evo X2 validation regenerated the company-blog `## 実装と検証：再現性の数値化` section in `167.33s`, then completed lightweight verification in `23.14s`; non-target prefix/suffix preservation was true and the score stayed in the prior company-blog band (`72.1` vs `72.3`). Details are in [Issue 19 section regeneration validation](../validation/issue-19-section-regeneration-2026-05-02.md).
 
 ### A4 — Deep-dive rationale surfaced
 
@@ -313,4 +316,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18) and [#17](https://github.com/terisuke/note_maker/issues/17) are merged. [#20](https://github.com/terisuke/note_maker/issues/20) is implemented in code; after merging it, continue with [#19](https://github.com/terisuke/note_maker/issues/19) for editable drafts and per-section regeneration.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) are merged. [#19](https://github.com/terisuke/note_maker/issues/19) is implemented in code; after merging it, continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) so editable draft state and regeneration history survive restarts.

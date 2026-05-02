@@ -114,6 +114,63 @@ func BuildStyleRevisionPrompt(originalPrompt, draftMarkdown string, evaluation S
 	return prompt.String()
 }
 
+// BuildSectionRegenerationPrompt asks for one replacement section only.
+func BuildSectionRegenerationPrompt(guide WritingStyleGuide, brief ArticleBrief, profile AuthorStyleProfile, persona personadomain.Persona, format outputformat.OutputFormat, draftMarkdown string, section MarkdownSection) string {
+	var prompt strings.Builder
+	prompt.WriteString("あなたは日本語記事の編集者です。既存下書きの指定された1セクションだけを書き直してください。\n")
+	prompt.WriteString("前置き、解説、内部メモは出力しないでください。返すのは置換後のセクション本文だけです。\n")
+	prompt.WriteString("必ず同じ `## ` 見出しで始め、次の `## ` セクションや記事全体は出力しないでください。\n\n")
+
+	prompt.WriteString("## 書き分けモード\n")
+	appendLine(&prompt, "Persona", persona.ID+" / "+persona.DisplayName)
+	appendLine(&prompt, "OutputFormat", format.ID+" / "+format.DisplayName)
+	appendLine(&prompt, "媒体ルール", format.PromptFragment)
+	appendLine(&prompt, "人格メモ", persona.PromptHint())
+	prompt.WriteString("\n")
+
+	if guideMarkdown := formatGuideMarkdown(format.ID); guideMarkdown != "" {
+		prompt.WriteString("## 媒体別Markdownガイド\n")
+		prompt.WriteString(guideMarkdown)
+		prompt.WriteString("\n\n")
+	}
+
+	prompt.WriteString("## 文体ガイド\n")
+	prompt.WriteString(truncateRunes(formatStyleGuide(guide), 1800))
+	prompt.WriteString("\n\n")
+
+	prompt.WriteString("## 記事ブリーフ\n")
+	appendLine(&prompt, "テーマ", brief.Theme)
+	appendLine(&prompt, "読者", brief.Reader)
+	appendLine(&prompt, "必ず含めること", brief.MustInclude)
+	appendLine(&prompt, "著者本人の属人的な文脈", brief.PersonalContext)
+	appendLine(&prompt, "含めないこと", brief.Exclusions)
+	appendLine(&prompt, "トーンと立場", brief.ToneStance)
+	appendDeepDives(&prompt, brief.DeepDives)
+	if calibration := strictMetricCalibration(profile, brief, guide); calibration != "" {
+		prompt.WriteString("\n## strict style calibration\n")
+		prompt.WriteString(calibration)
+		prompt.WriteString("\n")
+	}
+
+	prompt.WriteString("\n## 現在の全体下書き（構成参照用）\n")
+	prompt.WriteString(truncateRunes(draftMarkdown, 5000))
+	prompt.WriteString("\n\n")
+
+	prompt.WriteString("## 置換対象セクション\n")
+	appendLine(&prompt, "section_anchor", section.Anchor)
+	appendLine(&prompt, "heading", section.Heading)
+	prompt.WriteString(section.Content)
+	prompt.WriteString("\n\n")
+
+	prompt.WriteString("## 出力条件\n")
+	prompt.WriteString("1. 出力は `## " + section.Heading + "` から始める。\n")
+	prompt.WriteString("2. 他の `## ` セクション、frontmatter、記事タイトル、全体下書きは出力しない。\n")
+	prompt.WriteString("3. 既存セクションより具体性、根拠、読みやすさを上げる。\n")
+	prompt.WriteString("4. 媒体ルール、人格メモ、文体ガイド、記事ブリーフを守る。\n")
+	prompt.WriteString("5. コード例を使う場合は媒体ルールに沿う。\n")
+	return prompt.String()
+}
+
 func revisionMetricDetail(evaluation StyleEvaluation) string {
 	var lines []string
 	ref := evaluation.Comparison.Reference

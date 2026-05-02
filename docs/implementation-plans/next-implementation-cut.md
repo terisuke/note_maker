@@ -9,12 +9,15 @@ This document translates the current open issue set into the next executable imp
 Closed and incorporated:
 
 - [#11](https://github.com/terisuke/note_maker/issues/11) — strict Terisuke style tuning.
+- [#18](https://github.com/terisuke/note_maker/issues/18) — SSE streaming and cancellation.
+- [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answers.
+- [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale in transcript.
 - [#21](https://github.com/terisuke/note_maker/issues/21) — Persona and OutputFormat domain concepts.
 - [#38](https://github.com/terisuke/note_maker/issues/38) — Evo X2 Tailnet OpenAI-compatible API as primary runtime.
 
 Open and active:
 
-- Phase A: [#17](https://github.com/terisuke/note_maker/issues/17), [#18](https://github.com/terisuke/note_maker/issues/18), [#19](https://github.com/terisuke/note_maker/issues/19), [#20](https://github.com/terisuke/note_maker/issues/20).
+- Phase A: [#19](https://github.com/terisuke/note_maker/issues/19).
 - Phase B remaining: [#22](https://github.com/terisuke/note_maker/issues/22), [#23](https://github.com/terisuke/note_maker/issues/23), [#24](https://github.com/terisuke/note_maker/issues/24), [#25](https://github.com/terisuke/note_maker/issues/25).
 - Phase C: [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28), extending [#14](https://github.com/terisuke/note_maker/issues/14).
 - Quality and packaging: [#13](https://github.com/terisuke/note_maker/issues/13), [#15](https://github.com/terisuke/note_maker/issues/15), [#29](https://github.com/terisuke/note_maker/issues/29), [#36](https://github.com/terisuke/note_maker/issues/36).
@@ -22,7 +25,7 @@ Open and active:
 
 ## Next target
 
-The ordering correction is now applied: [#18](https://github.com/terisuke/note_maker/issues/18) landed first, then [#17](https://github.com/terisuke/note_maker/issues/17) is being implemented on top of those streaming primitives.
+The ordering correction is now applied: [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) have landed. [#19](https://github.com/terisuke/note_maker/issues/19) is the final Phase A UX cut before Phase C persistence.
 
 Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `1396.80s` and still missed quality gates. A spinner-only UI is not usable at that latency. Streaming, heartbeat, cancellation, and partial-result retention are the highest-leverage improvement before reshaping the transcript.
 
@@ -39,16 +42,18 @@ Reason: a real Tailnet Evo X2 scenario reached the correct endpoint but took `13
    - Replace the bounded log with a transcript surface.
    - Render existing fixed and deep-dive answers as bubbles.
    - Add in-memory fork-on-edit endpoint first; persistence follows in Phase C.
-   - Status: implemented in code; merge before moving to #20.
+   - Status: implemented and merged.
 
 3. **[#20] Deep-dive rationale in transcript**
    - Add parent-answer excerpts to prompt and UI.
    - Ensure LLM and rule-based fallback paths produce the same contextual prefix.
+   - Status: implemented and merged.
 
 4. **[#19] Editable draft and section regenerate**
    - Make the Markdown draft editable after streaming lands.
    - Add section anchor parsing and replacement tests.
    - Regenerate one heading subtree at a time.
+   - Status: implemented in code; merge before moving to #26.
 
 5. **[#26] SQLite persistence**
    - Persist answer forks, draft versions, guide versions, and project/article history.
