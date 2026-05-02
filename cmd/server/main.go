@@ -28,6 +28,9 @@ func main() {
 	// 静的ファイルの配信 (staticディレクトリをルートとして提供)
 	fs := http.FileServer(http.Dir("static"))
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fs))
+	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}).Methods("GET")
 
 	// APIエンドポイントの設定
 	r.HandleFunc("/api/generate", handlers.GenerateArticleHandler).Methods("POST")

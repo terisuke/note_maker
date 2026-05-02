@@ -19,12 +19,10 @@ Implemented and merged:
 - [#24](https://github.com/terisuke/note_maker/issues/24) — built-in `terisuke` and `cloudia` persona seeds.
 - [#25](https://github.com/terisuke/note_maker/issues/25) — persona- and format-aware question templates plus the media matrix scenario.
 - [#38](https://github.com/terisuke/note_maker/issues/38) — Evo X2 Tailnet OpenAI-compatible API as the primary runtime.
-
-Implemented in the current cut:
-
 - [#26](https://github.com/terisuke/note_maker/issues/26) — SQLite-backed workflow store with project/article/session/draft/source snapshot schema and explicit opt-in web-app wiring via `WORKFLOW_STORE_DRIVER=sqlite`.
 - [#29](https://github.com/terisuke/note_maker/issues/29) — focused handler tests for the expanded `workflow.go` surface; `go test ./internal/handlers -cover` now reaches 80.0%.
 - [#57](https://github.com/terisuke/note_maker/issues/57) — live media-matrix runner and aggregate JSON/Markdown evaluator with offline planned mode by default.
+- [#61](https://github.com/terisuke/note_maker/issues/61) / [PR #62](https://github.com/terisuke/note_maker/pull/62) — workflow storage mode can be inspected and switched from the settings UI; environment-locked deployments remain read-only.
 
 Open and active:
 
@@ -33,6 +31,8 @@ Open and active:
 - Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13).
 - Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40).
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
+- Runtime defect fixed by this cut: [#63](https://github.com/terisuke/note_maker/issues/63) makes the plain web-app default match the intended Evo X2 Tailnet primary path and records the 2026-05-03 draft-generation 500 root cause.
+- Documentation and DDD audit: [#64](https://github.com/terisuke/note_maker/issues/64), with details in [Runtime and DDD alignment audit](../validation/runtime-ui-ddd-audit-2026-05-03.md).
 
 ## Final evaluation target
 
@@ -62,7 +62,7 @@ Each live run must record:
 
 The three prerequisites before running the full multi-medium Evo X2 evaluation are now mostly in place:
 
-1. **Persistence first**: #26 adds SQLite storage for sessions, briefs, source snapshots, drafts, verification, and section-regeneration versions. The next UI work can now persist product memory instead of only loose files.
+1. **Persistence first**: #26 adds SQLite storage for sessions, briefs, source snapshots, drafts, verification, and section-regeneration versions. #61/#62 makes the storage driver visible and switchable from the settings UI, so users do not have to choose it only through make/env setup.
 2. **Handler coverage gate**: #29 raises `internal/handlers` coverage to 80.0%, including SSE, edit/fork, template, regenerate-section, and SQLite driver selection paths.
 3. **Scenario ownership**: #57 adds the reusable live runner/aggregate evaluator. #40 remains the owner for actual Evo X2 Tailnet quality results.
 
@@ -80,7 +80,7 @@ Lane A and Lane B can run immediately in parallel. Lane C can start by implement
 
 ## Recommended order
 
-1. Merge the current #26/#29/#57 implementation PR.
+1. Verify the browser app with the #63 runtime defaults: `/api/models` should hit Evo X2 Tailnet first, and `/api/drafts` SSE should report the actual endpoint/model before generation starts.
 2. Run one bounded Evo X2 live case through #57 and attach it to #40 to verify the runner with real latency/score data.
 3. Start #27 and #28 in parallel so persisted sessions, guides, and draft artifacts become visible in the web app.
 4. Start #13 once the history/artifact UI has enough stable browser surface.

@@ -52,7 +52,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 - Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
 - Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
-- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the default compatibility path until the #14 import/export follow-up is explicit.
+- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup.
 - Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails
@@ -69,7 +69,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
    - Note.com access belongs in `internal/infrastructure/note`.
    - OpenAI-compatible local LLM access belongs in `internal/infrastructure/llamacpp`.
    - In-memory/file repositories belong in `internal/infrastructure/repository`.
-   - Evo X2 Ollama is the primary heavy-inference runtime and must be reached through the Tailnet OpenAI-compatible API (`http://evo-x2.tailb30e58.ts.net/v1` by default) in `make evo-x2` and scenario targets.
+   - Evo X2 Ollama is the primary heavy-inference runtime and must be reached through the Tailnet OpenAI-compatible API (`http://evo-x2.tailb30e58.ts.net/v1` by default) in `make dev`, `make evo-x2`, the plain web server, and scenario targets.
    - The fallback order is Evo X2 Ollama → Evo X2 llama.cpp (`http://evo-x2.tailb30e58.ts.net/llama/v1`) → workstation-local llama.cpp.
    - SSH tunnels are allowed only as explicit developer diagnostics, not as the product default, because they depend on per-device SSH setup.
    - Local llama.cpp (`http://127.0.0.1:8081/v1`) is fallback only. Do not set `LLM_BASE_URL` to local Ollama or local llama.cpp for Evo X2 validation unless the test is explicitly measuring fallback behavior.

@@ -369,7 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     state.draftAbortController = new AbortController();
     setDraftStreaming(true);
-    el.draftStatus.textContent = 'Evo X2 の OpenAI互換APIで下書きを生成しています。';
+    el.draftStatus.textContent = 'OpenAI互換APIで下書きを生成しています。';
     let draftBuffer = '';
     el.markdownOutput.value = '';
     el.previewContent.innerHTML = '';
@@ -393,11 +393,11 @@ document.addEventListener('DOMContentLoaded', () => {
         signal: state.draftAbortController.signal,
         onEvent(event, data) {
           if (event === 'status') {
-            el.draftStatus.textContent = draftStatusText(data.status, data.elapsed_ms);
+            el.draftStatus.textContent = draftStatusText(data);
             return;
           }
           if (event === 'heartbeat') {
-            el.draftStatus.textContent = draftStatusText('running', data.elapsed_ms);
+            el.draftStatus.textContent = draftStatusText({ ...data, status: 'running' });
             return;
           }
           if (event === 'chunk') {
@@ -1333,8 +1333,11 @@ document.addEventListener('DOMContentLoaded', () => {
     onEvent(event, data);
   }
 
-  function draftStatusText(status, elapsedMS = 0) {
-    const seconds = Math.max(0, Math.round(Number(elapsedMS || 0) / 1000));
+  function draftStatusText(statusOrData, elapsedMS = 0) {
+    const data = typeof statusOrData === 'object' && statusOrData !== null
+      ? statusOrData
+      : { status: statusOrData, elapsed_ms: elapsedMS };
+    const status = data.status;
     const labels = {
       stream_opened: '接続しました',
       draft_generation_started: '本文を生成しています',
@@ -1345,7 +1348,12 @@ document.addEventListener('DOMContentLoaded', () => {
       running: '生成を継続しています',
       completed: '生成が完了しました',
     };
-    return `${labels[status] || status} (${seconds}s)`;
+    const elapsed = Math.max(0, Math.round(Number(data.elapsed_ms || elapsedMS || 0) / 1000));
+    if (status === 'runtime_connected' && data.endpoint) {
+      const model = data.model ? ` / ${data.model}` : '';
+      return `${labels[status]}: ${data.endpoint}${model} (${elapsed}s)`;
+    }
+    return `${labels[status] || status} (${elapsed}s)`;
   }
 
   function draftDoneText(data) {

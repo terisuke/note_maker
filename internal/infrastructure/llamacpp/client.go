@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	defaultBaseURL = "http://127.0.0.1:8081/v1"
-	defaultModel   = "gemma4:31b"
+	defaultBaseURL              = "http://evo-x2.tailb30e58.ts.net/v1"
+	defaultEvoX2LlamaCPPBaseURL = "http://evo-x2.tailb30e58.ts.net/llama/v1"
+	defaultLocalBaseURL         = "http://127.0.0.1:8081/v1"
+	defaultModel                = "gemma4:31b"
 )
 
 // Client calls an OpenAI-compatible local LLM API such as llama.cpp or Ollama.
@@ -51,8 +53,10 @@ func NewClientFromEnvForPurpose(purpose string) (*Client, error) {
 
 func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) {
 	baseURL := firstEnv("LLM_BASE_URL", "LLAMACPP_BASE_URL")
+	usingDefaultBaseURL := false
 	if baseURL == "" {
 		baseURL = defaultBaseURL
+		usingDefaultBaseURL = true
 	}
 	model := strings.TrimSpace(modelOverride)
 	if model == "" {
@@ -65,7 +69,7 @@ func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
-	fallback, err := fallbackChainFromEnv(purpose, model)
+	fallback, err := fallbackChainFromEnv(purpose, model, usingDefaultBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +96,21 @@ func modelFromEnv(purpose string) string {
 			return model
 		}
 	}
-	return firstEnv("LLM_MODEL", "LLAMACPP_MODEL")
+	if model := firstEnv("LLM_MODEL", "LLAMACPP_MODEL"); model != "" {
+		return model
+	}
+	switch purpose {
+	case "STYLE", "ARTICLE":
+		return "gemma4:e2b"
+	case "BRIEF":
+		return "qwen3.6:27b"
+	case "DRAFT":
+		return "gemma4:31b"
+	case "VERIFY":
+		return "gemma4:latest"
+	default:
+		return ""
+	}
 }
 
 func firstEnv(names ...string) string {
@@ -104,7 +122,7 @@ func firstEnv(names ...string) string {
 	return ""
 }
 
-func fallbackChainFromEnv(purpose, primaryModel string) (*Client, error) {
+func fallbackChainFromEnv(purpose, primaryModel string, usingDefaultBaseURL bool) (*Client, error) {
 	purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	keys := func(suffix string) []string {
 		if purpose == "" {
@@ -133,6 +151,9 @@ func fallbackChainFromEnv(purpose, primaryModel string) (*Client, error) {
 		if baseURL != "" {
 			baseURLs = []string{baseURL}
 		}
+	}
+	if len(baseURLs) == 0 && usingDefaultBaseURL {
+		baseURLs = []string{defaultEvoX2LlamaCPPBaseURL, defaultLocalBaseURL}
 	}
 	models := splitEnvList(firstEnv(listKeys("MODELS")...))
 	if len(models) == 0 {

@@ -186,6 +186,54 @@ func TestNewClientFromEnvFallsBackToLegacySettings(t *testing.T) {
 	}
 }
 
+func TestNewClientFromEnvDefaultsToEvoX2TailnetPrimary(t *testing.T) {
+	clearLLMEnv(t)
+
+	client, err := NewClientFromEnvForPurpose("brief")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.baseURL != defaultBaseURL {
+		t.Fatalf("unexpected primary base URL: %s", client.baseURL)
+	}
+	if client.model != "qwen3.6:27b" {
+		t.Fatalf("unexpected brief model: %s", client.model)
+	}
+	if client.fallback == nil || client.fallback.baseURL != defaultEvoX2LlamaCPPBaseURL {
+		t.Fatalf("unexpected first fallback: %#v", client.fallback)
+	}
+	if client.fallback.fallback == nil || client.fallback.fallback.baseURL != defaultLocalBaseURL {
+		t.Fatalf("unexpected second fallback: %#v", client.fallback.fallback)
+	}
+}
+
+func clearLLMEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"LLM_BASE_URL",
+		"LLAMACPP_BASE_URL",
+		"LLM_MODEL",
+		"LLAMACPP_MODEL",
+		"STYLE_LLM_MODEL",
+		"BRIEF_LLM_MODEL",
+		"ARTICLE_LLM_MODEL",
+		"DRAFT_LLM_MODEL",
+		"VERIFY_LLM_MODEL",
+		"LLM_FALLBACK_BASE_URLS",
+		"FALLBACK_LLM_BASE_URLS",
+		"FALLBACK_LLM_BASE_URL",
+		"FALLBACK_LLAMACPP_BASE_URL",
+		"BRIEF_LLM_FALLBACK_BASE_URLS",
+		"BRIEF_FALLBACK_LLM_BASE_URLS",
+		"BRIEF_FALLBACK_LLM_BASE_URL",
+		"BRIEF_LLM_FALLBACK_MODELS",
+		"BRIEF_FALLBACK_LLM_MODELS",
+		"BRIEF_FALLBACK_LLM_MODEL",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
