@@ -26,7 +26,7 @@ The four phases below match ADR 0002. Each is independently shippable.
 | C | Memory: SQLite + history UI | Persistence rewrite, extends [#14](https://github.com/terisuke/note_maker/issues/14) | [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28) |
 | D | Quality & coverage | Tests + thresholds | [#29](https://github.com/terisuke/note_maker/issues/29) (rolls up [#11](https://github.com/terisuke/note_maker/issues/11), [#13](https://github.com/terisuke/note_maker/issues/13)) |
 
-Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. After the 2026-05-03 merges, the practical order is **C1 + D1 in parallel → C2/C3 → media-matrix Evo X2 evaluation under #40**.
+Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. The 2026-05-03 implementation cut lands **C1 + D1 + the #57 runner foundation** in parallel. The practical order is now **C2/C3 → one bounded Evo X2 runner validation → full media-matrix Evo X2 evaluation under #40**.
 
 Current status after the 2026-05-03 merges:
 
@@ -49,9 +49,9 @@ Near-term implementation cut:
 | 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented and merged: answers render as editable bubbles and edits fork the in-memory session. |
 | 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Implemented in code: every follow-up references the parent answer in prompt and UI, with validation recorded under `docs/validation/`. |
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
-| 5A | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers, media-matrix briefs, draft versions, and evaluation results need durable storage before expensive Evo X2 runs become product memory. | SQLite stores sessions, answers, guides, articles, drafts, and import/export from the JSON store. |
-| 5B | [#29](https://github.com/terisuke/note_maker/issues/29) | #17-#25 added real handler surface; coverage should catch regressions before C2/C3 add more UI and endpoints. | `workflow.go` coverage reaches the agreed gate without real LLM/network. |
-| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Note/Qiita/Zenn/Cor blog runs record endpoint/model/elapsed/score/runes/verification in a comparable aggregate report. |
+| 5A | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers, media-matrix briefs, draft versions, and evaluation results need durable storage before expensive Evo X2 runs become product memory. | Implemented in the current cut: SQLite stores sessions, answers, guides, articles, drafts, source snapshots, verification, and section-regeneration versions; web-app opt-in is `WORKFLOW_STORE_DRIVER=sqlite`. |
+| 5B | [#29](https://github.com/terisuke/note_maker/issues/29) | #17-#25 added real handler surface; coverage should catch regressions before C2/C3 add more UI and endpoints. | Implemented in the current cut: `go test ./internal/handlers -cover` reports 80.0% without real LLM/network. |
+| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Implemented in the current cut: planned aggregate mode is offline by default; live mode records endpoint/model/elapsed/score/runes/verification in JSON/Markdown. |
 
 ## Phase A — Conversation UX
 
@@ -124,7 +124,7 @@ New packages:
 
 - `internal/domain/persona`
   - types: `Persona`, `PersonaID`, `PersonaSeed`
-  - registry: in-memory + SQLite-backed once Phase C lands
+  - registry: in-memory + opt-in SQLite-backed workflow store after Phase C1
 - `internal/domain/format`
   - types: `OutputFormat`, `FormatID`, `Validator`
   - registry: same dual-mode
@@ -260,17 +260,19 @@ Implementation note as of 2026-05-03: #25 is implemented with `brief.ComposeFixe
 
 ### C1 — SQLite store (extends Issue [#14](https://github.com/terisuke/note_maker/issues/14))
 
-- New package `internal/infrastructure/repository/sqlite` using `modernc.org/sqlite` (pure Go, no CGO) or `mattn/go-sqlite3` if CGO is acceptable.
+Status: implemented in the current cut as an opt-in workflow store. C2/C3 still need UI/read APIs on top of the schema.
+
+- New package `internal/infrastructure/repository/sqlite` using `mattn/go-sqlite3`.
 - Schema migrations under `internal/infrastructure/repository/sqlite/migrations/` numbered `0001_*.sql`, applied at boot via a tiny in-process migrator.
 - Tables (minimum): `personas`, `author_sources`, `writing_style_guides` (versioned), `projects`, `articles`, `brief_sessions`, `brief_answers` (with `parent_answer_id`), `drafts` (versioned).
-- The existing JSON file becomes an export/import utility. On first boot, if the JSON file exists, it is imported.
-- Default DB path: `data/note_maker.db` (gitignored).
+- The existing JSON file remains the default compatibility store for now. Import/export between JSON and SQLite stays under the broader [#14](https://github.com/terisuke/note_maker/issues/14) umbrella.
+- Default SQLite DB path: `data/workflow_store.db` when `WORKFLOW_STORE_DRIVER=sqlite` is set.
 
 Acceptance:
 
-- All repository interfaces have SQLite implementations. Existing in-memory implementations remain for tests.
-- `go test ./...` passes against both implementations.
-- Re-opening the app after a restart shows past projects, sessions, and drafts.
+- The current workflow store methods have SQLite implementations. Existing in-memory and JSON-file implementations remain for tests and compatibility.
+- `go test ./...` passes, and focused SQLite restart tests prove sessions, briefs, source snapshots, draft versions, and section-regeneration records survive reopening.
+- Re-opening the app after a restart can use SQLite when `WORKFLOW_STORE_DRIVER=sqlite`; browser-visible history still lands in C2/C3.
 
 ### C2 — Persona / past-session picker UI
 
@@ -299,7 +301,7 @@ Acceptance:
 
 ### D1 — Handler tests
 
-`internal/handlers/workflow.go` is 467 lines and currently has zero direct test coverage. This is the highest-leverage gap because every Phase A / B / C change touches it.
+`internal/handlers/workflow.go` is now 1,000+ lines and has focused direct tests. This remains the highest-leverage gap because every Phase A / B / C change touches it.
 
 - Add `internal/handlers/workflow_test.go` with table-driven tests for each handler: `AnalyzeAuthorStyleHandler`, `CreateBriefSessionHandler`, `AnswerBriefSessionHandler`, `GenerateDraftHandler`, plus the new endpoints introduced by Phases A and B.
 - Use injected fakes for the application services (the existing pattern from `generate_test.go`).
@@ -329,4 +331,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#25](https://github.com/terisuke/note_maker/issues/25) are implemented and merged. Continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) and D1 ([#29](https://github.com/terisuke/note_maker/issues/29)) in parallel. Use [#57](https://github.com/terisuke/note_maker/issues/57) and [#40](https://github.com/terisuke/note_maker/issues/40) for the final Evo X2 media-matrix evaluation once persistence can retain expensive run outputs.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#25](https://github.com/terisuke/note_maker/issues/25) are implemented and merged. The current cut implements Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26)), D1 ([#29](https://github.com/terisuke/note_maker/issues/29)), and the media-matrix runner ([#57](https://github.com/terisuke/note_maker/issues/57)). After this lands, start Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) and run one bounded Evo X2 case through [#40](https://github.com/terisuke/note_maker/issues/40) before the full note/Qiita/Zenn/company-blog pass.

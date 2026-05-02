@@ -20,13 +20,18 @@ Implemented and merged:
 - [#25](https://github.com/terisuke/note_maker/issues/25) — persona- and format-aware question templates plus the media matrix scenario.
 - [#38](https://github.com/terisuke/note_maker/issues/38) — Evo X2 Tailnet OpenAI-compatible API as the primary runtime.
 
+Implemented in the current cut:
+
+- [#26](https://github.com/terisuke/note_maker/issues/26) — SQLite-backed workflow store with project/article/session/draft/source snapshot schema and explicit opt-in web-app wiring via `WORKFLOW_STORE_DRIVER=sqlite`.
+- [#29](https://github.com/terisuke/note_maker/issues/29) — focused handler tests for the expanded `workflow.go` surface; `go test ./internal/handlers -cover` now reaches 80.0%.
+- [#57](https://github.com/terisuke/note_maker/issues/57) — live media-matrix runner and aggregate JSON/Markdown evaluator with offline planned mode by default.
+
 Open and active:
 
-- Memory/history: [#26](https://github.com/terisuke/note_maker/issues/26), [#14](https://github.com/terisuke/note_maker/issues/14).
+- Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work.
 - History UI and readable artifacts: [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28).
-- Quality and coverage: [#29](https://github.com/terisuke/note_maker/issues/29), [#13](https://github.com/terisuke/note_maker/issues/13).
+- Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13).
 - Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40).
-- Live media-matrix runner: [#57](https://github.com/terisuke/note_maker/issues/57), child of [#40](https://github.com/terisuke/note_maker/issues/40).
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
 
 ## Final evaluation target
@@ -55,11 +60,11 @@ Each live run must record:
 
 ## Before the full Evo X2 media run
 
-There are three prerequisites before running the full multi-medium Evo X2 evaluation:
+The three prerequisites before running the full multi-medium Evo X2 evaluation are now mostly in place:
 
-1. **Persistence first**: #26 must land so media-matrix drafts, evaluations, regenerated sections, answer forks, and style guides can be saved and reopened. Repeated Evo X2 runs are too expensive to leave only as loose files.
-2. **Handler coverage gate**: #29 should run in parallel with #26 and must close before more endpoint-heavy UI work. #17-#25 added real handler surface; the next phase should harden it instead of adding more unguarded routes.
-3. **Scenario ownership**: #40 owns the live Evo X2 media-matrix quality target. [#57](https://github.com/terisuke/note_maker/issues/57) owns the reusable runner/aggregate evaluator that executes the matrix and writes comparable reports.
+1. **Persistence first**: #26 adds SQLite storage for sessions, briefs, source snapshots, drafts, verification, and section-regeneration versions. The next UI work can now persist product memory instead of only loose files.
+2. **Handler coverage gate**: #29 raises `internal/handlers` coverage to 80.0%, including SSE, edit/fork, template, regenerate-section, and SQLite driver selection paths.
+3. **Scenario ownership**: #57 adds the reusable live runner/aggregate evaluator. #40 remains the owner for actual Evo X2 Tailnet quality results.
 
 ## Parallel implementation plan
 
@@ -67,22 +72,20 @@ Use subagents with disjoint write scopes:
 
 | Lane | Issue | Subagent role | Write scope | Done when |
 |---|---|---|---|---|
-| A | [#26](https://github.com/terisuke/note_maker/issues/26) / [#14](https://github.com/terisuke/note_maker/issues/14) | SQLite worker | `internal/infrastructure/repository/sqlite`, repository interfaces, boot wiring, migrations | JSON store imports, sessions/guides/briefs/drafts persist, cross-persona tests pass |
-| B | [#29](https://github.com/terisuke/note_maker/issues/29) | Handler coverage worker | `internal/handlers/*_test.go`, coverage script/docs | `workflow.go` reaches the agreed coverage gate without real LLM/network |
-| C | [#57](https://github.com/terisuke/note_maker/issues/57), feeding [#40](https://github.com/terisuke/note_maker/issues/40) | Scenario metrics worker | `cmd/scenario/*`, `docs/validation/*`, Make targets | media-matrix live runner records endpoint/model/elapsed/score/runes/verification in aggregate JSON/Markdown |
+| A | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | `static/*`, read APIs for projects/sessions/drafts once exposed | persona/session picker and human-readable brief/style cards use persisted state |
+| B | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | persona/format switching, edit/fork, streaming, regenerate-section, and legacy localStorage migration are covered |
+| C | [#40](https://github.com/terisuke/note_maker/issues/40) | Scenario metrics worker | `docs/validation/*`, live run artifacts | media-matrix live runner records endpoint/model/elapsed/score/runes/verification in aggregate JSON/Markdown for actual Evo X2 runs |
 
 Lane A and Lane B can run immediately in parallel. Lane C can start by implementing offline/resumable runner mechanics now, but the full multi-case Evo X2 run should wait until Lane A provides persistence or until the user explicitly wants a one-off artifact-file run.
 
 ## Recommended order
 
-1. Merge this docs alignment PR.
-2. Start #26 and #29 in parallel.
-3. Merge #29 as soon as handler coverage is sufficient.
-4. Merge #26 once JSON import, SQLite schema, and restart recovery are proven.
-5. Use #57/#40 to run one media-matrix case per implementation phase, then run the full note/Qiita/Zenn/company-blog pass after the persistence layer is stable.
-6. Start #27 and #28 after #26; both depend on persistent projects/sessions/guides.
-7. Start #13 after #27/#28 have enough browser surface to justify E2E tests.
-8. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
+1. Merge the current #26/#29/#57 implementation PR.
+2. Run one bounded Evo X2 live case through #57 and attach it to #40 to verify the runner with real latency/score data.
+3. Start #27 and #28 in parallel so persisted sessions, guides, and draft artifacts become visible in the web app.
+4. Start #13 once the history/artifact UI has enough stable browser surface.
+5. Run the full note/Qiita/Zenn/company-blog media matrix under #40.
+6. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
 
 ## Why not run the full Evo X2 matrix now?
 

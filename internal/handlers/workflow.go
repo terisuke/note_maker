@@ -23,12 +23,35 @@ import (
 	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/repository/memory"
+	sqliterepo "github.com/teradakousuke/note_maker/internal/infrastructure/repository/sqlite"
 	sourcefetch "github.com/teradakousuke/note_maker/internal/infrastructure/source"
 )
 
 var workflowStore = newWorkflowStore()
 
-func newWorkflowStore() *memory.WorkflowStore {
+type workflowStoreBackend interface {
+	SaveAuthorStyle(authorstyleapp.AnalyzeResult) error
+	GetAuthorStyle(string) (authorstyleapp.AnalyzeResult, bool)
+	SaveSession(briefdomain.ArticleBriefSession) error
+	GetSession(string) (briefdomain.ArticleBriefSession, bool)
+	SaveBrief(string, briefdomain.ArticleBrief) error
+	GetBrief(string) (briefdomain.ArticleBrief, bool)
+	GetProfileAndGuide(string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool)
+}
+
+func newWorkflowStore() workflowStoreBackend {
+	driver := strings.ToLower(strings.TrimSpace(os.Getenv("WORKFLOW_STORE_DRIVER")))
+	if driver == "sqlite" {
+		path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
+		if path == "" {
+			path = "data/workflow_store.db"
+		}
+		store, err := sqliterepo.NewWorkflowStore(path)
+		if err == nil {
+			return store
+		}
+		panic(fmt.Sprintf("initialize sqlite workflow store: %v", err))
+	}
 	path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
 	if path == "" {
 		path = "data/workflow_store.json"

@@ -24,6 +24,12 @@ Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/00
 | [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. It now owns live runs from `cmd/scenario/media_matrix` across note, Qiita, Zenn, and Cor blog. |
 | [#57](https://github.com/terisuke/note_maker/issues/57) | Live media-matrix runner and aggregate evaluator | ADR 0001/0002 runtime validation | Child of #40. Offline mode remains default; live mode must require explicit env vars and must refuse accidental workstation-local fallback for primary Evo X2 validation. |
 
+Current cut status:
+
+- [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus `WORKFLOW_STORE_DRIVER=sqlite` web-app opt-in. [#14](https://github.com/terisuke/note_maker/issues/14) remains the broader queryable-history umbrella until the UI/API surface is exposed.
+- [#29](https://github.com/terisuke/note_maker/issues/29) reaches the handler coverage gate: `go test ./internal/handlers -cover` reports 80.0%.
+- [#57](https://github.com/terisuke/note_maker/issues/57) is implemented as `cmd/scenario/live_media_matrix`; it defaults to offline planned aggregate output and requires `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` for Evo X2 calls.
+
 Closed historical issues:
 
 | Issue | Completed Scope | Relation to ADR 0001 |
@@ -46,7 +52,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 - Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
 - Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
-- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store becomes import/export utility.
+- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the default compatibility path until the #14 import/export follow-up is explicit.
 - Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails
@@ -150,7 +156,7 @@ Current live-media evaluation flow:
 
 1. `go run ./cmd/scenario/media_matrix` creates the deterministic cross-media brief/prompt matrix.
 2. `RUN_SOURCE_FETCH_SCENARIO=1 ... go run ./cmd/scenario/source_fetch` validates current live sources.
-3. #57 implements the resumable live runner and aggregate report.
+3. #57's runner is available; run one bounded live case first and attach the aggregate output to #40.
 4. #40 owns the Evo X2 Tailnet live draft results that fill in elapsed seconds, score, verification, and rune counts for each media-matrix case.
 
 ## Completion Criteria

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +62,99 @@ func TestSeedAuthorStyleHandlerRejectsUnknownPersona(t *testing.T) {
 	SeedAuthorStyleHandler(response, request)
 
 	assertErrorResponse(t, response, http.StatusBadRequest, "UNKNOWN_PERSONA")
+}
+
+func TestSeedAuthorStyleHandlerRejectsInvalidJSON(t *testing.T) {
+	workflowStore = memory.NewWorkflowStore()
+	request := httptest.NewRequest(http.MethodPost, "/api/author-styles/seed", bytes.NewBufferString(`{`))
+	response := httptest.NewRecorder()
+
+	SeedAuthorStyleHandler(response, request)
+
+	assertErrorResponse(t, response, http.StatusBadRequest, "INVALID_REQUEST_FORMAT")
+}
+
+func TestRefineStyleGuideWithModelUsesStyleRuntime(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if payload.Model != "style-test" {
+			t.Fatalf("model = %q, want style-test", payload.Model)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"- 導入は具体的な違和感から始める\n- 締めは読者の次の一歩に寄せる"}}]}`))
+	}))
+	defer llmServer.Close()
+	t.Setenv("LLM_BASE_URL", llmServer.URL+"/v1")
+
+	result := setupWorkflowStyle(t)
+	refined, err := refineStyleGuideWithModel(context.Background(), result, "style-test")
+	if err != nil {
+		t.Fatalf("refine style guide: %v", err)
+	}
+	if !strings.Contains(refined, "具体的な違和感") {
+		t.Fatalf("unexpected refined guide: %s", refined)
+	}
+}
+
+func TestAnalyzeAuthorStyleHandlerFetchesHTMLArticle(t *testing.T) {
+	articleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html><head><title>HTML article</title></head><body><article><h1>HTML article</h1>` +
+			strings.Repeat(`<p>僕はHTML記事から文体を抽出し、過去記事の調子を保存する流れを確認します。</p>`, 12) +
+			`</article></body></html>`))
+	}))
+	defer articleServer.Close()
+	workflowStore = memory.NewWorkflowStore()
+
+	body := `{"article_urls":[` + quoteJSONString(articleServer.URL+"/article") + `],"limit":1}`
+	request := httptest.NewRequest(http.MethodPost, "/api/author-styles/analyze", bytes.NewBufferString(body))
+	response := httptest.NewRecorder()
+
+	AnalyzeAuthorStyleHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload authorStyleResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.ProfileID == "" || payload.GuideID == "" || payload.ArticleCount != 1 {
+		t.Fatalf("unexpected analysis response: %#v", payload)
+	}
+	if _, ok := workflowStore.GetAuthorStyle(payload.ID); !ok {
+		t.Fatal("analysis result was not saved")
+	}
+}
+
+func TestAnalyzeAuthorStyleHandlerValidatesRequest(t *testing.T) {
+	workflowStore = memory.NewWorkflowStore()
+	tests := []struct {
+		name   string
+		body   string
+		status int
+		code   string
+	}{
+		{name: "bad json", body: `{`, status: http.StatusBadRequest, code: "INVALID_REQUEST_FORMAT"},
+		{name: "missing source", body: `{}`, status: http.StatusInternalServerError, code: "AUTHOR_STYLE_ANALYSIS_FAILED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/author-styles/analyze", bytes.NewBufferString(tt.body))
+			response := httptest.NewRecorder()
+
+			AnalyzeAuthorStyleHandler(response, request)
+
+			assertErrorResponse(t, response, tt.status, tt.code)
+		})
+	}
 }
 
 func TestGetAuthorStyleHandlerNotFound(t *testing.T) {
@@ -208,6 +302,17 @@ func TestGetBriefSessionHandlerReturnsStoredProgressAndCompletedBrief(t *testing
 	}
 }
 
+func TestGetBriefSessionHandlerRejectsMissingSession(t *testing.T) {
+	workflowStore = memory.NewWorkflowStore()
+	request := httptest.NewRequest(http.MethodGet, "/api/brief-sessions/missing", nil)
+	request = mux.SetURLVars(request, map[string]string{"id": "missing"})
+	response := httptest.NewRecorder()
+
+	GetBriefSessionHandler(response, request)
+
+	assertErrorResponse(t, response, http.StatusNotFound, "BRIEF_SESSION_NOT_FOUND")
+}
+
 func TestAnswerBriefSessionHandlerRecordsAnswerWithoutLLM(t *testing.T) {
 	style := setupWorkflowStyle(t)
 	session, err := briefdomain.NewArticleBriefSession("session-answer", style.Profile.ID)
@@ -269,6 +374,66 @@ func TestAnswerBriefSessionHandlerSkipDeepDiveCompletesAndSavesBrief(t *testing.
 	}
 }
 
+func TestAnswerBriefSessionHandlerValidatesRequestAndSessionState(t *testing.T) {
+	workflowStore = memory.NewWorkflowStore()
+	tests := []struct {
+		name      string
+		sessionID string
+		body      string
+		status    int
+		code      string
+		setup     func(t *testing.T)
+	}{
+		{
+			name:      "bad json",
+			sessionID: "session-any",
+			body:      `{`,
+			status:    http.StatusBadRequest,
+			code:      "INVALID_REQUEST_FORMAT",
+		},
+		{
+			name:      "missing session",
+			sessionID: "missing",
+			body:      `{"content":"answer"}`,
+			status:    http.StatusNotFound,
+			code:      "BRIEF_SESSION_NOT_FOUND",
+		},
+		{
+			name:      "skip before complete",
+			sessionID: "session-incomplete",
+			body:      `{"skip_deep_dive":true}`,
+			status:    http.StatusBadRequest,
+			code:      "BRIEF_SESSION_INCOMPLETE",
+			setup: func(t *testing.T) {
+				style := setupWorkflowStyle(t)
+				session, err := briefdomain.NewArticleBriefSession("session-incomplete", style.Profile.ID)
+				if err != nil {
+					t.Fatalf("new session: %v", err)
+				}
+				if err := workflowStore.SaveSession(session); err != nil {
+					t.Fatalf("save session: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workflowStore = memory.NewWorkflowStore()
+			if tt.setup != nil {
+				tt.setup(t)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/brief-sessions/"+tt.sessionID+"/answers", bytes.NewBufferString(tt.body))
+			request = mux.SetURLVars(request, map[string]string{"id": tt.sessionID})
+			response := httptest.NewRecorder()
+
+			AnswerBriefSessionHandler(response, request)
+
+			assertErrorResponse(t, response, tt.status, tt.code)
+		})
+	}
+}
+
 func TestAnswerBriefSessionHandlerStreamsFirstAnswerWithoutLLM(t *testing.T) {
 	style := setupWorkflowStyle(t)
 	session, err := briefdomain.NewArticleBriefSession("session-stream-answer", style.Profile.ID)
@@ -296,6 +461,114 @@ func TestAnswerBriefSessionHandlerStreamsFirstAnswerWithoutLLM(t *testing.T) {
 		if !strings.Contains(stream, want) {
 			t.Fatalf("stream missing %q:\n%s", want, stream)
 		}
+	}
+}
+
+func TestAnswerBriefSessionHandlerStreamsGeneratedFollowUp(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if payload.Model != "brief-test" {
+			t.Fatalf("model = %q, want brief-test", payload.Model)
+		}
+		if !payload.Stream {
+			t.Fatal("follow-up generation should use streaming completions")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			"「A handler test failed before reaching a networked LLM.」というご回答を踏まえて、",
+			"どの判断を最初に説明しますか？",
+		} {
+			_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":` + quoteJSONString(chunk) + `}}]}` + "\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer llmServer.Close()
+	t.Setenv("LLM_BASE_URL", llmServer.URL+"/v1")
+	t.Setenv("BRIEF_LLM_MODEL", "brief-test")
+
+	style := setupWorkflowStyle(t)
+	session := sessionWithFixedAnswers(t, "session-follow-up-stream", style.Profile.ID)
+	if err := workflowStore.SaveSession(session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/brief-sessions/session-follow-up-stream/answers", bytes.NewBufferString(`{"content":"The first follow-up answer adds the concrete decision point."}`))
+	request.Header.Set("Accept", "text/event-stream")
+	request = mux.SetURLVars(request, map[string]string{"id": "session-follow-up-stream"})
+	response := httptest.NewRecorder()
+
+	AnswerBriefSessionHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Fatalf("unexpected content type: %s", got)
+	}
+	stream := response.Body.String()
+	for _, want := range []string{"event: status", "follow_up_generation_started", "event: chunk", "event: result", "event: done"} {
+		if !strings.Contains(stream, want) {
+			t.Fatalf("stream missing %q:\n%s", want, stream)
+		}
+	}
+	if !strings.Contains(stream, "どの判断を最初に説明しますか？") {
+		t.Fatalf("stream missing generated follow-up question:\n%s", stream)
+	}
+	saved, ok := workflowStore.GetSession("session-follow-up-stream")
+	if !ok {
+		t.Fatal("answered session was not saved")
+	}
+	if got := len(saved.DeepDiveAnswers()); got != 1 {
+		t.Fatalf("deep dive answer count = %d, want 1; answers = %#v", got, saved.Answers)
+	}
+}
+
+func TestLLMFollowUpGeneratorUsesNonStreamingRuntime(t *testing.T) {
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if payload.Model != "brief-nonstream-test" {
+			t.Fatalf("model = %q, want brief-nonstream-test", payload.Model)
+		}
+		if payload.Stream {
+			t.Fatal("non-stream follow-up should not request SSE")
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"「Local workflow tests」というご回答を踏まえて、どの判断を一番詳しく説明しますか？"}}]}`))
+	}))
+	defer llmServer.Close()
+	t.Setenv("LLM_BASE_URL", llmServer.URL+"/v1")
+
+	style := setupWorkflowStyle(t)
+	session := sessionWithFixedAnswers(t, "session-follow-up-nonstream", style.Profile.ID)
+	target := session.Questions[0]
+	answer, ok := session.AnswerForQuestion(target.ID)
+	if !ok {
+		t.Fatalf("missing answer for %s", target.ID)
+	}
+	generator := llmFollowUpGenerator{model: "brief-nonstream-test", styleGuideMarkdown: style.Guide.Markdown}
+
+	question, err := generator.GenerateFollowUp(context.Background(), session, target, answer, 1)
+	if err != nil {
+		t.Fatalf("generate follow-up: %v", err)
+	}
+	if !strings.Contains(question, "どの判断") {
+		t.Fatalf("unexpected question: %s", question)
 	}
 }
 
