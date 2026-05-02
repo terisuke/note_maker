@@ -26,14 +26,16 @@ The four phases below match ADR 0002. Each is independently shippable.
 | C | Memory: SQLite + history UI | Persistence rewrite, extends [#14](https://github.com/terisuke/note_maker/issues/14) | [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28) |
 | D | Quality & coverage | Tests + thresholds | [#29](https://github.com/terisuke/note_maker/issues/29) (rolls up [#11](https://github.com/terisuke/note_maker/issues/11), [#13](https://github.com/terisuke/note_maker/issues/13)) |
 
-Recommended order: **A → C → B → D**. Phase B benefits from durable storage (Phase C) being in place first, otherwise the JSON store becomes a temporary obstacle for the persona registry.
+Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. After the 2026-05-03 merges, the practical order is **C1 + D1 in parallel → C2/C3 → media-matrix Evo X2 evaluation under #40**.
 
-Current status after the 2026-05-02 merges:
+Current status after the 2026-05-03 merges:
 
 - [#11](https://github.com/terisuke/note_maker/issues/11) strict Terisuke style tuning is closed.
 - [#21](https://github.com/terisuke/note_maker/issues/21) B1 landed early: persona/format domain concepts, prompt dispatch, selectors, and validators exist.
 - [#23](https://github.com/terisuke/note_maker/issues/23) is implemented for the in-repo generation surface: every registered format has a prompt fragment, embedded guide, validator, unit coverage, and deterministic sample validation.
 - [#24](https://github.com/terisuke/note_maker/issues/24) is implemented for built-in seeds: `terisuke` and `cloudia` have distinct source bundles, default formats, prompt hints, and unit/scenario coverage. Live source-derived guide rebuilding remains dependent on [#22](https://github.com/terisuke/note_maker/issues/22).
+- [#22](https://github.com/terisuke/note_maker/issues/22) is implemented and revalidated for historical user/article sources. Cor blog style analysis should use GitHub Markdown for full bodies and RSS for discovery.
+- [#25](https://github.com/terisuke/note_maker/issues/25) is implemented: the server composes persona/format question templates, the UI fetches templates, and `cmd/scenario/media_matrix` defines varied cases for note, Cor blog, Zenn, Qiita, and homepage.
 - [#38](https://github.com/terisuke/note_maker/issues/38) Tailnet OpenAI-compatible API is now the Evo X2 primary path. SSH tunnel access is diagnostic-only.
 - [#36](https://github.com/terisuke/note_maker/issues/36) remains open for local llama.cpp fallback quality; it does not block Phase A work.
 - [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization.
@@ -47,7 +49,9 @@ Near-term implementation cut:
 | 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented and merged: answers render as editable bubbles and edits fork the in-memory session. |
 | 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Implemented in code: every follow-up references the parent answer in prompt and UI, with validation recorded under `docs/validation/`. |
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
-| 5 | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers and draft versions need durable storage before broader persona library work. | SQLite stores sessions, answers, guides, articles, and draft versions. |
+| 5A | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers, media-matrix briefs, draft versions, and evaluation results need durable storage before expensive Evo X2 runs become product memory. | SQLite stores sessions, answers, guides, articles, drafts, and import/export from the JSON store. |
+| 5B | [#29](https://github.com/terisuke/note_maker/issues/29) | #17-#25 added real handler surface; coverage should catch regressions before C2/C3 add more UI and endpoints. | `workflow.go` coverage reaches the agreed gate without real LLM/network. |
+| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Note/Qiita/Zenn/Cor blog runs record endpoint/model/elapsed/score/runes/verification in a comparable aggregate report. |
 
 ## Phase A — Conversation UX
 
@@ -325,4 +329,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18), [#17](https://github.com/terisuke/note_maker/issues/17), and [#20](https://github.com/terisuke/note_maker/issues/20) are merged. [#19](https://github.com/terisuke/note_maker/issues/19) is implemented in code. [#23](https://github.com/terisuke/note_maker/issues/23) and [#24](https://github.com/terisuke/note_maker/issues/24) are implemented for the registry/prompt/validator/seed scope and validated in [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md). Continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) so editable draft state and regeneration history survive restarts; source acquisition remains under [#22](https://github.com/terisuke/note_maker/issues/22).
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#25](https://github.com/terisuke/note_maker/issues/25) are implemented and merged. Continue with Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) and D1 ([#29](https://github.com/terisuke/note_maker/issues/29)) in parallel. Use [#57](https://github.com/terisuke/note_maker/issues/57) and [#40](https://github.com/terisuke/note_maker/issues/40) for the final Evo X2 media-matrix evaluation once persistence can retain expensive run outputs.

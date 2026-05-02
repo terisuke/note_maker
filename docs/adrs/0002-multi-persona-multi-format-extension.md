@@ -195,9 +195,9 @@ The full work is broken into four phases tracked by issues. Each phase is indepe
   - Handler test coverage, Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold), Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright), Issue [#15](https://github.com/terisuke/note_maker/issues/15) (desktop packaging) follow-up.
   - Issue: [#29](https://github.com/terisuke/note_maker/issues/29).
 
-Recommended order: A → C → B → D. Phase C is sequenced before the remaining B work because the persona registry needs durable storage to be useful; running the full persona library on the JSON store would force a second migration.
+Original recommended order was A → C → B → D. Implementation intentionally pulled the minimum B work forward because source acquisition, format validation, persona seeds, and question templates were required before a realistic cross-media evaluation could be defined. With Phases A and B now implemented, the next order is C1 + D1 in parallel, then C2/C3, then the full Evo X2 media-matrix evaluation under #40.
 
-Current implementation status as of 2026-05-02:
+Current implementation status as of 2026-05-03:
 
 - ADR 0001's strict Terisuke style threshold work is complete ([#11](https://github.com/terisuke/note_maker/issues/11)).
 - Phase B1 is complete ahead of the original order: `Persona` and `OutputFormat` concepts, prompt dispatch, and format validators are in place ([#21](https://github.com/terisuke/note_maker/issues/21)). The remaining Phase B work stays deferred until after Phase A/C foundations.
@@ -209,13 +209,14 @@ Current implementation status as of 2026-05-02:
 - Phase A1 is implemented and merged: the interview surface now renders a chat-style transcript, answer bubbles can be edited inline, and edits create child sessions via fork-on-edit while retaining `parent_session_id` lineage ([#17](https://github.com/terisuke/note_maker/issues/17)).
 - Phase A4 is implemented and merged: follow-up prompts include parent question, parent answer, and active style guide context; rule-based fallback questions use the same quoted parent-answer prefix; the transcript labels the parent answer as the deep-dive rationale ([#20](https://github.com/terisuke/note_maker/issues/20)). Validation is recorded in [Issue 20 deep-dive rationale validation](../validation/issue-20-deep-dive-rationale-2026-05-02.md).
 - Phase A3 is implemented in code: the generated Markdown textarea is editable, preview rendering live-syncs through `marked`, both preview and Markdown tabs can copy content, and `POST /api/drafts/{id}/regenerate-section` rewrites exactly one `## ` subtree while preserving the rest of the draft byte-for-byte ([#19](https://github.com/terisuke/note_maker/issues/19)). Validation is recorded in [Issue 19 section regeneration validation](../validation/issue-19-section-regeneration-2026-05-02.md).
-- Phase B3/B4 are implemented for the in-repo registry surface: all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Deterministic scenario validation is recorded in [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md). Live source-derived guide rebuilding for Zenn/Qiita/RSS remains part of source acquisition work in [#22](https://github.com/terisuke/note_maker/issues/22).
+- Phase B2/B3/B4 are implemented: historical source acquisition works for note, Zenn, Qiita, Cor RSS, and Cor GitHub Markdown; all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Validation is recorded in [Issue 22 source fetcher validation](../validation/issue-22-source-fetchers-2026-05-02.md) and [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md).
 - Phase B5 is implemented: fixed interview questions are composed server-side by `persona_id × output_format_id`, Cloudia technical modes include extra viewpoint/context prompts, the frontend reads `GET /api/brief-sessions/templates`, and `cmd/scenario/media_matrix` produces a six-case cross-media evaluation matrix for note, Cor blog, Zenn, Qiita, and homepage output ([#25](https://github.com/terisuke/note_maker/issues/25)).
 
 Near-term execution order:
 
-1. Merge [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate on top of the streamed draft surface.
-2. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts and section-regeneration candidates can become versioned draft records.
+1. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks, source-derived guides, media-matrix briefs, draft versions, and evaluation records survive restarts.
+2. Phase D1 ([#29](https://github.com/terisuke/note_maker/issues/29)) in parallel with C1 — raise `workflow.go` handler coverage before more endpoint-heavy UI work lands.
+3. Runtime stabilization ([#40](https://github.com/terisuke/note_maker/issues/40), with runner implementation in [#57](https://github.com/terisuke/note_maker/issues/57)) — use `cmd/scenario/media_matrix` to run varied Note/Qiita/Zenn/Cor blog Evo X2 cases and record endpoint/model/elapsed/score/runes/verification. Full multi-case runs should happen after C1 unless the user explicitly wants one-off artifact files.
 
 ## Tracked issues
 
@@ -234,6 +235,7 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI
 - C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards
 - D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` (currently 0% coverage)
+- Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40)
 
 ## Consequences
 
