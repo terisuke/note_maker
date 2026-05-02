@@ -8,6 +8,7 @@ import (
 
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
+	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
@@ -27,6 +28,10 @@ func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
 			PersonalContext:       "音楽家からエンジニアになった経験を入れる。",
 			Exclusions:            "Note記事本文の再取得",
 			TargetLengthStructure: "1200字、導入・本論・結論",
+			CustomAnswers: []BriefAnswer{
+				{QuestionID: briefdomain.QuestionIDReaderProblem, Content: "媒体ごとの書き分けが難しい"},
+				{QuestionID: briefdomain.QuestionIDTitleKeywords, Content: "下書き、Evo X2、検証"},
+			},
 		},
 		AuthorProfile: profile,
 	}
@@ -51,6 +56,8 @@ func TestGenerateBuildsPromptFromGuideAndBriefOnly(t *testing.T) {
 		"参考記事本文は与えられていません",
 		"strict style calibration",
 		"一人称密度",
+		"読者の困りごと: 媒体ごとの書き分けが難しい",
+		"タイトル候補・見出し語: 下書き、Evo X2、検証",
 	} {
 		if !strings.Contains(generator.prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, generator.prompt)

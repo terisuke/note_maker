@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
@@ -145,6 +146,7 @@ func BuildSectionRegenerationPrompt(guide WritingStyleGuide, brief ArticleBrief,
 	appendLine(&prompt, "著者本人の属人的な文脈", brief.PersonalContext)
 	appendLine(&prompt, "含めないこと", brief.Exclusions)
 	appendLine(&prompt, "トーンと立場", brief.ToneStance)
+	appendCustomAnswers(&prompt, brief.CustomAnswers)
 	appendDeepDives(&prompt, brief.DeepDives)
 	if calibration := strictMetricCalibration(profile, brief, guide); calibration != "" {
 		prompt.WriteString("\n## strict style calibration\n")
@@ -415,10 +417,49 @@ func appendCustomAnswers(builder *strings.Builder, values []BriefAnswer) {
 	for _, value := range values {
 		content := strings.TrimSpace(value.Content)
 		if content != "" {
-			lines = append(lines, content)
+			lines = append(lines, briefQuestionLabel(value.QuestionID)+": "+content)
 		}
 	}
 	appendList(builder, "追加質問メモ", lines)
+}
+
+func briefQuestionLabel(questionID string) string {
+	switch questionID {
+	case briefdomain.QuestionIDReaderProblem:
+		return "読者の困りごと"
+	case briefdomain.QuestionIDKeyTakeaway:
+		return "持ち帰ってほしいこと"
+	case briefdomain.QuestionIDConcreteExample:
+		return "具体例・失敗例"
+	case briefdomain.QuestionIDEvidence:
+		return "根拠・数字・比較"
+	case briefdomain.QuestionIDTitleKeywords:
+		return "タイトル候補・見出し語"
+	case briefdomain.QuestionIDStoryArc:
+		return "note向けの感情の流れ"
+	case briefdomain.QuestionIDTargetStack:
+		return "技術・ツール・バージョン"
+	case briefdomain.QuestionIDPrerequisiteKnowledge:
+		return "読者の前提知識"
+	case briefdomain.QuestionIDTechnicalProof:
+		return "再現手順・検証結果"
+	case briefdomain.QuestionIDCodeExamples:
+		return "コード例・コマンド"
+	case briefdomain.QuestionIDReferences:
+		return "参考リンク"
+	case briefdomain.QuestionIDCorBlogPurpose:
+		return "自社ブログでの目的"
+	case briefdomain.QuestionIDCorBlogNextAction:
+		return "会社ブログとしての読後感"
+	case briefdomain.QuestionIDHomepageCTA:
+		return "CTA"
+	case briefdomain.QuestionIDHomepageTrust:
+		return "信頼の根拠"
+	case briefdomain.QuestionIDCloudiaViewpoint:
+		return "クラウディア視点"
+	default:
+		return questionID
+	}
 }
 
 func truncateRunes(value string, max int) string {

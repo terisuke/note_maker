@@ -1,7 +1,6 @@
 package brief
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -15,23 +14,33 @@ func TestFixedQuestionsAreDeterministic(t *testing.T) {
 		QuestionIDTheme,
 		QuestionIDOpeningEpisode,
 		QuestionIDReader,
+		QuestionIDReaderProblem,
 		QuestionIDExpectedReaderAction,
+		QuestionIDKeyTakeaway,
 		QuestionIDMustInclude,
+		QuestionIDConcreteExample,
+		QuestionIDEvidence,
 		QuestionIDPersonalContext,
 		QuestionIDExclusions,
 		QuestionIDTargetLengthStructure,
 		QuestionIDToneStance,
+		QuestionIDTitleKeywords,
 	}
 	wantText := []string{
-		"記事の中心テーマは何ですか？",
-		"記事の導入に置く具体的な体験や場面は何ですか？",
-		"この記事を届けたい読者は誰ですか？",
-		"読後に読者へどんな変化や行動を起こしてほしいですか？",
-		"記事に必ず含める論点、事実、手順は何ですか？",
-		"著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？",
-		"記事に含めないこと、避けたい表現、断言しないことは何ですか？",
-		"目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。",
-		"記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。",
+		"この記事で一番伝えたいことを、ひとことで書くと何ですか？",
+		"冒頭で使えそうな出来事や場面はありますか？いつ・どこで・何が起きましたか？",
+		"誰に向けて書きますか？例: これから試す人、社内メンバー、同じ悩みのある人。",
+		"その読者は今、何に困っている・迷っていると思いますか？",
+		"読み終わった後、その人にまず何をしてほしいですか？",
+		"読者に一番持ち帰ってほしい言葉や考えは何ですか？",
+		"絶対に入れたい事実・手順・名前・数字を箇条書きで教えてください。",
+		"その話を伝えるための具体例、失敗例、画面、コード、会話などはありますか？",
+		"根拠として出せる結果・数字・比較・リンク・観察はありますか？なければ「なし」でOKです。",
+		"あなた自身はなぜこの話を書きたいですか？経験・問題意識・違和感を短く教えてください。",
+		"書かないこと、避けたい言い方、まだ断言しないことはありますか？なければ「なし」でOKです。",
+		"長さと構成の希望はありますか？例: 1500字で軽く、3000字で詳しく、導入→手順→結果。",
+		"文章の雰囲気はどうしますか？例: やさしく、熱量高め、冷静な技術報告、社内向け。",
+		"タイトルや見出しに入れたい言葉はありますか？なければ「未定」でOKです。",
 	}
 	if len(questions) != len(wantIDs) {
 		t.Fatalf("question count = %d, want %d", len(questions), len(wantIDs))
@@ -66,19 +75,20 @@ func TestComposeFixedQuestionsCoversPersonasAndFormats(t *testing.T) {
 					t.Fatalf("question count = %d, want at least %d", len(questions), len(FixedQuestions()))
 				}
 				assertUniqueQuestionIDs(t, questions)
-				if personaID == persona.IDTerisuke && formatID == outputformat.IDNoteArticle {
-					if !reflect.DeepEqual(questions, FixedQuestions()) {
-						t.Fatalf("terisuke note_article template changed:\ngot  %#v\nwant %#v", questions, FixedQuestions())
-					}
-					return
-				}
 				switch formatID {
 				case outputformat.IDNoteArticle:
 					assertQuestionPresent(t, questions, QuestionIDStoryArc)
 				case outputformat.IDMarkdownBlog, outputformat.IDZennArticle, outputformat.IDQiitaArticle:
 					assertQuestionPresent(t, questions, QuestionIDTargetStack)
+					assertQuestionPresent(t, questions, QuestionIDPrerequisiteKnowledge)
+					assertQuestionPresent(t, questions, QuestionIDCodeExamples)
+					assertQuestionPresent(t, questions, QuestionIDReferences)
 				case outputformat.IDHomepageSection:
 					assertQuestionPresent(t, questions, QuestionIDHomepageCTA)
+				}
+				if formatID == outputformat.IDMarkdownBlog {
+					assertQuestionPresent(t, questions, QuestionIDCorBlogPurpose)
+					assertQuestionPresent(t, questions, QuestionIDCorBlogNextAction)
 				}
 				if personaID == persona.IDCloudia {
 					assertQuestionPresent(t, questions, QuestionIDCloudiaViewpoint)
@@ -323,12 +333,17 @@ func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBrie
 		QuestionIDTheme:                 "Local article generation with a small deterministic workflow.",
 		QuestionIDOpeningEpisode:        "Open with a failed local LLM run that timed out while drafting.",
 		QuestionIDReader:                "Solo developers who write note.com articles with local tools.",
+		QuestionIDReaderProblem:         "They are unsure how to structure practical notes.",
 		QuestionIDExpectedReaderAction:  "They should try a three-phase workflow before drafting.",
+		QuestionIDKeyTakeaway:           "Small interviews make drafts easier to evaluate.",
 		QuestionIDMustInclude:           "Mention style analysis, brief interviews, and final draft checks.",
+		QuestionIDConcreteExample:       "Use a timeout failure and a repaired draft flow as the example.",
+		QuestionIDEvidence:              "Use elapsed seconds, score, and verification status.",
 		QuestionIDPersonalContext:       "Use the author's background as a musician, engineer, and public speaker.",
 		QuestionIDExclusions:            "Avoid cloud-only assumptions.",
 		QuestionIDTargetLengthStructure: "3000字前後 with six sections.",
 		QuestionIDToneStance:            "Practical and introspective.",
+		QuestionIDTitleKeywords:         "local LLM, draft workflow, verification.",
 	}
 	for key, value := range overrides {
 		answers[key] = value

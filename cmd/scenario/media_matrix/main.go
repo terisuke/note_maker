@@ -398,10 +398,18 @@ func answerForQuestion(item matrixCase, questionID string) string {
 		return item.OpeningEpisode
 	case briefdomain.QuestionIDReader:
 		return item.Reader
+	case briefdomain.QuestionIDReaderProblem:
+		return "媒体ごとの作法が違い、どの粒度で書けば読者に届くか迷っている。"
 	case briefdomain.QuestionIDExpectedReaderAction:
 		return item.ExpectedReaderAction
+	case briefdomain.QuestionIDKeyTakeaway:
+		return "媒体に合わせて、同じ知見でも入口と根拠の出し方を変える。"
 	case briefdomain.QuestionIDMustInclude:
 		return item.MustInclude
+	case briefdomain.QuestionIDConcreteExample:
+		return "実際の取得元、Markdown形式、検証コマンド、生成後の評価結果を例として出す。"
+	case briefdomain.QuestionIDEvidence:
+		return "シナリオCLIの出力、style score、verification PASS/NEEDS_REVIEW、生成文字数を根拠にする。"
 	case briefdomain.QuestionIDPersonalContext:
 		return item.PersonalContext
 	case briefdomain.QuestionIDExclusions:
@@ -410,12 +418,24 @@ func answerForQuestion(item matrixCase, questionID string) string {
 		return item.TargetLengthStructure
 	case briefdomain.QuestionIDToneStance:
 		return item.ToneStance
+	case briefdomain.QuestionIDTitleKeywords:
+		return "AI駆動開発、媒体別、下書き、検証、Evo X2。"
 	case briefdomain.QuestionIDStoryArc:
 		return "導入の違和感から、実践で見えた発見へ進み、読者が次に試す一歩で締める。"
 	case briefdomain.QuestionIDTargetStack:
 		return "Go 1.26、OpenAI互換API、Ollama/Evo X2、Markdown validator、ローカルシナリオCLI。"
+	case briefdomain.QuestionIDPrerequisiteKnowledge:
+		return "GoとMarkdownの基礎は知っているが、媒体別の記法差分やローカルLLM運用はこれから試す読者。"
 	case briefdomain.QuestionIDTechnicalProof:
 		return "実行コマンド、JSON出力、本文長、style score、verification結果を比較表に残す。"
+	case briefdomain.QuestionIDCodeExamples:
+		return "必要ならMakefileターゲット、curl、JSONの抜粋を短く載せる。"
+	case briefdomain.QuestionIDReferences:
+		return "Zenn/Qiita公式Markdownガイド、corsweb2024のMarkdown記事、過去の検証ログ。"
+	case briefdomain.QuestionIDCorBlogPurpose:
+		return "技術知見の報告を主にし、社員や採用候補へ開発方針も伝える。"
+	case briefdomain.QuestionIDCorBlogNextAction:
+		return "Cor.incの開発文化と検証姿勢を理解し、相談や協業につなげてもらう。"
 	case briefdomain.QuestionIDHomepageCTA:
 		return "問い合わせまたは技術相談への導線を置き、検証可能な発信基盤を短く伝える。"
 	case briefdomain.QuestionIDHomepageTrust:

@@ -93,6 +93,8 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 The interview is a structured取材 session, not a generic chat.
 
 - Fixed questions run first in deterministic order.
+- Fixed questions should be small and plain enough to answer in one or two short sentences. If one question asks for multiple kinds of thinking, split it into smaller template questions.
+- Optional questions must be clearly optional in the UI and may advance as `未定`; do not force the user to invent detail just to continue.
 - Deep-dive questions run after fixed questions.
 - A deep-dive question must store:
   - `target_question_id`
@@ -101,7 +103,7 @@ The interview is a structured取材 session, not a generic chat.
 - Follow-ups must ask exactly one question.
 - Follow-ups must not be yes/no questions.
 - Follow-ups must not be binary choice questions.
-- Follow-ups must ask for concrete scene, reason, turning point, emotion, or reader lesson.
+- Follow-ups must ask for one concrete scene, step, number, reason, turning point, emotion, or reader lesson.
 - If LLM-generated follow-up text fails validation, use a rule-based fallback.
 
 ## Draft Guardrails
