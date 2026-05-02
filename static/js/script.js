@@ -16,10 +16,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = {
     profileId: '',
     sessionId: '',
+    parentSessionId: '',
     nextQuestion: null,
+    answers: [],
     completedBrief: null,
     personas: [],
     formats: [],
+    questionTextById: {},
+    lastSubmittedAnswer: '',
     answerAbortController: null,
     draftAbortController: null,
   };
@@ -84,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el.usePresetStyle.addEventListener('click', usePresetStyle);
   el.startInterview.addEventListener('click', startInterview);
   el.submitAnswer.addEventListener('click', submitAnswer);
+  el.answerInput.addEventListener('keydown', onAnswerInputKeydown);
   el.cancelAnswer.addEventListener('click', () => state.answerAbortController?.abort());
   el.skipDeepDive.addEventListener('click', skipDeepDive);
   el.generateDraft.addEventListener('click', generateDraft);
@@ -198,10 +203,16 @@ document.addEventListener('DOMContentLoaded', () => {
         },
       });
       state.sessionId = data.session_id;
+      state.parentSessionId = data.parent_session_id || '';
       state.nextQuestion = data.next_question;
+      state.answers = data.answers || [];
+      state.completedBrief = null;
+      rememberQuestions(currentQuestions());
+      rememberQuestion(data.next_question);
       el.interviewArea.classList.remove('hidden');
-      el.questionLog.innerHTML = '';
-      renderQuestion(data.next_question);
+      el.briefResult.classList.add('hidden');
+      el.generateDraft.disabled = true;
+      renderTranscript(data);
     } catch (error) {
       showError(`取材開始に失敗しました: ${error.message}`);
     } finally {
@@ -216,7 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showError('回答を入力してください');
       return;
     }
-    appendLog('answer', content);
+    state.lastSubmittedAnswer = content;
     el.answerInput.value = '';
     await sendAnswer({ content });
   }
@@ -247,7 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let streamedQuestionItem = null;
     state.answerAbortController = new AbortController();
     setAnswerStreaming(true);
-    appendLog('system', '回答を保存しています。');
     try {
       await requestSSE(`/api/brief-sessions/${state.sessionId}/answers`, {
         method: 'POST',
@@ -255,25 +265,15 @@ document.addEventListener('DOMContentLoaded', () => {
         signal: state.answerAbortController.signal,
         onEvent(event, data) {
           if (event === 'status') {
-            if (data.status === 'follow_up_generation_started') {
-              appendLog('system', '深掘り質問を生成しています。');
-            }
             return;
           }
           if (event === 'chunk') {
             streamedQuestion += data.text || '';
-            if (!streamedQuestionItem) {
-              streamedQuestionItem = appendLog('deep-dive', '');
-            }
-            streamedQuestionItem.textContent = streamedQuestion;
-            el.questionLog.scrollTop = el.questionLog.scrollHeight;
+            streamedQuestionItem = renderPendingQuestion(streamedQuestionItem, streamedQuestion);
             return;
           }
           if (event === 'result') {
-            applyInterviewResult(data, { questionAlreadyRendered: Boolean(streamedQuestionItem) });
-            if (streamedQuestionItem && data.next_question?.text) {
-              streamedQuestionItem.textContent = data.next_question.text;
-            }
+            applyInterviewResult(data);
             return;
           }
           if (event === 'error') {
@@ -283,7 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (error) {
       if (error.name === 'AbortError') {
-        appendLog('system', '処理を停止しました。途中までの内容は画面に残しています。');
+        renderPendingQuestion(streamedQuestionItem, streamedQuestion || '処理を停止しました。途中までの内容は画面に残しています。');
       } else {
         showError(`回答の保存に失敗しました: ${error.message}`);
       }
@@ -293,20 +293,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function applyInterviewResult(data, options = {}) {
+  function applyInterviewResult(data) {
+    state.sessionId = data.session_id || state.sessionId;
+    state.parentSessionId = data.parent_session_id || '';
+    state.answers = data.answers || [];
+    rememberQuestion(data.next_question);
+    renderTranscript(data);
     if (data.completed) {
       state.completedBrief = data.brief;
       state.nextQuestion = null;
       el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
       el.briefResult.classList.remove('hidden');
       el.generateDraft.disabled = false;
-      appendLog('system', '記事ブリーフが完成しました。');
+      el.skipDeepDive.classList.add('hidden');
       return;
     }
+    state.completedBrief = null;
     state.nextQuestion = data.next_question;
-    if (!options.questionAlreadyRendered) {
-      renderQuestion(data.next_question);
-    }
+    el.briefResult.classList.add('hidden');
+    el.generateDraft.disabled = true;
     el.skipDeepDive.classList.toggle('hidden', data.next_question?.flow_type !== 'deep_dive_follow_up');
   }
 
@@ -377,12 +382,235 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function renderQuestion(question) {
-    if (!question) {
+  function renderTranscript(data = {}) {
+    const answers = data.answers || state.answers || [];
+    const nextQuestion = data.next_question ?? state.nextQuestion;
+    el.questionLog.innerHTML = '';
+    answers.forEach((answer) => {
+      el.questionLog.appendChild(createTranscriptItem(answer));
+    });
+    if (nextQuestion && !data.completed) {
+      el.questionLog.appendChild(createPendingQuestionItem(nextQuestion));
+    }
+    el.questionLog.scrollTop = el.questionLog.scrollHeight;
+  }
+
+  function createTranscriptItem(answer) {
+    const questionId = answerValue(answer, 'question_id', 'QuestionID');
+    const flowType = answerValue(answer, 'flow_type', 'FlowType') || 'main';
+    const targetQuestionId = answerValue(answer, 'target_question_id', 'TargetQuestionID');
+    const item = document.createElement('div');
+    item.className = `transcript-item answered ${flowType === 'deep_dive_follow_up' ? 'deep-dive' : ''}`;
+
+    const questionBubble = document.createElement('div');
+    questionBubble.className = 'question-bubble';
+    const questionLabel = document.createElement('span');
+    questionLabel.className = 'bubble-label';
+    questionLabel.textContent = flowType === 'deep_dive_follow_up' ? '深掘り質問' : '質問';
+    const questionText = document.createElement('p');
+    questionText.textContent = questionTextForAnswer(answer);
+    questionBubble.append(questionLabel, questionText);
+    const parentContext = parentContextForAnswer(answer);
+    if (parentContext) {
+      questionBubble.appendChild(parentContext);
+    }
+
+    const answerBubble = document.createElement('div');
+    answerBubble.className = 'answer-bubble';
+    answerBubble.dataset.answerId = questionId;
+    if (targetQuestionId) {
+      answerBubble.dataset.targetQuestionId = targetQuestionId;
+    }
+    const answerLabel = document.createElement('span');
+    answerLabel.className = 'bubble-label';
+    answerLabel.textContent = '回答';
+    const answerText = document.createElement('p');
+    answerText.className = 'answer-text';
+    answerText.textContent = answerValue(answer, 'content', 'Content') || '';
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'answer-edit-btn';
+    editButton.textContent = '編集';
+    editButton.addEventListener('click', () => startAnswerEdit(answerBubble, answer));
+    answerBubble.append(answerLabel, answerText, editButton);
+
+    item.append(questionBubble, answerBubble);
+    return item;
+  }
+
+  function createPendingQuestionItem(question) {
+    rememberQuestion(question);
+    const item = document.createElement('div');
+    item.className = `transcript-item pending ${question.flow_type === 'deep_dive_follow_up' ? 'deep-dive' : ''}`;
+    const questionBubble = document.createElement('div');
+    questionBubble.className = 'question-bubble current';
+    const label = document.createElement('span');
+    label.className = 'bubble-label';
+    label.textContent = question.flow_type === 'deep_dive_follow_up' ? '次の深掘り質問' : '次の質問';
+    const text = document.createElement('p');
+    text.textContent = question.text || '質問を準備しています...';
+    questionBubble.append(label, text);
+    if (question.flow_type === 'deep_dive_follow_up') {
+      const context = parentContextForQuestion(question);
+      if (context) {
+        questionBubble.appendChild(context);
+      }
+    }
+    item.appendChild(questionBubble);
+    return item;
+  }
+
+  function renderPendingQuestion(existingItem, text) {
+    if (existingItem) {
+      const paragraph = existingItem.querySelector('p');
+      if (paragraph) {
+        paragraph.textContent = text;
+      }
+      el.questionLog.scrollTop = el.questionLog.scrollHeight;
+      return existingItem;
+    }
+    const item = createPendingQuestionItem({
+      id: 'streaming_follow_up',
+      text,
+      flow_type: 'deep_dive_follow_up',
+    });
+    el.questionLog.appendChild(item);
+    el.questionLog.scrollTop = el.questionLog.scrollHeight;
+    return item;
+  }
+
+  function startAnswerEdit(container, answer) {
+    const original = answerValue(answer, 'content', 'Content') || '';
+    container.innerHTML = '';
+    const textarea = document.createElement('textarea');
+    textarea.className = 'answer-edit-input';
+    textarea.rows = 5;
+    textarea.value = original;
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'primary-btn';
+    save.textContent = '保存して分岐';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'secondary-btn';
+    cancel.textContent = 'キャンセル';
+    actions.append(save, cancel);
+    container.append(textarea, actions);
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    save.addEventListener('click', () => editAnswer(answer, textarea.value));
+    cancel.addEventListener('click', () => renderTranscript());
+  }
+
+  async function editAnswer(answer, content) {
+    clearError();
+    const trimmed = content.trim();
+    if (!trimmed) {
+      showError('回答を入力してください');
       return;
     }
-    appendLog(question.flow_type === 'deep_dive_follow_up' ? 'deep-dive' : 'question', question.text);
-    el.skipDeepDive.classList.toggle('hidden', question.flow_type !== 'deep_dive_follow_up');
+    const answerId = answerValue(answer, 'question_id', 'QuestionID');
+    setLoading(true, '回答を編集し、新しいセッションへ分岐しています...');
+    try {
+      const data = await requestJSON(`/api/brief-sessions/${state.sessionId}/answers/${encodeURIComponent(answerId)}/edit`, {
+        method: 'POST',
+        body: {
+          content: trimmed,
+          brief_model: el.briefModel.value,
+        },
+      });
+      state.lastSubmittedAnswer = trimmed;
+      applyInterviewResult(data);
+      el.answerInput.focus();
+    } catch (error) {
+      showError(`回答編集に失敗しました: ${error.message}`);
+      renderTranscript();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function rememberQuestions(questions) {
+    (questions || []).forEach(rememberQuestion);
+  }
+
+  function rememberQuestion(question) {
+    if (!question?.id || !question?.text) {
+      return;
+    }
+    state.questionTextById[question.id] = question.text;
+  }
+
+  function questionTextForAnswer(answer) {
+    const questionId = answerValue(answer, 'question_id', 'QuestionID');
+    const flowType = answerValue(answer, 'flow_type', 'FlowType') || 'main';
+    if (state.questionTextById[questionId]) {
+      return state.questionTextById[questionId];
+    }
+    if (flowType === 'deep_dive_follow_up') {
+      const targetQuestionId = answerValue(answer, 'target_question_id', 'TargetQuestionID');
+      const index = answerValue(answer, 'follow_up_index', 'FollowUpIndex');
+      const target = state.questionTextById[targetQuestionId] || targetQuestionId || '回答';
+      return `${target} への深掘り ${index || ''}`.trim();
+    }
+    return questionId || '質問';
+  }
+
+  function parentContextForAnswer(answer) {
+    const flowType = answerValue(answer, 'flow_type', 'FlowType') || 'main';
+    if (flowType !== 'deep_dive_follow_up') {
+      return null;
+    }
+    return parentContextForQuestion({
+      target_question_id: answerValue(answer, 'target_question_id', 'TargetQuestionID'),
+    });
+  }
+
+  function parentContextForQuestion(question) {
+    const targetQuestionId = question.target_question_id || question.TargetQuestionID;
+    if (!targetQuestionId) {
+      return null;
+    }
+    const parentAnswer = (state.answers || []).find((answer) => answerValue(answer, 'question_id', 'QuestionID') === targetQuestionId);
+    if (!parentAnswer) {
+      return null;
+    }
+    const context = document.createElement('blockquote');
+    context.className = 'parent-context';
+    const parentQuestion = state.questionTextById[targetQuestionId] || targetQuestionId;
+    const parentContent = answerValue(parentAnswer, 'content', 'Content') || '';
+    context.textContent = `${parentQuestion}: ${truncate(parentContent, 140)}`;
+    return context;
+  }
+
+  function answerValue(answer, snake, pascal) {
+    return answer?.[snake] ?? answer?.[pascal] ?? '';
+  }
+
+  function truncate(value, maxLength) {
+    const text = String(value || '');
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
+  }
+
+  function onAnswerInputKeydown(event) {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      if (!el.submitAnswer.disabled) {
+        submitAnswer();
+      }
+      return;
+    }
+    if (event.key !== 'ArrowUp' || el.answerInput.value.trim() || !state.lastSubmittedAnswer) {
+      return;
+    }
+    if (el.answerInput.selectionStart !== 0 || el.answerInput.selectionEnd !== 0) {
+      return;
+    }
+    event.preventDefault();
+    el.answerInput.value = state.lastSubmittedAnswer;
+    el.answerInput.setSelectionRange(el.answerInput.value.length, el.answerInput.value.length);
   }
 
   function populateModelSelects(models) {
@@ -625,15 +853,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function cloneQuestions(questions) {
     return questions.map((question) => ({ ...question }));
-  }
-
-  function appendLog(kind, text) {
-    const item = document.createElement('div');
-    item.className = `log-item ${kind}`;
-    item.textContent = text;
-    el.questionLog.appendChild(item);
-    el.questionLog.scrollTop = el.questionLog.scrollHeight;
-    return item;
   }
 
   function escapeHTML(value) {

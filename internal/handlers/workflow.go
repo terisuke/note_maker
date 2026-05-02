@@ -77,6 +77,11 @@ type answerBriefSessionRequest struct {
 	BriefModel   string `json:"brief_model"`
 }
 
+type editBriefAnswerRequest struct {
+	Content    string `json:"content"`
+	BriefModel string `json:"brief_model"`
+}
+
 type briefSessionResponse struct {
 	SessionID       string                    `json:"session_id"`
 	StyleProfileID  string                    `json:"style_profile_id"`
@@ -350,6 +355,37 @@ func GetBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		result.Brief = &brief
 	} else if question, ok := session.CurrentQuestion(); ok {
 		result.NextQuestion = &question
+	}
+	respondWithJSON(w, http.StatusOK, toBriefSessionResponse(result))
+}
+
+// EditBriefAnswerHandler creates a new child session from an edited past answer.
+func EditBriefAnswerHandler(w http.ResponseWriter, r *http.Request) {
+	var req editBriefAnswerRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	session, ok := workflowStore.GetSession(pathValue(r, "id"))
+	if !ok {
+		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
+		return
+	}
+	service := newBriefInterviewService(req.BriefModel)
+	result, err := service.ForkAnswer(r.Context(), session, newID("abs"), pathValue(r, "answer_id"), req.Content)
+	if err != nil {
+		respondWithError(w, "BRIEF_ANSWER_EDIT_FAILED", "Failed to edit brief answer", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := workflowStore.SaveSession(result.Session); err != nil {
+		respondWithError(w, "BRIEF_SESSION_SAVE_FAILED", "Failed to save brief session", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if result.Completed && result.Brief != nil {
+		if err := workflowStore.SaveBrief(result.Session.ID, *result.Brief); err != nil {
+			respondWithError(w, "BRIEF_SAVE_FAILED", "Failed to save article brief", err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	respondWithJSON(w, http.StatusOK, toBriefSessionResponse(result))
 }

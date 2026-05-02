@@ -40,6 +40,8 @@ func main() {
 	r.HandleFunc("/api/brief-sessions", handlers.CreateBriefSessionHandler).Methods("POST")
 	r.HandleFunc("/api/brief-sessions/{id}", handlers.GetBriefSessionHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions/{id}/answers", handlers.AnswerBriefSessionHandler).Methods("POST")
+	r.HandleFunc("/api/brief-sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
+	r.HandleFunc("/api/sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
 	r.HandleFunc("/api/drafts", handlers.GenerateDraftHandler).Methods("POST")
 
 	// ルートパスへのアクセスはindex.htmlにリダイレクト

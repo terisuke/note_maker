@@ -112,6 +112,45 @@ func TestInterviewServiceUsesFallbackWhenGeneratorFails(t *testing.T) {
 	}
 }
 
+func TestInterviewServiceForksEditedAnswerAndReturnsNextQuestion(t *testing.T) {
+	service := NewInterviewService(nil)
+	result, err := service.StartSession(StartSessionInput{
+		SessionID:      "session-1",
+		StyleProfileID: "style-1",
+	})
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	session := result.Session
+	for _, answer := range fixedAnswers()[:5] {
+		result, err = service.Answer(context.Background(), session, answer)
+		if err != nil {
+			t.Fatalf("answer fixed question: %v", err)
+		}
+		session = result.Session
+	}
+
+	result, err = service.ForkAnswer(context.Background(), session, "session-2", domain.QuestionIDOpeningEpisode, "Edited opening")
+	if err != nil {
+		t.Fatalf("fork answer: %v", err)
+	}
+	if result.Session.ID != "session-2" {
+		t.Fatalf("fork id = %q", result.Session.ID)
+	}
+	if result.Session.ParentSessionID != "session-1" {
+		t.Fatalf("parent session id = %q", result.Session.ParentSessionID)
+	}
+	if len(result.Session.Answers) != 2 {
+		t.Fatalf("answers = %d, want 2", len(result.Session.Answers))
+	}
+	if result.NextQuestion == nil || result.NextQuestion.ID != domain.QuestionIDReader {
+		t.Fatalf("next question = %#v", result.NextQuestion)
+	}
+	if session.Answers[1].Content != fixedAnswers()[1] {
+		t.Fatalf("original session was mutated: %#v", session.Answers[1])
+	}
+}
+
 func fixedAnswers() []string {
 	return []string{
 		"Local article generation with a small deterministic workflow.",

@@ -264,36 +264,95 @@ pre {
 
 .question-log {
     display: grid;
-    gap: 10px;
-    max-height: 340px;
+    gap: 14px;
+    min-height: 420px;
+    max-height: min(68vh, 760px);
     overflow: auto;
     margin-bottom: 14px;
-    padding: 12px;
+    padding: 16px;
     background: #f8fafc;
     border: 1px solid var(--line);
     border-radius: 6px;
 }
 
-.log-item {
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: var(--surface);
-    border: 1px solid var(--line);
+.transcript-item {
+    display: grid;
+    gap: 8px;
 }
 
-.log-item.answer {
-    margin-left: 52px;
+.transcript-item.answered {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.question-bubble,
+.answer-bubble {
+    width: min(82%, 760px);
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.question-bubble {
+    justify-self: start;
+}
+
+.question-bubble.current {
+    border-color: rgba(37, 99, 235, 0.32);
+}
+
+.answer-bubble {
+    justify-self: end;
     background: #eff6ff;
 }
 
-.log-item.deep-dive {
+.transcript-item.deep-dive .question-bubble {
     border-left: 4px solid var(--warning);
     background: var(--warning-bg);
 }
 
-.log-item.system {
-    color: var(--success);
-    background: var(--success-bg);
+.bubble-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.question-bubble p,
+.answer-bubble p {
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.parent-context {
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.72);
+    border-left: 3px solid var(--line);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.answer-edit-btn {
+    margin-top: 8px;
+    padding: 4px 8px;
+    color: var(--primary);
+    background: transparent;
+    border: 1px solid rgba(37, 99, 235, 0.28);
+    font-size: 13px;
+}
+
+.answer-edit-input {
+    min-height: 120px;
+}
+
+.edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 8px;
 }
 
 .status-line {
@@ -436,7 +495,8 @@ pre {
         grid-template-columns: 1fr;
     }
 
-    .log-item.answer {
-        margin-left: 0;
+    .question-bubble,
+    .answer-bubble {
+        width: 100%;
     }
 }

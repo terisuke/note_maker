@@ -38,8 +38,8 @@ Closed historical issues:
 
 The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (A, B, C, D) are tracked as separate issues in the new tranche. Their guardrails extend the rules below:
 
-- Phase A (Conversation UX): no domain changes, only handler streaming + frontend rewrite. Must keep all existing `go test ./...` green without modification.
-- Phase A execution starts with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
+- Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
+- Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): introduces `internal/domain/persona` and `internal/domain/format`. The note.com host check moves out of application services into `internal/infrastructure/source/note` only.
 - Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store becomes import/export utility.
 - Phase D (Quality): handler tests are mandatory before any further endpoint additions land. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.

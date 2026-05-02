@@ -175,6 +175,52 @@ func TestAssembleBriefIncludesFixedAndDeepDiveAnswers(t *testing.T) {
 	}
 }
 
+func TestForkWithEditedAnswerKeepsOriginalAndTruncatesFollowingAnswers(t *testing.T) {
+	session, err := NewArticleBriefSession("session-1", "style-1")
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial theme"); err != nil {
+		t.Fatalf("answer theme: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial opening"); err != nil {
+		t.Fatalf("answer opening: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial reader"); err != nil {
+		t.Fatalf("answer reader: %v", err)
+	}
+
+	fork, err := session.ForkWithEditedAnswer("session-2", QuestionIDOpeningEpisode, "Edited opening")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if fork.ID != "session-2" {
+		t.Fatalf("fork id = %q", fork.ID)
+	}
+	if fork.ParentSessionID != "session-1" {
+		t.Fatalf("parent session id = %q", fork.ParentSessionID)
+	}
+	if len(fork.Answers) != 2 {
+		t.Fatalf("fork answers = %d, want 2", len(fork.Answers))
+	}
+	if fork.Answers[0].QuestionID != QuestionIDTheme || fork.Answers[0].Content != "Initial theme" {
+		t.Fatalf("first fork answer = %#v", fork.Answers[0])
+	}
+	if fork.Answers[1].QuestionID != QuestionIDOpeningEpisode || fork.Answers[1].Content != "Edited opening" {
+		t.Fatalf("edited fork answer = %#v", fork.Answers[1])
+	}
+	if session.Answers[1].Content != "Initial opening" || len(session.Answers) != 3 {
+		t.Fatalf("original session was mutated: %#v", session.Answers)
+	}
+	next, ok := fork.CurrentQuestion()
+	if !ok {
+		t.Fatal("expected next question after fork")
+	}
+	if next.ID != QuestionIDReader {
+		t.Fatalf("next question = %q, want %q", next.ID, QuestionIDReader)
+	}
+}
+
 func TestGeneratedFollowUpQuestionRulesRejectBinaryQuestions(t *testing.T) {
 	disallowed := []string{
 		"Do you want the article to be practical?",

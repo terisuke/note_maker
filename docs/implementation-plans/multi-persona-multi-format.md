@@ -41,8 +41,8 @@ Near-term implementation cut:
 
 | Order | Issue | Why now | Done when |
 |---|---|---|---|
-| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Code streams follow-up/draft output, can be cancelled, and reports endpoint/model/elapsed time; final closure waits for Tailnet Evo X2 validation. |
-| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Answers render as editable bubbles and edits fork the in-memory session. |
+| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Implemented and merged. |
+| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented in code: answers render as editable bubbles and edits fork the in-memory session. |
 | 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Every follow-up references the parent answer in prompt and UI. |
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
 | 5 | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers and draft versions need durable storage before broader persona library work. | SQLite stores sessions, answers, guides, articles, and draft versions. |
@@ -62,9 +62,11 @@ Acceptance:
 - Editing answer #2 in a 5-answer session produces a new session whose answers list is `[1, 2', …]`.
 - Original session is reachable from the new session via `parent_session_id`.
 
+Implementation note as of 2026-05-02: the static app implements this as a progressive enhancement without a SPA rewrite. The canonical route is `POST /api/brief-sessions/{id}/answers/{answer_id}/edit`; `/api/sessions/{id}/answers/{answer_id}/edit` remains as an ADR-compatible alias.
+
 ### A2 — Stream LLM responses via SSE
 
-Implementation status: code path implemented on `codex/issue-18-sse-streaming`; validate against real Tailnet Evo X2 before closing the issue.
+Implementation status: implemented and merged in [#18](https://github.com/terisuke/note_maker/issues/18).
 
 - Add SSE support to `internal/infrastructure/llamacpp/client.go` (OpenAI-compatible `stream: true`).
 - Wire streaming through the application services for `follow-up generation` and `draft generation`. Style analysis can stay non-streaming (single short call).
@@ -308,4 +310,4 @@ Draft generation now includes a lightweight final verification pass before retur
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. Start with **[#18](https://github.com/terisuke/note_maker/issues/18)** (SSE streaming, progress, and cancellation) on a feature branch off `develop`, then fold the transcript work from [#17](https://github.com/terisuke/note_maker/issues/17) on top of those streaming primitives.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. [#18](https://github.com/terisuke/note_maker/issues/18) is merged and [#17](https://github.com/terisuke/note_maker/issues/17) is implemented in code; after merging #17, continue with [#20](https://github.com/terisuke/note_maker/issues/20) so generated deep-dive questions expose their rationale inside the transcript.

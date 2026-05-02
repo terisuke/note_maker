@@ -204,15 +204,15 @@ Current implementation status as of 2026-05-02:
 - Phase model defaults are intentionally split: lightweight `gemma4:e2b` for source/style summarization, `qwen3.6:27b` for deeper interview questions, and `gemma4:31b` for final Japanese draft generation. This is an operational default, not a hard domain rule; users can override it per phase.
 - Final verification uses lightweight Gemma by default (`gemma4:latest`, currently the Evo X2 E4B-class Ollama model) to check brief coverage, style consistency, output-format notation, and unsupported factual assertions before the UI presents the final draft ([#47](https://github.com/terisuke/note_maker/issues/47)).
 - Runtime validation showed that Tailnet inference can take 20+ minutes and still miss quality gates because of generation variance. Therefore, Phase A started with streaming and cancellation ([#18](https://github.com/terisuke/note_maker/issues/18)) before the broader transcript rewrite ([#17](https://github.com/terisuke/note_maker/issues/17)). Primary-runtime quality stabilization is tracked separately in [#40](https://github.com/terisuke/note_maker/issues/40).
-- Phase A2 is implemented in code: `llamacpp.Client.GenerateStream`, streaming follow-up/draft service paths, `Accept: text/event-stream` handlers, browser Cancel controls, heartbeat events, and final runtime metrics. It still requires real Tailnet Evo X2 validation before closing the issue.
+- Phase A2 is implemented and merged: `llamacpp.Client.GenerateStream`, streaming follow-up/draft service paths, `Accept: text/event-stream` handlers, browser Cancel controls, heartbeat events, and final runtime metrics ([#18](https://github.com/terisuke/note_maker/issues/18)).
+- Phase A1 is implemented in code: the interview surface now renders a chat-style transcript, answer bubbles can be edited inline, and edits create child sessions via fork-on-edit while retaining `parent_session_id` lineage ([#17](https://github.com/terisuke/note_maker/issues/17)).
 
 Near-term execution order:
 
-1. Validate and merge [#18](https://github.com/terisuke/note_maker/issues/18) — streaming LLM responses, progress events, and cancellation for Tailnet Evo X2.
-2. [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answer/fork UX, using the streaming primitives from #18.
-3. [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
-4. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.
-5. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts.
+1. Merge [#17](https://github.com/terisuke/note_maker/issues/17) — chat transcript and editable answer/fork UX, using the streaming primitives from #18.
+2. [#20](https://github.com/terisuke/note_maker/issues/20) — deep-dive rationale display inside the transcript.
+3. [#19](https://github.com/terisuke/note_maker/issues/19) — editable draft and per-section regenerate once streamed drafts are visible and cancellable.
+4. Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26), extending [#14](https://github.com/terisuke/note_maker/issues/14)) — SQLite history, so answer forks and draft versions survive restarts.
 
 ## Tracked issues
 
