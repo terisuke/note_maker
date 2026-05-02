@@ -155,12 +155,13 @@ Concrete implementations under `internal/infrastructure/source/`:
 - `qiita/` — public REST API (no auth needed for read-only public posts) + HTML fallback.
 - `rss/` — generic RSS reader for Astro/Jekyll/Hugo blogs.
 - `html/` — generic semantic-content extractor (last resort).
+- `github/` — public repository Markdown reader for canonical blog sources such as `corsweb2024/src/content/blog/ja/*.md`.
 
 Each fetcher carries its own User-Agent string and rate-limit policy.
 
 Acceptance:
 
-- Scenario test fetches one article from each of {note, zenn, qiita, rss} and produces `tmp/source_fetch/{name}.json`.
+- Scenario test fetches historical user/account material from {note, zenn, qiita, rss, github}; it must prove that Zenn and Qiita return multiple Cloudia articles with body text, and that Cor.inc blog style analysis uses GitHub Markdown because RSS only contains short descriptions.
 - The note.com host check moves out of the application service into the `note` fetcher only; other hosts route to other fetchers.
 
 ### B3 — Format-specific prompt templates and validators

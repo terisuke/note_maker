@@ -148,7 +148,7 @@ New domain types under `internal/domain`:
 ## Infrastructure Changes
 
 - `internal/infrastructure/repository/sqlite` — new package implementing every repository interface; the JSON file repository becomes an export/import utility for portability.
-- `internal/infrastructure/source/{note,zenn,qiita,rss,html}` — per-source fetchers behind a common interface in `internal/domain/source` (or kept under `infrastructure` and bound by interface in `domain/persona`).
+- `internal/infrastructure/source/{note,zenn,qiita,rss,html,github}` — per-source fetchers behind a common interface in `internal/domain/source` (or kept under `infrastructure` and bound by interface in `domain/persona`). GitHub-backed Markdown is required for Cor.inc blog because the public RSS feed is a discovery source with summaries, while `corsweb2024/src/content/blog/ja/*.md` is the canonical full-body source.
 - `internal/infrastructure/llamacpp` — gains streaming (SSE) support; existing non-streaming path retained for tests.
 
 ## API Changes

@@ -2,6 +2,7 @@ package source
 
 import (
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -58,4 +59,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
 }

@@ -67,10 +67,21 @@ func TestAuthorStyleFetcherRoutesExplicitSources(t *testing.T) {
 				t.Fatalf("zenn feed should request all=1, got %s", r.URL.RawQuery)
 			}
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss><channel><item><title>Zenn</title><link>https://zenn.dev/zenn-user/articles/a</link><description><![CDATA[<p>Zenn本文</p>]]></description></item></channel></rss>`))
+		case "/zenn-user/articles/a":
+			_, _ = w.Write([]byte(`<html><head><meta property="og:title" content="Zenn"></head><body><article><h1>Zenn</h1><p>Zenn記事ページ本文</p></article></body></html>`))
 		case "/api/v2/users/qiita-user/items":
 			_, _ = w.Write([]byte(`[{"id":"abc","url":"https://qiita.com/qiita-user/items/abc","title":"Qiita","body":"# Qiita本文","created_at":"2026-05-02T00:00:00+09:00","updated_at":"2026-05-02T00:00:00+09:00"}]`))
 		case "/feed.xml":
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><rss><channel><item><title>RSS</title><link>https://example.com/rss</link><description><![CDATA[<p>RSS本文</p>]]></description></item></channel></rss>`))
+		case "/repos/owner/repo/contents/src/content/blog/ja":
+			_, _ = w.Write([]byte(`[{"name":"post.md","path":"src/content/blog/ja/post.md","type":"file","download_url":"https://raw.githubusercontent.com/owner/repo/main/src/content/blog/ja/post.md","html_url":"https://github.com/owner/repo/blob/main/src/content/blog/ja/post.md"}]`))
+		case "/owner/repo/main/src/content/blog/ja/post.md":
+			_, _ = w.Write([]byte(`---
+title: "GitHub記事"
+pubDate: 2026-05-02
+---
+
+GitHub Markdown本文`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -79,16 +90,17 @@ func TestAuthorStyleFetcherRoutesExplicitSources(t *testing.T) {
 
 	fetcher := NewAuthorStyleFetcherWithClient(mappedClient(server.URL))
 	cases := map[string]string{
-		"zenn:zenn-user":         "Zenn本文",
-		"qiita:qiita-user":       "# Qiita本文",
-		"rss:https://x/feed.xml": "RSS本文",
+		"zenn:zenn-user":                        "Zenn\n\nZenn記事ページ本文",
+		"qiita:qiita-user":                      "# Qiita本文",
+		"rss:https://x/feed.xml":                "RSS本文",
+		"github:owner/repo/src/content/blog/ja": `title: "GitHub記事"`,
 	}
 	for selector, wantContent := range cases {
 		articles, err := fetcher.FetchUserLatestArticles(context.Background(), selector, 3)
 		if err != nil {
 			t.Fatalf("%s: fetch latest: %v", selector, err)
 		}
-		if len(articles) != 1 || articles[0].Content != wantContent {
+		if len(articles) != 1 || !strings.Contains(articles[0].Content, wantContent) {
 			t.Fatalf("%s: unexpected articles: %#v", selector, articles)
 		}
 	}
@@ -96,11 +108,12 @@ func TestAuthorStyleFetcherRoutesExplicitSources(t *testing.T) {
 
 func TestRefFromURLRoutesKnownHosts(t *testing.T) {
 	tests := map[string]sourcedomain.Kind{
-		"https://note.com/user/n/n1":         sourcedomain.KindNote,
-		"https://zenn.dev/user/articles/abc": sourcedomain.KindZenn,
-		"https://qiita.com/user/items/abc":   sourcedomain.KindQiita,
-		"https://example.com/rss.xml":        sourcedomain.KindRSS,
-		"https://example.com/blog/post":      sourcedomain.KindHTML,
+		"https://note.com/user/n/n1":            sourcedomain.KindNote,
+		"https://zenn.dev/user/articles/abc":    sourcedomain.KindZenn,
+		"https://qiita.com/user/items/abc":      sourcedomain.KindQiita,
+		"https://example.com/rss.xml":           sourcedomain.KindRSS,
+		"https://github.com/o/r/blob/main/a.md": sourcedomain.KindGitHub,
+		"https://example.com/blog/post":         sourcedomain.KindHTML,
 	}
 	for rawURL, want := range tests {
 		if got := RefFromURL(rawURL).Kind; got != want {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,24 +28,28 @@ func main() {
 		fatalf("create output dir: %v", err)
 	}
 
-	limit := 1
+	limit := envIntOrDefault("SOURCE_FETCH_LIMIT", 20)
 	fetcher := sourcefetch.NewAuthorStyleFetcherWithClient(&http.Client{Timeout: 20 * time.Second})
-	selectors := map[string]string{
-		"note":  envOrDefault("SOURCE_FETCH_NOTE", "note:cor_instrument"),
-		"zenn":  envOrDefault("SOURCE_FETCH_ZENN", "zenn:zenn"),
-		"qiita": envOrDefault("SOURCE_FETCH_QIITA", "qiita:Qiita"),
-		"rss":   envOrDefault("SOURCE_FETCH_RSS", "rss:https://zenn.dev/zenn/feed"),
+	selectors := []struct {
+		name     string
+		selector string
+	}{
+		{"note", envOrDefault("SOURCE_FETCH_NOTE", "note:cor_instrument")},
+		{"zenn", envOrDefault("SOURCE_FETCH_ZENN", "zenn:cloudia")},
+		{"qiita", envOrDefault("SOURCE_FETCH_QIITA", "qiita:Cloudia_Cor_Inc")},
+		{"rss", envOrDefault("SOURCE_FETCH_RSS", "rss:https://cor-jp.com/rss.xml")},
+		{"github", envOrDefault("SOURCE_FETCH_GITHUB", "github:Cor-Incorporated/corsweb2024/src/content/blog/ja")},
 	}
 
-	for name, selector := range selectors {
+	for _, source := range selectors {
 		started := time.Now()
-		articles, err := fetcher.FetchUserLatestArticles(ctx, selector, limit)
+		articles, err := fetcher.FetchUserLatestArticles(ctx, source.selector, limit)
 		if err != nil {
-			fatalf("fetch %s (%s): %v", name, selector, err)
+			fatalf("fetch %s (%s): %v", source.name, source.selector, err)
 		}
-		path := filepath.Join(outputDir, name+".json")
+		path := filepath.Join(outputDir, source.name+".json")
 		writeJSON(path, articles)
-		fmt.Printf("%s selector=%s articles=%d elapsed_seconds=%.2f output=%s\n", name, selector, len(articles), time.Since(started).Seconds(), path)
+		fmt.Printf("%s selector=%s limit=%d articles=%d elapsed_seconds=%.2f output=%s\n", source.name, source.selector, limit, len(articles), time.Since(started).Seconds(), path)
 	}
 }
 
@@ -63,6 +68,18 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func fatalf(format string, args ...any) {
