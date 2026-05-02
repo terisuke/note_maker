@@ -4,6 +4,8 @@ Note記事のURLまたはユーザー名を入力し、ローカルLLMが新し�
 
 今後の大規模改修方針は [ADR 0001](docs/adrs/0001-three-phase-local-article-generation.md) と [3フェーズ実装計画](docs/implementation-plans/three-phase-local-article-generation.md) に整理しています。単一フォームで記事を生成する方式から、文体分析、記事条件の一問一答、記事生成と評価の3フェーズへ移行します。
 
+ADR 0001 を踏まえた次の進化方針は [ADR 0002 — Multi-Persona, Multi-Format Article Generation](docs/adrs/0002-multi-persona-multi-format-extension.md) と [Multi-persona / multi-format 実装計画](docs/implementation-plans/multi-persona-multi-format.md) にまとめています。てりすけ本人と架空キャラ「宇宙野クラウディア」を別人格として扱い、note / cor-jp.com ブログ / Zenn / Qiita / ホームページHTML を切り替え可能にします。
+
 実装 issue と ADR の対応、各層の責務、テスト条件は [Issue and ADR guardrails](docs/implementation-plans/issue-adr-guardrails.md) にまとめています。
 
 ## 主な機能

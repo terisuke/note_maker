@@ -4,7 +4,7 @@ Date: 2026-05-01
 
 ## Status
 
-Accepted
+Accepted. Extended by [ADR 0002](0002-multi-persona-multi-format-extension.md), which adds the orthogonal axes of author persona and output format on top of the three-phase pipeline. The phases described below remain authoritative; the registries and strategies introduced by ADR 0002 plug into them rather than replacing them.
 
 ## Context
 
