@@ -10,6 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
     'exclusions',
     'target_length_structure',
     'tone_stance',
+    'reader_problem',
+    'key_takeaway',
+    'concrete_example',
+    'evidence',
+    'title_keywords',
     'cor_blog_purpose',
     'cor_blog_category',
     'cor_blog_metadata',
@@ -268,10 +273,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function submitAnswer() {
     clearError();
-    const content = el.answerInput.value.trim();
+    let content = el.answerInput.value.trim();
     if (!content) {
-      showError('回答を入力してください');
-      return;
+      if (isQuestionRequired(state.nextQuestion)) {
+        showError('回答を入力してください');
+        return;
+      }
+      content = '未定';
     }
     state.lastSubmittedAnswer = content;
     el.answerInput.value = '';
@@ -494,9 +502,14 @@ document.addEventListener('DOMContentLoaded', () => {
     questionBubble.className = 'question-bubble current';
     const label = document.createElement('span');
     label.className = 'bubble-label';
-    label.textContent = question.flow_type === 'deep_dive_follow_up' ? '次の深掘り質問' : '次の質問';
+    label.textContent = pendingQuestionLabel(question);
     const text = document.createElement('p');
     text.textContent = question.text || '質問を準備しています...';
+    if (question.flow_type !== 'deep_dive_follow_up') {
+      el.answerInput.placeholder = isQuestionRequired(question)
+        ? '短くても大丈夫です。箇条書きでも入力できます。'
+        : '任意です。空のまま送ると「未定」で進みます。';
+    }
     questionBubble.append(label, text);
     if (question.flow_type === 'deep_dive_follow_up') {
       const context = parentContextForQuestion(question);
@@ -506,6 +519,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     item.appendChild(questionBubble);
     return item;
+  }
+
+  function pendingQuestionLabel(question) {
+    if (question.flow_type === 'deep_dive_follow_up') {
+      return '次の深掘り質問';
+    }
+    return isQuestionRequired(question) ? '次の質問' : '次の質問（任意）';
+  }
+
+  function isQuestionRequired(question) {
+    if (!question) {
+      return true;
+    }
+    return question.required !== false && question.Required !== false;
   }
 
   function renderPendingQuestion(existingItem, text) {
@@ -905,17 +932,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const row = document.createElement('div');
     row.className = 'question-config-row template';
 
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = question.text;
-    input.readOnly = true;
-    input.setAttribute('aria-label', 'テンプレート質問');
+    const text = document.createElement('div');
+    text.className = 'question-template-text';
+    text.textContent = question.text;
+    text.setAttribute('aria-label', 'テンプレート質問');
 
     const label = document.createElement('span');
     label.className = 'question-config-tag';
-    label.textContent = 'テンプレート';
+    label.textContent = isQuestionRequired(question) ? '必須' : '任意';
 
-    row.append(input, label);
+    row.append(text, label);
     return row;
   }
 

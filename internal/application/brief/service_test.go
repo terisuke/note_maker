@@ -207,12 +207,18 @@ func fixedAnswers() []string {
 		"Local article generation with a small deterministic workflow.",
 		"Open with a failed local LLM run that timed out while drafting.",
 		"Solo developers who write note.com articles with local tools.",
+		"They are unsure how to turn rough technical notes into a readable article.",
 		"They should try a three-phase workflow before drafting.",
+		"The smallest useful workflow is style analysis, interview, draft, and verification.",
 		"Mention style analysis, brief interviews, and final draft checks.",
+		"Use a failed timeout and a fixed follow-up question as concrete examples.",
+		"Compare elapsed seconds, style score, verification result, and generated length.",
 		"Use the author's personal history as a musician and engineer.",
 		"Avoid cloud-only assumptions.",
 		"3000字前後 with six sections.",
 		"Practical and introspective.",
+		"local LLM, article draft, verification.",
+		"Start with friction, move to workflow design, and close with one small next step.",
 	}
 }
 

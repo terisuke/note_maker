@@ -33,6 +33,7 @@ Open and active:
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
 - Runtime defect fixed by this cut: [#63](https://github.com/terisuke/note_maker/issues/63) makes the plain web-app default match the intended Evo X2 Tailnet primary path and records the 2026-05-03 draft-generation 500 root cause.
 - Documentation and DDD audit: [#64](https://github.com/terisuke/note_maker/issues/64), with details in [Runtime and DDD alignment audit](../validation/runtime-ui-ddd-audit-2026-05-03.md).
+- Interview usability fixed before measurement: [#66](https://github.com/terisuke/note_maker/issues/66), with details in [Issue 66 plain brief questions validation](../validation/issue-66-plain-brief-questions-2026-05-03.md).
 
 ## Final evaluation target
 
@@ -80,7 +81,7 @@ Lane A and Lane B can run immediately in parallel. Lane C can start by implement
 
 ## Recommended order
 
-1. Verify the browser app with the #63 runtime defaults: `/api/models` should hit Evo X2 Tailnet first, and `/api/drafts` SSE should report the actual endpoint/model before generation starts.
+1. Browser-check the #66 smaller question flow with at least note and one technical format. Do this before spending Evo X2 runtime.
 2. Run one bounded Evo X2 live case through #57 and attach it to #40 to verify the runner with real latency/score data.
 3. Start #27 and #28 in parallel so persisted sessions, guides, and draft artifacts become visible in the web app.
 4. Start #13 once the history/artifact UI has enough stable browser surface.

@@ -12,15 +12,25 @@ const (
 	QuestionIDTheme                 = "theme"
 	QuestionIDOpeningEpisode        = "opening_episode"
 	QuestionIDReader                = "reader"
+	QuestionIDReaderProblem         = "reader_problem"
 	QuestionIDExpectedReaderAction  = "expected_reader_action"
+	QuestionIDKeyTakeaway           = "key_takeaway"
 	QuestionIDMustInclude           = "must_include"
+	QuestionIDConcreteExample       = "concrete_example"
+	QuestionIDEvidence              = "evidence"
 	QuestionIDPersonalContext       = "personal_context"
 	QuestionIDExclusions            = "exclusions"
 	QuestionIDTargetLengthStructure = "target_length_structure"
 	QuestionIDToneStance            = "tone_stance"
+	QuestionIDTitleKeywords         = "title_keywords"
 	QuestionIDStoryArc              = "story_arc"
 	QuestionIDTargetStack           = "target_stack"
+	QuestionIDPrerequisiteKnowledge = "prerequisite_knowledge"
 	QuestionIDTechnicalProof        = "technical_proof"
+	QuestionIDCodeExamples          = "code_examples"
+	QuestionIDReferences            = "references"
+	QuestionIDCorBlogPurpose        = "cor_blog_purpose"
+	QuestionIDCorBlogNextAction     = "cor_blog_next_action"
 	QuestionIDHomepageCTA           = "homepage_cta"
 	QuestionIDHomepageTrust         = "homepage_trust"
 	QuestionIDCloudiaViewpoint      = "cloudia_viewpoint"
@@ -165,66 +175,101 @@ func FixedQuestions() []ArticleQuestion {
 	return []ArticleQuestion{
 		{
 			ID:          QuestionIDTheme,
-			Text:        "記事の中心テーマは何ですか？",
+			Text:        "この記事で一番伝えたいことを、ひとことで書くと何ですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "theme",
 		},
 		{
 			ID:          QuestionIDOpeningEpisode,
-			Text:        "記事の導入に置く具体的な体験や場面は何ですか？",
+			Text:        "冒頭で使えそうな出来事や場面はありますか？いつ・どこで・何が起きましたか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "opening_episode",
 		},
 		{
 			ID:          QuestionIDReader,
-			Text:        "この記事を届けたい読者は誰ですか？",
+			Text:        "誰に向けて書きますか？例: これから試す人、社内メンバー、同じ悩みのある人。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "reader",
 		},
 		{
+			ID:          QuestionIDReaderProblem,
+			Text:        "その読者は今、何に困っている・迷っていると思いますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
 			ID:          QuestionIDExpectedReaderAction,
-			Text:        "読後に読者へどんな変化や行動を起こしてほしいですか？",
+			Text:        "読み終わった後、その人にまず何をしてほしいですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "expected_reader_action",
 		},
 		{
+			ID:          QuestionIDKeyTakeaway,
+			Text:        "読者に一番持ち帰ってほしい言葉や考えは何ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
 			ID:          QuestionIDMustInclude,
-			Text:        "記事に必ず含める論点、事実、手順は何ですか？",
+			Text:        "絶対に入れたい事実・手順・名前・数字を箇条書きで教えてください。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "must_include",
 		},
 		{
+			ID:          QuestionIDConcreteExample,
+			Text:        "その話を伝えるための具体例、失敗例、画面、コード、会話などはありますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDEvidence,
+			Text:        "根拠として出せる結果・数字・比較・リンク・観察はありますか？なければ「なし」でOKです。",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
 			ID:          QuestionIDPersonalContext,
-			Text:        "著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？",
+			Text:        "あなた自身はなぜこの話を書きたいですか？経験・問題意識・違和感を短く教えてください。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "personal_context",
 		},
 		{
 			ID:          QuestionIDExclusions,
-			Text:        "記事に含めないこと、避けたい表現、断言しないことは何ですか？",
+			Text:        "書かないこと、避けたい言い方、まだ断言しないことはありますか？なければ「なし」でOKです。",
 			FlowType:    QuestionFlowMain,
 			Required:    false,
 			TargetField: "exclusions",
 		},
 		{
 			ID:          QuestionIDTargetLengthStructure,
-			Text:        "目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。",
+			Text:        "長さと構成の希望はありますか？例: 1500字で軽く、3000字で詳しく、導入→手順→結果。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "target_length_structure",
 		},
 		{
 			ID:          QuestionIDToneStance,
-			Text:        "記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。",
+			Text:        "文章の雰囲気はどうしますか？例: やさしく、熱量高め、冷静な技術報告、社内向け。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "tone_stance",
+		},
+		{
+			ID:          QuestionIDTitleKeywords,
+			Text:        "タイトルや見出しに入れたい言葉はありますか？なければ「未定」でOKです。",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
 		},
 	}
 }
@@ -238,9 +283,6 @@ func ComposeFixedQuestions(personaID, outputFormatID string) []ArticleQuestion {
 		}
 	}
 	outputFormatID = outputformat.NormalizeID(outputFormatID)
-	if personaID == persona.IDTerisuke && outputFormatID == outputformat.IDNoteArticle {
-		return FixedQuestions()
-	}
 
 	questions := FixedQuestions()
 	questions = append(questions, formatExtensionQuestions(outputFormatID)...)
@@ -252,7 +294,9 @@ func formatExtensionQuestions(outputFormatID string) []ArticleQuestion {
 	switch outputFormatID {
 	case outputformat.IDNoteArticle:
 		return narrativeExtensionQuestions()
-	case outputformat.IDMarkdownBlog, outputformat.IDZennArticle, outputformat.IDQiitaArticle:
+	case outputformat.IDMarkdownBlog:
+		return append(technicalExtensionQuestions(), companyBlogExtensionQuestions()...)
+	case outputformat.IDZennArticle, outputformat.IDQiitaArticle:
 		return technicalExtensionQuestions()
 	case outputformat.IDHomepageSection:
 		return homepageExtensionQuestions()
@@ -265,7 +309,7 @@ func narrativeExtensionQuestions() []ArticleQuestion {
 	return []ArticleQuestion{
 		{
 			ID:          QuestionIDStoryArc,
-			Text:        "読み物として印象に残すため、どんな感情の流れやオチを置きますか？",
+			Text:        "noteらしい読み物にするなら、どんな順番で気持ちや発見を見せますか？例: 違和感→試したこと→気づき→読者への一言。",
 			FlowType:    QuestionFlowMain,
 			Required:    false,
 			TargetField: "custom",
@@ -277,14 +321,54 @@ func technicalExtensionQuestions() []ArticleQuestion {
 	return []ArticleQuestion{
 		{
 			ID:          QuestionIDTargetStack,
-			Text:        "対象にする技術スタック、言語、ライブラリ、実行環境、前提バージョンは何ですか？",
+			Text:        "扱う技術・ツール・言語・バージョンは何ですか？わかる範囲でOKです。",
 			FlowType:    QuestionFlowMain,
 			Required:    true,
 			TargetField: "custom",
 		},
 		{
+			ID:          QuestionIDPrerequisiteKnowledge,
+			Text:        "読者はどこまで知っている前提にしますか？初心者向けか、経験者向けかも教えてください。",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
 			ID:          QuestionIDTechnicalProof,
-			Text:        "記事内で示す再現手順、コード例、検証結果、失敗例は何ですか？",
+			Text:        "再現手順や検証結果として、どこまで記事に載せますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDCodeExamples,
+			Text:        "コード例・コマンド・設定ファイルを載せますか？載せるならどの部分ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDReferences,
+			Text:        "参考リンク、公式ドキュメント、過去記事など、記事からリンクしたいものはありますか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+	}
+}
+
+func companyBlogExtensionQuestions() []ArticleQuestion {
+	return []ArticleQuestion{
+		{
+			ID:          QuestionIDCorBlogPurpose,
+			Text:        "自社ブログとして、今回は技術知見の報告ですか？社員や採用候補へのビジョン共有ですか？",
+			FlowType:    QuestionFlowMain,
+			Required:    false,
+			TargetField: "custom",
+		},
+		{
+			ID:          QuestionIDCorBlogNextAction,
+			Text:        "会社ブログとして、読者に最後に何を感じてほしい・相談してほしいですか？",
 			FlowType:    QuestionFlowMain,
 			Required:    false,
 			TargetField: "custom",

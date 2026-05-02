@@ -154,6 +154,9 @@ func (s ArticleBriefSession) CustomAnswers() []BriefAnswer {
 	}
 	answers := make([]BriefAnswer, 0)
 	for _, answer := range s.Answers {
+		if strings.TrimSpace(answer.Content) == "" {
+			continue
+		}
 		if answer.FlowType == QuestionFlowMain && !fixed[answer.QuestionID] {
 			answers = append(answers, answer)
 		}
@@ -241,36 +244,36 @@ func FallbackFollowUpText(target ArticleQuestion, answer BriefAnswer, followUpIn
 	switch target.ID {
 	case QuestionIDOpeningEpisode:
 		if followUpIndex == 1 {
-			question = "読者に最初に見せたい具体的な場面を、どの描写から始めますか？"
+			question = "その場面で、読者に最初に見せたいものを1つだけ挙げると何ですか？"
 			break
 		}
-		question = "その時点の感情を、どんな言葉で記事に残しますか？"
+		question = "その時の気持ちを短く書くなら、どんな言葉になりますか？"
 	case QuestionIDMustInclude:
 		if followUpIndex == 1 {
-			question = "必ず含めたい論点のうち、どの部分に具体的な根拠を足しますか？"
+			question = "必ず入れたいことの中で、特に詳しく説明したいものはどれですか？"
 			break
 		}
-		question = "その論点から読者に持ち帰ってほしい学びを、どう表現しますか？"
+		question = "その話を信じてもらうために、足せそうな根拠は何ですか？"
 	case QuestionIDPersonalContext:
 		if followUpIndex == 1 {
-			question = "記事の主張に最も直接つなげたい個人的な経験は何ですか？"
+			question = "あなた自身の経験として、記事に入れると伝わりやすい出来事は何ですか？"
 			break
 		}
-		question = "記事の中で見せたい個人的な価値観や迷いは何ですか？"
+		question = "その経験から、今の考え方が変わった点はありますか？"
 	case QuestionIDExpectedReaderAction:
 		if followUpIndex == 1 {
-			question = "読者がその行動を取りたくなる理由を、どの実感から説明しますか？"
+			question = "読者が最初に試せる小さな一歩は何ですか？"
 			break
 		}
-		question = "読後に読者が想像できる最初の一歩は何ですか？"
+		question = "その一歩を試すと、読者にどんな良いことがありますか？"
 	case QuestionIDToneStance:
 		if followUpIndex == 1 {
-			question = "記事で最も丁寧に説明したい立場は何ですか？"
+			question = "この文章で一番大事にしたい温度感は何ですか？"
 			break
 		}
-		question = "そのトーンや立場を支える経験は何ですか？"
+		question = "その温度感にしたい理由は何ですか？"
 	default:
-		question = "記事を実用的にするために、どんな具体的な情報を足しますか？"
+		question = "記事に足すと読みやすくなる具体的な情報を1つ挙げるなら何ですか？"
 	}
 	return contextualFollowUpQuestion(answer.Content, question)
 }

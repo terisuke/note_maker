@@ -678,12 +678,17 @@ func sessionWithFixedAnswers(t *testing.T, id, styleProfileID string) briefdomai
 		"Local workflow tests",
 		"A handler test failed before reaching a networked LLM.",
 		"Maintainers adding coverage.",
+		"They need stable endpoint behavior.",
 		"Keep endpoint behavior stable.",
+		"Small handler tests can prevent runtime regressions.",
 		"HTTP status codes and persistence checks.",
-		"Testing the workflow handler without external services.",
+		"Use the failed handler test as the concrete example.",
+		"Status codes, persisted sessions, and stream events.",
+		"We want local tests to catch workflow drift before live Evo X2 runs.",
 		"Avoid broad source changes.",
 		"1200字, validation focused.",
 		"Practical and concise.",
+		"workflow handler, SSE, persistence.",
 	}
 	for _, answer := range answers {
 		if _, err := session.RecordAnswer(answer); err != nil {

@@ -207,9 +207,14 @@ body {
     min-width: 0;
 }
 
-.question-config-row.template input {
+.question-template-text {
     background: #f8fafc;
     color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    line-height: 1.55;
+    min-width: 0;
 }
 
 .question-config-tag {
