@@ -25,7 +25,7 @@ Files to create: `Dockerfile`.
 
 Multi-stage build:
 
-1. Build stage: `golang:1.22-alpine` base, `go build -o /app/note-maker-server ./cmd/server`, copy `static/` into the build output.
+1. Build stage: `golang:1.23-alpine` base (matches `go.mod` `go 1.23.0`), `go build -o /app/note-maker-server ./cmd/server`, copy `static/` into the build output.
 2. Runtime stage: `gcr.io/distroless/static-debian12` or `alpine:3.20` base, non-root user (`USER 65534:65534`), copy the binary and `static/` from the build stage.
 
 Add `HEALTHCHECK CMD wget -qO- http://localhost:8080/api/models || exit 1` (or `curl` if the base image includes it). Expose port `8080`.
