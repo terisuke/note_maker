@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 )
 
 var (
@@ -16,19 +18,25 @@ type Draft struct {
 	markdown string
 }
 
-// NewDraft normalizes and validates generated Markdown.
+// NewDraft normalizes and validates generated Markdown for note_article.
 func NewDraft(raw string) (Draft, error) {
+	return NewDraftForFormat(raw, outputformat.IDNoteArticle)
+}
+
+// NewDraftForFormat normalizes and validates generated output for a publishing target.
+func NewDraftForFormat(raw, formatID string) (Draft, error) {
 	markdown := normalizeDraft(raw)
 	if markdown == "" {
 		return Draft{}, fmt.Errorf("draft is empty")
 	}
-	if !strings.HasPrefix(markdown, "# ") {
-		return Draft{}, fmt.Errorf("draft must start with a level-1 Markdown title")
+	format, ok := outputformat.DefaultRegistry().Get(formatID)
+	if !ok {
+		return Draft{}, fmt.Errorf("unknown output format %q", formatID)
 	}
-	if strings.Contains(markdown, "```") {
-		return Draft{}, fmt.Errorf("draft must not wrap the article in code fences")
+	if err := format.Validator.Validate(markdown); err != nil {
+		return Draft{}, err
 	}
-	if strings.Contains(markdown, "以下") && strings.Contains(markdown, "下書き") && strings.Index(markdown, "# ") > 20 {
+	if !strings.HasPrefix(markdown, "---\n") && strings.Contains(markdown, "以下") && strings.Contains(markdown, "下書き") && strings.Index(markdown, "# ") > 20 {
 		return Draft{}, fmt.Errorf("draft appears to contain preamble before the article")
 	}
 	return Draft{markdown: markdown}, nil
@@ -43,19 +51,31 @@ func normalizeDraft(raw string) string {
 	text := strings.TrimSpace(raw)
 	text = thinkingBlockPattern.ReplaceAllString(text, "")
 	text = strings.TrimSpace(text)
+	text = unwrapFencedFrontmatter(text)
 	if strings.HasPrefix(text, "```") && !strings.HasPrefix(text, "```markdown") && !strings.HasPrefix(text, "```md") {
 		return text
 	}
 	if match := codeFencePattern.FindStringSubmatch(text); len(match) == 2 {
 		text = strings.TrimSpace(match[1])
 	}
-	if idx := strings.Index(text, "# "); idx > 0 {
+	droppedPreambleWithFence := false
+	if idx := frontmatterStartIndex(text); idx > 0 {
 		preamble := strings.TrimSpace(text[:idx])
 		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
+			droppedPreambleWithFence = strings.Contains(preamble, "```")
 			text = strings.TrimSpace(text[idx:])
 		}
 	}
-	text = strings.TrimSuffix(text, "```")
+	if idx := strings.Index(text, "# "); idx > 0 && !strings.HasPrefix(text, "---\n") {
+		preamble := strings.TrimSpace(text[:idx])
+		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
+			droppedPreambleWithFence = strings.Contains(preamble, "```")
+			text = strings.TrimSpace(text[idx:])
+		}
+	}
+	if droppedPreambleWithFence {
+		text = strings.TrimSuffix(text, "```")
+	}
 	text = strings.TrimSpace(text)
 	lines := strings.Split(text, "\n")
 	cleaned := make([]string, 0, len(lines))
@@ -74,6 +94,46 @@ func normalizeDraft(raw string) string {
 		cleaned = append(cleaned, line)
 	}
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+func unwrapFencedFrontmatter(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) < 4 {
+		return text
+	}
+	opener := strings.ToLower(strings.TrimSpace(lines[0]))
+	if opener != "```yaml" && opener != "```yml" {
+		return text
+	}
+	closing := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			closing = i
+			break
+		}
+	}
+	if closing < 0 {
+		return text
+	}
+	frontmatter := strings.TrimSpace(strings.Join(lines[1:closing], "\n"))
+	if !strings.HasPrefix(frontmatter, "---\n") {
+		return text
+	}
+	rest := strings.TrimSpace(strings.Join(lines[closing+1:], "\n"))
+	if rest == "" {
+		return frontmatter
+	}
+	return frontmatter + "\n\n" + rest
+}
+
+func frontmatterStartIndex(text string) int {
+	if strings.HasPrefix(text, "---\n") {
+		return 0
+	}
+	if idx := strings.Index(text, "\n---\n"); idx >= 0 {
+		return idx + 1
+	}
+	return -1
 }
 
 func canDropPreamble(text string) bool {

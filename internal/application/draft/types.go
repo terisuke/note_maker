@@ -4,6 +4,8 @@ import (
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 // WritingStyleGuide is the compact author style guide used for draft generation.
@@ -23,12 +25,33 @@ type GenerateRequest struct {
 	StyleGuide    WritingStyleGuide
 	Brief         ArticleBrief
 	AuthorProfile AuthorStyleProfile
+	Persona       personadomain.Persona
+	OutputFormat  outputformat.OutputFormat
 }
 
 // GenerateResult returns the validated draft and its strict style evaluation.
 type GenerateResult struct {
-	Draft      articledomain.Draft
-	Evaluation StyleEvaluation
+	Draft        articledomain.Draft
+	Evaluation   StyleEvaluation
+	Verification FinalVerification
+	Attempts     []GenerationAttempt
+}
+
+// GenerationAttempt preserves raw model output and validation state for each model call.
+type GenerationAttempt struct {
+	Index           int    `json:"index"`
+	Kind            string `json:"kind"`
+	RawOutput       string `json:"raw_output"`
+	ValidationError string `json:"validation_error,omitempty"`
+}
+
+// FinalVerification reports the lightweight model's final consistency review.
+type FinalVerification struct {
+	Performed bool     `json:"performed"`
+	Passed    bool     `json:"passed"`
+	Summary   string   `json:"summary"`
+	Report    string   `json:"report"`
+	Failures  []string `json:"failures,omitempty"`
 }
 
 // StyleThresholds are the strict draft acceptance thresholds from the implementation plan.

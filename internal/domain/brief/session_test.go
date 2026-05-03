@@ -1,6 +1,12 @@
 package brief
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	"github.com/teradakousuke/note_maker/internal/domain/persona"
+)
 
 func TestFixedQuestionsAreDeterministic(t *testing.T) {
 	questions := FixedQuestions()
@@ -8,23 +14,33 @@ func TestFixedQuestionsAreDeterministic(t *testing.T) {
 		QuestionIDTheme,
 		QuestionIDOpeningEpisode,
 		QuestionIDReader,
+		QuestionIDReaderProblem,
 		QuestionIDExpectedReaderAction,
+		QuestionIDKeyTakeaway,
 		QuestionIDMustInclude,
+		QuestionIDConcreteExample,
+		QuestionIDEvidence,
 		QuestionIDPersonalContext,
 		QuestionIDExclusions,
 		QuestionIDTargetLengthStructure,
 		QuestionIDToneStance,
+		QuestionIDTitleKeywords,
 	}
 	wantText := []string{
-		"記事の中心テーマは何ですか？",
-		"記事の導入に置く具体的な体験や場面は何ですか？",
-		"この記事を届けたい読者は誰ですか？",
-		"読後に読者へどんな変化や行動を起こしてほしいですか？",
-		"記事に必ず含める論点、事実、手順は何ですか？",
-		"著者本人の経験、肩書き、失敗、価値観など、記事に入れるべき属人的な文脈は何ですか？",
-		"記事に含めないこと、避けたい表現、断言しないことは何ですか？",
-		"目標文字数と記事構成を指定してください。例: 3000字前後、導入・背景・実装・検証・提案・結論。",
-		"記事のトーンや立場はどうしますか？内省、技術解説、実用、物語性の比重も指定してください。",
+		"この記事で一番伝えたいことを、ひとことで書くと何ですか？",
+		"冒頭で使えそうな出来事や場面はありますか？いつ・どこで・何が起きましたか？",
+		"誰に向けて書きますか？例: これから試す人、社内メンバー、同じ悩みのある人。",
+		"その読者は今、何に困っている・迷っていると思いますか？",
+		"読み終わった後、その人にまず何をしてほしいですか？",
+		"読者に一番持ち帰ってほしい言葉や考えは何ですか？",
+		"絶対に入れたい事実・手順・名前・数字を箇条書きで教えてください。",
+		"その話を伝えるための具体例、失敗例、画面、コード、会話などはありますか？",
+		"根拠として出せる結果・数字・比較・リンク・観察はありますか？なければ「なし」でOKです。",
+		"あなた自身はなぜこの話を書きたいですか？経験・問題意識・違和感を短く教えてください。",
+		"書かないこと、避けたい言い方、まだ断言しないことはありますか？なければ「なし」でOKです。",
+		"長さと構成の希望はありますか？例: 1500字で軽く、3000字で詳しく、導入→手順→結果。",
+		"文章の雰囲気はどうしますか？例: やさしく、熱量高め、冷静な技術報告、社内向け。",
+		"タイトルや見出しに入れたい言葉はありますか？なければ「未定」でOKです。",
 	}
 	if len(questions) != len(wantIDs) {
 		t.Fatalf("question count = %d, want %d", len(questions), len(wantIDs))
@@ -38,6 +54,49 @@ func TestFixedQuestionsAreDeterministic(t *testing.T) {
 		}
 		if question.FlowType != QuestionFlowMain {
 			t.Fatalf("question %d flow = %q, want %q", i, question.FlowType, QuestionFlowMain)
+		}
+	}
+}
+
+func TestComposeFixedQuestionsCoversPersonasAndFormats(t *testing.T) {
+	personas := []string{persona.IDTerisuke, persona.IDCloudia}
+	formats := []string{
+		outputformat.IDNoteArticle,
+		outputformat.IDMarkdownBlog,
+		outputformat.IDZennArticle,
+		outputformat.IDQiitaArticle,
+		outputformat.IDHomepageSection,
+	}
+	for _, personaID := range personas {
+		for _, formatID := range formats {
+			t.Run(personaID+"_"+formatID, func(t *testing.T) {
+				questions := ComposeFixedQuestions(personaID, formatID)
+				if len(questions) < len(FixedQuestions()) {
+					t.Fatalf("question count = %d, want at least %d", len(questions), len(FixedQuestions()))
+				}
+				assertUniqueQuestionIDs(t, questions)
+				switch formatID {
+				case outputformat.IDNoteArticle:
+					assertQuestionPresent(t, questions, QuestionIDStoryArc)
+				case outputformat.IDMarkdownBlog, outputformat.IDZennArticle, outputformat.IDQiitaArticle:
+					assertQuestionPresent(t, questions, QuestionIDTargetStack)
+					assertQuestionPresent(t, questions, QuestionIDPrerequisiteKnowledge)
+					assertQuestionPresent(t, questions, QuestionIDCodeExamples)
+					assertQuestionPresent(t, questions, QuestionIDReferences)
+				case outputformat.IDHomepageSection:
+					assertQuestionPresent(t, questions, QuestionIDHomepageCTA)
+				}
+				if formatID == outputformat.IDMarkdownBlog {
+					assertQuestionPresent(t, questions, QuestionIDCorBlogPurpose)
+					assertQuestionPresent(t, questions, QuestionIDCorBlogNextAction)
+				}
+				if personaID == persona.IDCloudia {
+					assertQuestionPresent(t, questions, QuestionIDCloudiaViewpoint)
+				}
+				if personaID == persona.IDCloudia && formatID == outputformat.IDZennArticle {
+					assertQuestionPresent(t, questions, QuestionIDTargetStack)
+				}
+			})
 		}
 	}
 }
@@ -175,6 +234,52 @@ func TestAssembleBriefIncludesFixedAndDeepDiveAnswers(t *testing.T) {
 	}
 }
 
+func TestForkWithEditedAnswerKeepsOriginalAndTruncatesFollowingAnswers(t *testing.T) {
+	session, err := NewArticleBriefSession("session-1", "style-1")
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial theme"); err != nil {
+		t.Fatalf("answer theme: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial opening"); err != nil {
+		t.Fatalf("answer opening: %v", err)
+	}
+	if _, err := session.RecordAnswer("Initial reader"); err != nil {
+		t.Fatalf("answer reader: %v", err)
+	}
+
+	fork, err := session.ForkWithEditedAnswer("session-2", QuestionIDOpeningEpisode, "Edited opening")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if fork.ID != "session-2" {
+		t.Fatalf("fork id = %q", fork.ID)
+	}
+	if fork.ParentSessionID != "session-1" {
+		t.Fatalf("parent session id = %q", fork.ParentSessionID)
+	}
+	if len(fork.Answers) != 2 {
+		t.Fatalf("fork answers = %d, want 2", len(fork.Answers))
+	}
+	if fork.Answers[0].QuestionID != QuestionIDTheme || fork.Answers[0].Content != "Initial theme" {
+		t.Fatalf("first fork answer = %#v", fork.Answers[0])
+	}
+	if fork.Answers[1].QuestionID != QuestionIDOpeningEpisode || fork.Answers[1].Content != "Edited opening" {
+		t.Fatalf("edited fork answer = %#v", fork.Answers[1])
+	}
+	if session.Answers[1].Content != "Initial opening" || len(session.Answers) != 3 {
+		t.Fatalf("original session was mutated: %#v", session.Answers)
+	}
+	next, ok := fork.CurrentQuestion()
+	if !ok {
+		t.Fatal("expected next question after fork")
+	}
+	if next.ID != QuestionIDReader {
+		t.Fatalf("next question = %q, want %q", next.ID, QuestionIDReader)
+	}
+}
+
 func TestGeneratedFollowUpQuestionRulesRejectBinaryQuestions(t *testing.T) {
 	disallowed := []string{
 		"Do you want the article to be practical?",
@@ -191,6 +296,33 @@ func TestGeneratedFollowUpQuestionRulesRejectBinaryQuestions(t *testing.T) {
 	}
 }
 
+func TestFallbackFollowUpTextIncludesContextualPrefix(t *testing.T) {
+	target := FixedQuestions()[1]
+	answer := BriefAnswer{
+		QuestionID: target.ID,
+		Content:    "以前の生成記事を読んだとき、自分の切実さが抜け落ちていると感じた",
+		FlowType:   QuestionFlowMain,
+	}
+	got := FallbackFollowUpText(target, answer, 1)
+	if !strings.HasPrefix(got, "「以前の生成記事を読んだとき、自分の切実さが抜け落ちていると感じた」というご回答を踏まえて、") {
+		t.Fatalf("fallback missing contextual prefix: %q", got)
+	}
+	if !IsAllowedFollowUpQuestion(got) {
+		t.Fatalf("contextual fallback should be allowed: %q", got)
+	}
+}
+
+func TestContextualFollowUpValidationStillRejectsBinaryQuestion(t *testing.T) {
+	text := "「AI or human の迷いがある」というご回答を踏まえて、Do you want the article to be practical?"
+	if IsAllowedFollowUpQuestion(text) {
+		t.Fatalf("expected contextual binary question to be rejected: %q", text)
+	}
+	allowed := "「AI or human の迷いがある」というご回答を踏まえて、どの場面からその迷いを具体的に説明しますか？"
+	if !IsAllowedFollowUpQuestion(allowed) {
+		t.Fatalf("expected contextual open question to be allowed: %q", allowed)
+	}
+}
+
 func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBriefSession {
 	t.Helper()
 	session, err := NewArticleBriefSession("session-1", "style-1")
@@ -201,12 +333,17 @@ func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBrie
 		QuestionIDTheme:                 "Local article generation with a small deterministic workflow.",
 		QuestionIDOpeningEpisode:        "Open with a failed local LLM run that timed out while drafting.",
 		QuestionIDReader:                "Solo developers who write note.com articles with local tools.",
+		QuestionIDReaderProblem:         "They are unsure how to structure practical notes.",
 		QuestionIDExpectedReaderAction:  "They should try a three-phase workflow before drafting.",
+		QuestionIDKeyTakeaway:           "Small interviews make drafts easier to evaluate.",
 		QuestionIDMustInclude:           "Mention style analysis, brief interviews, and final draft checks.",
+		QuestionIDConcreteExample:       "Use a timeout failure and a repaired draft flow as the example.",
+		QuestionIDEvidence:              "Use elapsed seconds, score, and verification status.",
 		QuestionIDPersonalContext:       "Use the author's background as a musician, engineer, and public speaker.",
 		QuestionIDExclusions:            "Avoid cloud-only assumptions.",
 		QuestionIDTargetLengthStructure: "3000字前後 with six sections.",
 		QuestionIDToneStance:            "Practical and introspective.",
+		QuestionIDTitleKeywords:         "local LLM, draft workflow, verification.",
 	}
 	for key, value := range overrides {
 		answers[key] = value
@@ -217,4 +354,25 @@ func answeredFixedSession(t *testing.T, overrides map[string]string) ArticleBrie
 		}
 	}
 	return session
+}
+
+func assertQuestionPresent(t *testing.T, questions []ArticleQuestion, id string) {
+	t.Helper()
+	for _, question := range questions {
+		if question.ID == id {
+			return
+		}
+	}
+	t.Fatalf("question %q was not present in %#v", id, questions)
+}
+
+func assertUniqueQuestionIDs(t *testing.T, questions []ArticleQuestion) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, question := range questions {
+		if seen[question.ID] {
+			t.Fatalf("duplicate question id %q in %#v", question.ID, questions)
+		}
+		seen[question.ID] = true
+	}
 }

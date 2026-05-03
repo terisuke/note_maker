@@ -26,7 +26,32 @@ The four phases below match ADR 0002. Each is independently shippable.
 | C | Memory: SQLite + history UI | Persistence rewrite, extends [#14](https://github.com/terisuke/note_maker/issues/14) | [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28) |
 | D | Quality & coverage | Tests + thresholds | [#29](https://github.com/terisuke/note_maker/issues/29) (rolls up [#11](https://github.com/terisuke/note_maker/issues/11), [#13](https://github.com/terisuke/note_maker/issues/13)) |
 
-Recommended order: **A → C → B → D**. Phase B benefits from durable storage (Phase C) being in place first, otherwise the JSON store becomes a temporary obstacle for the persona registry.
+Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. The 2026-05-03 implementation cut landed **C1 + D1 + the #57 runner foundation** in parallel, then completed #74's staged Evo X2 validation. The practical order is now **C2/C3 + browser E2E → fallback/runtime P2 → packaging**.
+
+Current status after the 2026-05-03 merges:
+
+- [#11](https://github.com/terisuke/note_maker/issues/11) strict Terisuke style tuning is closed.
+- [#21](https://github.com/terisuke/note_maker/issues/21) B1 landed early: persona/format domain concepts, prompt dispatch, selectors, and validators exist.
+- [#23](https://github.com/terisuke/note_maker/issues/23) is implemented for the in-repo generation surface: every registered format has a prompt fragment, embedded guide, validator, unit coverage, and deterministic sample validation.
+- [#24](https://github.com/terisuke/note_maker/issues/24) is implemented for built-in seeds: `terisuke` and `cloudia` have distinct source bundles, default formats, prompt hints, and unit/scenario coverage. Live source-derived guide rebuilding remains dependent on [#22](https://github.com/terisuke/note_maker/issues/22).
+- [#22](https://github.com/terisuke/note_maker/issues/22) is implemented and revalidated for historical user/article sources. Cor blog style analysis should use GitHub Markdown for full bodies and RSS for discovery.
+- [#25](https://github.com/terisuke/note_maker/issues/25) is implemented: the server composes persona/format question templates, the UI fetches templates, and `cmd/scenario/media_matrix` defines varied cases for note, Cor blog, Zenn, Qiita, and homepage.
+- [#38](https://github.com/terisuke/note_maker/issues/38) Tailnet OpenAI-compatible API is now the Evo X2 primary path. SSH tunnel access is diagnostic-only.
+- [#36](https://github.com/terisuke/note_maker/issues/36) remains open for local llama.cpp fallback quality; it does not block Phase A work.
+- [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization. The current note/Qiita/Zenn/Cor blog publishing-target scope passed on 2026-05-03 with `5/5` live rows against Evo X2 Tailnet primary.
+- A Tailnet full-workflow run reached the correct Evo X2 endpoint but took `1396.80s` and failed the quality gate (`score=82.0`, `2653` runes, `first_person=49`). This is the practical reason to start with streaming/cancellation rather than more prompt-only tuning.
+
+Near-term implementation cut:
+
+| Order | Issue | Why now | Done when |
+|---|---|---|---|
+| 1 | [#18](https://github.com/terisuke/note_maker/issues/18) | Long Tailnet inference needs visible progress, heartbeat, and cancellation before more UX is layered on top. | Implemented and merged. |
+| 2 | [#17](https://github.com/terisuke/note_maker/issues/17) | The transcript can then use the streaming primitives instead of another spinner path. | Implemented and merged: answers render as editable bubbles and edits fork the in-memory session. |
+| 3 | [#20](https://github.com/terisuke/note_maker/issues/20) | Deep-dive rationale belongs in the transcript once the transcript exists. | Implemented in code: every follow-up references the parent answer in prompt and UI, with validation recorded under `docs/validation/`. |
+| 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
+| 5A | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers, media-matrix briefs, draft versions, and evaluation results need durable storage before expensive Evo X2 runs become product memory. | Implemented in the current cut: SQLite stores sessions, answers, guides, articles, drafts, source snapshots, verification, and section-regeneration versions; web-app opt-in is `WORKFLOW_STORE_DRIVER=sqlite`. |
+| 5B | [#29](https://github.com/terisuke/note_maker/issues/29) | #17-#25 added real handler surface; coverage should catch regressions before C2/C3 add more UI and endpoints. | Implemented in the current cut: `go test ./internal/handlers -cover` reports 80.0% without real LLM/network. |
+| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Implemented: planned aggregate mode is offline by default; live mode records endpoint/model/elapsed/score/runes/verification in JSON/Markdown. The final #74 full matrix passed `5/5`. |
 
 ## Phase A — Conversation UX
 
@@ -43,16 +68,25 @@ Acceptance:
 - Editing answer #2 in a 5-answer session produces a new session whose answers list is `[1, 2', …]`.
 - Original session is reachable from the new session via `parent_session_id`.
 
+Implementation note as of 2026-05-02: the static app implements this as a progressive enhancement without a SPA rewrite. The canonical route is `POST /api/brief-sessions/{id}/answers/{answer_id}/edit`; `/api/sessions/{id}/answers/{answer_id}/edit` remains as an ADR-compatible alias.
+
 ### A2 — Stream LLM responses via SSE
+
+Implementation status: implemented and merged in [#18](https://github.com/terisuke/note_maker/issues/18).
 
 - Add SSE support to `internal/infrastructure/llamacpp/client.go` (OpenAI-compatible `stream: true`).
 - Wire streaming through the application services for `follow-up generation` and `draft generation`. Style analysis can stay non-streaming (single short call).
 - Frontend: replace global spinner with token-by-token append into the transcript (for follow-up) or into the draft preview (for draft).
+- Tailnet runtime: stream status events before first token (`endpoint`, `model`, `phase`, `started_at`), heartbeat events every 10 seconds, and final metrics (`elapsed_ms`, `runes`, `score` when available).
+- Cancellation: closing the browser request or pressing Cancel must cancel the server context and the upstream OpenAI-compatible request.
+- Failure mode: if the stream ends because the model times out or quality validation fails, keep the partial draft and surface the evaluation instead of losing the work.
 
 Acceptance:
 
-- A 3000-character draft visibly streams; first token < 3s on `gemma4:31b` warm.
+- A 3000-character draft visibly streams; a status event appears immediately and content chunks append incrementally once the model responds.
 - Network tab shows `text/event-stream` content type with incremental chunks.
+- Cancelling during a Tailnet Evo X2 run stops the server-side request and leaves the UI in a recoverable state.
+- Scenario/validation output records base URL, model, elapsed time, draft length, and score.
 
 ### A3 — Editable draft + per-section regenerate
 
@@ -64,17 +98,23 @@ Acceptance:
 
 - Editing the textarea immediately updates the preview.
 - Regenerating section "## 実装" replaces only that subtree of the Markdown; the other sections remain byte-identical.
+- Regenerated candidates are shown as a text-only preview with accept/reject controls; accepting can still be manually edited before insertion.
+
+Implementation note as of 2026-05-02: #19 is implemented in code. The Phase A route uses the existing `session_id` as the draft identifier until Phase C adds versioned draft records. The canonical endpoint is `POST /api/drafts/{id}/regenerate-section`; it loads the stored style guide and brief, applies the current persona/output-format strategy, rejects replacement candidates containing multiple `## ` sections, and returns both the candidate section and the full updated draft. Evo X2 validation regenerated the company-blog `## 実装と検証：再現性の数値化` section in `167.33s`, then completed lightweight verification in `23.14s`; non-target prefix/suffix preservation was true and the score stayed in the prior company-blog band (`72.1` vs `72.3`). Details are in [Issue 19 section regeneration validation](../validation/issue-19-section-regeneration-2026-05-02.md).
 
 ### A4 — Deep-dive rationale surfaced
 
 - Follow-up prompt (`internal/handlers/workflow.go:437-453`) gains the parent question text and the latest answer summary, plus the active style guide as context.
 - UI renders deep-dive bubbles with a quoted excerpt from the parent answer ("「〇〇」というご回答を踏まえて…").
 - Fallback (rule-based) text uses the same prefix to keep tone consistent.
+- Scenario harness records per-run medium, elapsed time, draft length, style score, and lightweight verification result so Phase A/B/C runs can build a cross-medium average over time.
 
 Acceptance:
 
 - Every deep-dive bubble in the transcript visibly references its parent answer.
 - Falling back to the rule-based path (LLM stub) still produces a contextual prefix.
+
+Implementation note as of 2026-05-02: #20 is implemented in code. Validation used a different medium from the prior note-oriented run: `terisuke` + `markdown_blog` + `cor_blog` brief. The draft-only rerun on Evo X2 Tailnet primary produced `elapsed_seconds=439.86`, `runes=3675`, `score=72.3`, and lightweight verification PASS. The strict note-style threshold of 82 was not met, which is expected signal that company-blog baselines need to be tracked separately from note-style baselines.
 
 ## Phase B — Persona + OutputFormat
 
@@ -84,7 +124,7 @@ New packages:
 
 - `internal/domain/persona`
   - types: `Persona`, `PersonaID`, `PersonaSeed`
-  - registry: in-memory + SQLite-backed once Phase C lands
+  - registry: in-memory + opt-in SQLite-backed workflow store after Phase C1
 - `internal/domain/format`
   - types: `OutputFormat`, `FormatID`, `Validator`
   - registry: same dual-mode
@@ -119,36 +159,42 @@ Concrete implementations under `internal/infrastructure/source/`:
 - `qiita/` — public REST API (no auth needed for read-only public posts) + HTML fallback.
 - `rss/` — generic RSS reader for Astro/Jekyll/Hugo blogs.
 - `html/` — generic semantic-content extractor (last resort).
+- `github/` — public repository Markdown reader for canonical blog sources such as `corsweb2024/src/content/blog/ja/*.md`.
 
 Each fetcher carries its own User-Agent string and rate-limit policy.
 
 Acceptance:
 
-- Scenario test fetches one article from each of {note, zenn, qiita, rss} and produces `tmp/source_fetch/{name}.json`.
+- Scenario test fetches historical user/account material from {note, zenn, qiita, rss, github}; it must prove that Zenn and Qiita return multiple Cloudia articles with body text, and that Cor.inc blog style analysis uses GitHub Markdown because RSS only contains short descriptions.
 - The note.com host check moves out of the application service into the `note` fetcher only; other hosts route to other fetchers.
 
 ### B3 — Format-specific prompt templates and validators
 
 Files:
 
-- `internal/application/draft/templates/note_article.go`
-- `internal/application/draft/templates/markdown_blog.go`
-- `internal/application/draft/templates/zenn_article.go`
-- `internal/application/draft/templates/qiita_article.go`
-- `internal/application/draft/templates/homepage_section.go`
+- `internal/domain/format/format.go`
+- `internal/application/draft/format_guides/note.md`
+- `internal/application/draft/format_guides/markdown_blog.md`
+- `internal/application/draft/format_guides/zenn.md`
+- `internal/application/draft/format_guides/qiita.md`
+- `internal/application/draft/format_guides/homepage_section.md`
+- `internal/application/draft/format_guides.go`
 
-Validators (in `internal/domain/format/validators/`):
+Validators (in `internal/domain/format`):
 
-- `NoteValidator` — current rules: `# ` first line, no fences, `ですます調` recommendation.
-- `MarkdownBlogValidator` — frontmatter optional, `# ` or `## ` first heading, fences allowed.
-- `ZennValidator` — frontmatter required (`title`, `emoji`, `type ∈ {tech, idea}`, `topics: [...]`, `published: bool`), code fences allowed, no `# ` (Zenn auto-renders title from frontmatter).
-- `QiitaValidator` — frontmatter required (`title`, `tags: [...]`), code fences allowed.
+- `NoteValidator` — `# ` first line, no frontmatter, no Zenn/Qiita-specific extended Markdown; plain fences allowed only when needed.
+- `MarkdownBlogValidator` — `corsweb2024` Astro frontmatter required, `lang: ja`, category limited to `ai | engineering | founder | lab`, `# ` or `## ` first heading, code fences require language.
+- `ZennValidator` — frontmatter required (`title`, `emoji`, `type ∈ {tech, idea}`, `topics: [...]`, `published: bool`), rejects Qiita `:::note` and `diff_language`.
+- `QiitaValidator` — frontmatter required (`title`, `tags: [...]`), rejects Zenn `:::message`, `:::details`, `@[card]`, and `diff language`.
 - `HomepageSectionValidator` — output is HTML, no `# `, requires at least one `<h2>` and one `<p>`, optional CTA `<a>` block.
 
 Acceptance:
 
 - Each validator has a positive and negative unit test.
+- Each registered format has an embedded Markdown guide injected into the final draft prompt.
 - Generating the same brief under different formats produces visibly different drafts: Zenn has frontmatter + many code fences; note has narrative paragraphs and ですます調; homepage_section is HTML with no `# `.
+
+Implementation note as of 2026-05-02: #23 is implemented for deterministic generation validation. `cmd/scenario/format_persona_seed` writes one validated sample per registered format and confirms that prompt construction injects the selected embedded guide. The scenario avoids live LLM calls so it can run in `go test ./...`-adjacent validation without touching source fetchers.
 
 ### B4 — Persona library seed
 
@@ -189,6 +235,8 @@ Acceptance:
 - A scenario command runs `analyze` for both personas and writes two distinct `WritingStyleGuide` files to `tmp/personas/`.
 - Cross-style score: rebuilding Cloudia's guide from Terisuke's articles produces lower style-similarity than Cloudia's own articles (sanity check that the personas are actually distinct).
 
+Implementation note as of 2026-05-02: #24's built-in seed library is implemented and validated without expanding source acquisition. The registry ships `terisuke` and `cloudia` with distinct default formats, source kinds, first-person options, title patterns, and anti-patterns. Source-derived guide rebuilding for Zenn/Qiita/RSS remains blocked on #22, so the original live-analyze scenario acceptance moves with that source-fetcher work rather than being claimed here.
+
 ### B5 — Format- and persona-aware fixed questions
 
 The fixed nine questions in `static/js/script.js` are extracted server-side into `internal/domain/brief/questions/`:
@@ -206,21 +254,25 @@ Acceptance:
 - Starting a `terisuke × note_article` session is byte-identical to the current question set.
 - Custom questions added via the existing config UI are appended after the composed list.
 
+Implementation note as of 2026-05-03: #25 is implemented with `brief.ComposeFixedQuestions(persona_id, output_format_id)` and `GET /api/brief-sessions/templates`. The frontend now displays server templates as read-only rows and sends only custom additions on session start. `cmd/scenario/media_matrix` validates all 2 personas x 5 formats templates and creates a six-case cross-media evaluation matrix for follow-on live LLM runs.
+
 ## Phase C — Memory & history
 
 ### C1 — SQLite store (extends Issue [#14](https://github.com/terisuke/note_maker/issues/14))
 
-- New package `internal/infrastructure/repository/sqlite` using `modernc.org/sqlite` (pure Go, no CGO) or `mattn/go-sqlite3` if CGO is acceptable.
+Status: implemented in the current cut as an opt-in workflow store. C2/C3 still need UI/read APIs on top of the schema.
+
+- New package `internal/infrastructure/repository/sqlite` using `mattn/go-sqlite3`.
 - Schema migrations under `internal/infrastructure/repository/sqlite/migrations/` numbered `0001_*.sql`, applied at boot via a tiny in-process migrator.
 - Tables (minimum): `personas`, `author_sources`, `writing_style_guides` (versioned), `projects`, `articles`, `brief_sessions`, `brief_answers` (with `parent_answer_id`), `drafts` (versioned).
-- The existing JSON file becomes an export/import utility. On first boot, if the JSON file exists, it is imported.
-- Default DB path: `data/note_maker.db` (gitignored).
+- The existing JSON file remains the default compatibility store for now. Import/export between JSON and SQLite stays under the broader [#14](https://github.com/terisuke/note_maker/issues/14) umbrella.
+- Default SQLite DB path: `data/workflow_store.db` when `WORKFLOW_STORE_DRIVER=sqlite` is set.
 
 Acceptance:
 
-- All repository interfaces have SQLite implementations. Existing in-memory implementations remain for tests.
-- `go test ./...` passes against both implementations.
-- Re-opening the app after a restart shows past projects, sessions, and drafts.
+- The current workflow store methods have SQLite implementations. Existing in-memory and JSON-file implementations remain for tests and compatibility.
+- `go test ./...` passes, and focused SQLite restart tests prove sessions, briefs, source snapshots, draft versions, and section-regeneration records survive reopening.
+- Re-opening the app after a restart can use SQLite when `WORKFLOW_STORE_DRIVER=sqlite`; browser-visible history still lands in C2/C3.
 
 ### C2 — Persona / past-session picker UI
 
@@ -249,13 +301,17 @@ Acceptance:
 
 ### D1 — Handler tests
 
-`internal/handlers/workflow.go` is 467 lines and currently has zero direct test coverage. This is the highest-leverage gap because every Phase A / B / C change touches it.
+`internal/handlers/workflow.go` is now 1,000+ lines and has focused direct tests. This remains the highest-leverage gap because every Phase A / B / C change touches it.
 
 - Add `internal/handlers/workflow_test.go` with table-driven tests for each handler: `AnalyzeAuthorStyleHandler`, `CreateBriefSessionHandler`, `AnswerBriefSessionHandler`, `GenerateDraftHandler`, plus the new endpoints introduced by Phases A and B.
 - Use injected fakes for the application services (the existing pattern from `generate_test.go`).
 - Target ≥ 80 % line coverage for `workflow.go`.
 
 Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold tuning) and Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright E2E) are tracked separately but their acceptance criteria are folded into Phase D's exit gate.
+
+Runtime validation treats Evo X2 Ollama's OpenAI-compatible API over Tailscale VPN/MagicDNS as the primary heavy-inference path. SSH tunnels are explicit developer diagnostics only. The fallback chain is Evo X2 Ollama → Evo X2 llama.cpp → workstation-local llama.cpp. Scenario reports must include base URL, model, elapsed time, score, and draft length to prevent accidental local-runtime validation. The 2026-05-02 validation passed on Evo X2 and found local fallback quality/model-compatibility gaps; fallback hardening is tracked in Issue [#36](https://github.com/terisuke/note_maker/issues/36). Issue [#45](https://github.com/terisuke/note_maker/issues/45) now has a documented conservative Evo X2 llama.cpp service-profile swap strategy and dry-run default targets; closure still requires direct `/llama/v1` brief/draft live validation with streaming metrics and no Ollama disruption.
+
+Draft generation now includes a lightweight final verification pass before returning the final result. The default operational model split is: `gemma4:e2b` for source/style summarization, `qwen3.6:27b` for follow-up question generation, `gemma4:31b` for Japanese draft generation, and `gemma4:latest` for final consistency verification. The verification step reports PASS/NEEDS_REVIEW plus concrete issues; automatic rewrite from the verification report is deferred until section regeneration and draft versioning are in place.
 
 ## Risk register
 
@@ -275,4 +331,4 @@ Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold t
 
 ## Immediate next implementation step
 
-Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#29](https://github.com/terisuke/note_maker/issues/29) are filed. Start with **[#17](https://github.com/terisuke/note_maker/issues/17)** (chat transcript) on a feature branch off `develop`.
+Issues [#17](https://github.com/terisuke/note_maker/issues/17)–[#25](https://github.com/terisuke/note_maker/issues/25) are implemented and merged. The current cut implements Phase C1 ([#26](https://github.com/terisuke/note_maker/issues/26)), D1 ([#29](https://github.com/terisuke/note_maker/issues/29)), and the media-matrix runner ([#57](https://github.com/terisuke/note_maker/issues/57)). After this lands, start Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) and run one bounded Evo X2 case through [#40](https://github.com/terisuke/note_maker/issues/40) before the full note/Qiita/Zenn/company-blog pass.

@@ -6,7 +6,7 @@ Note記事のURLまたはユーザー名を入力し、ローカルLLMが新し�
 
 ADR 0001 を踏まえた次の進化方針は [ADR 0002 — Multi-Persona, Multi-Format Article Generation](docs/adrs/0002-multi-persona-multi-format-extension.md) と [Multi-persona / multi-format 実装計画](docs/implementation-plans/multi-persona-multi-format.md) にまとめています。てりすけ本人と架空キャラ「宇宙野クラウディア」を別人格として扱い、note / cor-jp.com ブログ / Zenn / Qiita / ホームページHTML を切り替え可能にします。
 
-実装 issue と ADR の対応、各層の責務、テスト条件は [Issue and ADR guardrails](docs/implementation-plans/issue-adr-guardrails.md) にまとめています。
+実装 issue と ADR の対応、各層の責務、テスト条件は [Issue and ADR guardrails](docs/implementation-plans/issue-adr-guardrails.md) にまとめています。現在のアプリ化後の引き継ぎ、起動方法、main昇格チェックリストは [Note Maker app handoff](docs/handoffs/app-handoff-2026-05-03.md) に整理しています。次に着手する実装順は [Next implementation cut](docs/implementation-plans/next-implementation-cut.md) に整理しています。
 
 ## 主な機能
 
@@ -20,8 +20,8 @@ ADR 0001 を踏まえた次の進化方針は [ADR 0002 — Multi-Persona, Multi
 
 - フロントエンド: HTML, CSS, JavaScript
 - バックエンド: Go
-- ローカルLLM: llama.cpp `llama-server`
-- モデル: `gemma4:31b` alias for `ggml-org/gemma-4-31B-it-GGUF` Q4_K_M
+- LLM runtime: Evo X2 Ollama OpenAI互換API over Tailnetをprimary、Evo X2 llama.cppと作業端末ローカル llama.cppをfallback
+- 主要モデル: `gemma4:e2b`（文体/ソース整理）、`qwen3.6:27b`（深掘り質問）、`gemma4:31b`（日本語下書き）、`gemma4:latest`（最終検証）
 - Note取得: 公開記事ページ/RSS優先、非公式APIは互換フォールバック
 
 ## 必要な環境
@@ -48,21 +48,64 @@ LLAMACPP_BASE_URL=http://127.0.0.1:8081/v1
 LLAMACPP_MODEL=gemma4:31b
 ```
 
-### まとめて起動する
+### アプリ風 launcher で起動する
 
-`llama-server` と Go サーバーをまとめて起動できます。
+通常利用は launcher 経由を推奨します。launcher は空いているローカルポートを選び、Evo X2 Tailnet の primary LLM health を確認し、Go サーバーをビルドして起動し、終了時に子プロセスを停止します。既定では Mac 側のローカル fallback LLM は起動しません。
 
 ```bash
-make app
+make launcher
+```
+
+または mise を使う場合:
+
+```bash
+mise run launcher
+```
+
+`make app` も同じ launcher を起動する alias です。
+
+起動後はブラウザが自動で開きます。終了するときは launcher を実行したターミナルで `Ctrl-C` を押します。`PORT` が使用中の場合は、既定で次の空きポートを選びます。固定ポートで失敗させたい場合は `./scripts/launcher.sh --strict-port` を使います。
+
+launcher の既定保存先:
+
+- macOS: `~/Library/Application Support/Note Maker`
+- Linux/その他: `$XDG_DATA_HOME/note-maker` または `~/.local/share/note-maker`
+
+この配下に `app_config.json`、`workflow_store.json`、`logs/`、ビルド済みサーバーバイナリを置きます。保存先を変える場合は `NOTE_MAKER_DATA_DIR=/path/to/dir make launcher` または `./scripts/launcher.sh --data-dir /path/to/dir` を指定します。
+
+Evo X2 Tailnet が到達不能な場合、既定ではアプリを起動しません。UIだけを起動したい検証時は `make launcher-status` で状態を確認し、必要に応じて `./scripts/launcher.sh --allow-degraded` を使います。ローカル `llama-server` を明示的に起動して primary として使う場合だけ、次を実行します。
+
+```bash
+make launcher-local
+```
+
+`llama-server` の場所やモデルを変える場合は `.env` の `LLAMA_SERVER`、`LLAMACPP_HF_REPO`、`LLAMACPP_HF_FILE`、`LLAMACPP_MODEL` を変更します。
+
+launcher 自体の検証:
+
+```bash
+make launcher-check
+```
+
+### 旧 dev script でまとめて起動する
+
+従来の `scripts/dev.sh` は残しています。`LLM_RUNTIME=local` を明示した検証では `llama-server` と Go サーバーをまとめて起動できます。
+
+```bash
+make dev
 ```
 
 ブラウザで `http://localhost:8080` にアクセスします。終了するときは `Ctrl-C` で両方のプロセスを停止できます。
 
-`llama-server` の場所やモデルを変える場合は `.env` の `LLAMA_SERVER`、`LLAMACPP_HF_REPO`、`LLAMACPP_HF_FILE`、`LLAMACPP_MODEL` を変更します。
+### Evo X2 の Ollama を Tailscale VPN 経由で使って起動する
 
-### Evo X2 の Ollama を使って起動する
+Evo X2 の Ollama を使う場合は、Tailscale VPN/MagicDNS 上の OpenAI互換APIを primary とし、Mac側のローカルLLMは起動しません。fallback は順番を固定します。
 
-Tailscale 経由で Evo X2 の Ollama を使う場合は、Mac側でローカルLLMを起動せず、Goサーバーだけを起動します。
+1. Evo X2 Ollama OpenAI互換API: `http://evo-x2.tailb30e58.ts.net/v1`
+2. Evo X2 llama.cpp OpenAI互換API: `http://evo-x2.tailb30e58.ts.net/llama/v1`
+3. 最終手段の作業端末ローカル llama.cpp: `http://127.0.0.1:8081/v1`
+
+前提として、利用端末が同じ Tailnet に参加しており、Evo X2 の Caddy/OpenAI互換APIが Tailnet 内から到達できる必要があります。これにより、SSH の個別認証や端末ごとの port forward に依存せず、他の許可済みデバイスからも同じ Evo X2 を利用できます。
 
 ```bash
 make evo-x2
@@ -75,25 +118,38 @@ mise trust
 mise run evo-x2
 ```
 
-既定では `http://evo-x2:11434/v1` の OpenAI互換APIに接続し、`gemma4:31b` を使います。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
+既定では Tailnet 上の `http://evo-x2.tailb30e58.ts.net/v1` に接続します。モデルを変える場合は `.env.evo-x2.example` を参考に `LLM_MODEL`、`STYLE_LLM_MODEL`、`BRIEF_LLM_MODEL`、`ARTICLE_LLM_MODEL`、`DRAFT_LLM_MODEL`、`VERIFY_LLM_MODEL` を設定してください。120B級のモデルを使う場合は `LLM_TIMEOUT_SECONDS` を長めに設定します。
 
-画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は初期テンプレートを編集でき、追加質問も下書き生成のブリーフに含まれます。
+画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は選択したペルソナと出力形式に応じた固定テンプレートが表示され、追加質問も下書き生成のブリーフに含まれます。
 
 文体分析結果、取材セッションの回答、完成ブリーフは `WORKFLOW_STORE_PATH` にJSONとして永続化されます。既定値は `data/workflow_store.json` です。
 
+保存方式は設定画面の「保存方式」から選べます。UIで変更した内容は `data/app_config.json` に保存され、サーバー再起動後に反映されます。SQLiteを選んだ場合の既定パスは `data/workflow_store.db` です。JSON store は互換性のため既定のまま残しています。
+
+開発・検証で強制したい場合は `WORKFLOW_STORE_DRIVER=sqlite` を指定できます。この環境変数がある場合、設定画面では保存方式がロック表示になります。
+
 フェーズ別モデルの目安:
 
-- `STYLE_LLM_MODEL`: Note記事取得後の文体ガイド整理用。
-- `BRIEF_LLM_MODEL`: 深掘り質問生成用。軽いモデルで十分です。
-- `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。
-- `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。品質重視のモデルを指定します。
-- `FALLBACK_LLM_BASE_URL`: Evo X2 に接続できない場合の llama.cpp フォールバック先です。
-- フォールバック時のモデル名は、原則としてUIまたは環境変数で選んだフェーズ別モデルをそのまま使います。別名にしたい場合だけ `STYLE_FALLBACK_LLM_MODEL` / `BRIEF_FALLBACK_LLM_MODEL` / `ARTICLE_FALLBACK_LLM_MODEL` / `DRAFT_FALLBACK_LLM_MODEL` を設定します。
+- `STYLE_LLM_MODEL`: Note記事取得後の文体ガイド整理用。既定は軽量な `gemma4:e2b`。
+- `BRIEF_LLM_MODEL`: 深掘り質問生成用。既定は推論力重視の `qwen3.6:27b`。
+- `ARTICLE_LLM_MODEL`: 旧 `/api/generate` 用。既定は軽量な `gemma4:e2b`。
+- `DRAFT_LLM_MODEL`: 一問一答後の最終下書き生成用。既定は日本語下書き品質重視の `gemma4:31b`。
+- `VERIFY_LLM_MODEL`: 下書き後の最終一貫性チェック用。既定は軽量な `gemma4:latest`。
+- `EVO_X2_TAILNET_HOST`: Tailnet/MagicDNS 上の Evo X2 ホスト名です。既定値は `evo-x2.tailb30e58.ts.net`。
+- `EVO_X2_LLM_BASE_URL`: Evo X2 Ollama primary の OpenAI互換APIです。既定値は `http://evo-x2.tailb30e58.ts.net/v1`。
+- `LLM_FALLBACK_BASE_URLS`: カンマ区切りの fallback chain です。既定は Evo X2 llama.cpp、最後にローカル llama.cpp。
+- `STYLE_LLM_FALLBACK_MODELS` など: fallback endpoint ごとのモデル名をカンマ区切りで指定します。
 
-接続確認だけ行う場合:
+Tailnet primary の接続確認だけ行う場合:
 
 ```bash
-curl http://evo-x2:11434/v1/models
+make evo-x2-models
+```
+
+SSH tunnel を使った個人端末向け診断を行う場合だけ、明示的に SSH ターゲットを使います。これはアプリの primary 経路ではありません。
+
+```bash
+make evo-x2-ssh-models
 ```
 
 3,000字前後の統合シナリオを Evo X2 で実行する場合:
@@ -103,6 +159,28 @@ make scenario-evo-x2
 ```
 
 このシナリオは文体分析、一問一答、深掘り、下書き生成を通し、文体スコア80点以上と一定以上の本文量を確認します。
+
+### ローカル llama.cpp fallback だけを検証する
+
+Evo X2 primary とは別に、作業端末上で既に起動済みの `llama.cpp` fallback だけを検証する場合は専用ターゲットを使います。このターゲットは Ollama や `llama-server` を起動せず、Evo X2 への fallback chain も無効化します。
+
+まず plan/report だけを作る場合:
+
+```bash
+make scenario-local-llamacpp-fallback
+```
+
+実際に draft 生成まで走らせる場合は、誤って Evo X2 primary 検証と混同しないように明示的な gate が必要です。`LOCAL_LLAMACPP_FALLBACK_BASE_URL` は loopback の OpenAI互換 `/v1` endpoint だけを受け付けます。
+
+```bash
+RUN_LOCAL_LLAMACPP_FALLBACK_SCENARIO=1 \
+LOCAL_LLAMACPP_FALLBACK_BASE_URL=http://127.0.0.1:8081/v1 \
+LOCAL_LLAMACPP_FALLBACK_MODEL=qwen3:30b-a3b \
+LOCAL_LLAMACPP_FALLBACK_LOAD_FLAGS='--host 127.0.0.1 --port 8081 --alias qwen3:30b-a3b --reasoning off ...' \
+make scenario-local-llamacpp-fallback
+```
+
+結果は `tmp/local_llamacpp_fallback/report.md` と `tmp/local_llamacpp_fallback/report.json` に記録されます。Issue #36 の合格条件は `score >= 82.0`、`keyword_overlap >= 70`、`runes >= 2800` です。記録テンプレートは `docs/validation/issue-36-local-llamacpp-fallback-template.md` です。
 
 ### 個別に起動する
 

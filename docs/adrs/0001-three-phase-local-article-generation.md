@@ -44,6 +44,7 @@ Note Maker will move from a single `POST /api/generate` flow to a three-phase wo
    - Generate a draft from `WritingStyleGuide + ArticleBrief`.
    - Do not fetch Note articles during draft generation.
    - Validate the draft as paste-ready Markdown and compare it against the author style profile.
+   - Run a final lightweight-model consistency check against the draft, brief, style guide, and target output format before returning the result.
 
 These phases are orchestrated by application services, not autonomous background agents. The word "agent" may be used in product language, but the implementation should use deterministic workflow boundaries first.
 
@@ -83,7 +84,7 @@ Planned services:
 
 - `GenerateDraftService`
   - input: `WritingStyleGuide`, `ArticleBrief`.
-  - output: validated `Draft`, comparison report.
+  - output: validated `Draft`, comparison report, and lightweight final verification report.
 
 - `ArticleWorkflowService`
   - optional facade for UI/API flows that need to coordinate the three services.
@@ -96,13 +97,23 @@ Adapters remain outside the domain:
   - public page and RSS remain preferred for the product path.
   - note.com JSON APIs may be used in local scenario tests and compatibility adapters where the user explicitly requests them.
 
-- Local LLM:
-  - `llama.cpp` `llama-server` remains the documented target.
-  - Any OpenAI-compatible local endpoint, including Ollama, can be used for local verification if it exposes the required model alias.
+- LLM runtime:
+  - The preferred heavy inference path is Evo X2's Ollama OpenAI-compatible API over Tailscale VPN/MagicDNS, normally `http://evo-x2.tailb30e58.ts.net/v1`.
+  - Ollama is the primary runtime because it supports OpenAI-compatible chat completions with streaming and lets the app select a different installed model per request. This is needed for phase-specific routing: lightweight Gemma for source/style summarization, Qwen for deeper interview questions, and Gemma 31B for final Japanese drafts.
+  - The ordered fallback chain is:
+    1. Evo X2 Ollama OpenAI-compatible API.
+    2. Evo X2 `llama.cpp` / `llama-server` OpenAI-compatible API, normally `http://evo-x2.tailb30e58.ts.net/llama/v1`.
+    3. Workstation-local `llama.cpp`, normally `http://127.0.0.1:8081/v1`, as the last resort only.
+  - SSH port forwarding is a developer diagnostic path only. It must not be the product default because it depends on per-device SSH configuration and prevents other authorized Tailnet devices from using the shared Evo X2 endpoint.
+  - `llama.cpp` model swapping is tracked by Issue [#45](https://github.com/terisuke/note_maker/issues/45). The current recommended implementation is a conservative systemd/profile swap for one shared fallback `llama-server` behind `/llama/v1`, with dry-run default scripts and explicit restart gates. Until live Evo X2 validation proves brief/draft quality, first-token latency, and no Ollama disruption, `llama-server` remains a fallback route rather than the primary multi-model route.
+  - Direct local Ollama on `127.0.0.1:11434` must not be used as the default verification path; it is only acceptable when explicitly selected for a one-off diagnostic.
+  - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
 
 - Storage:
-  - initial implementation can use in-memory repositories and JSON file fixtures.
-  - durable storage can be added later without changing the domain model.
+  - JSON-file repositories remain the compatibility path.
+  - SQLite is the durable app baseline for queryable workflow memory, including author styles, sessions, briefs, brief versions, projects, articles, source snapshots, drafts, and final verification metadata.
+  - Storage mode must be visible from the settings UI unless environment variables intentionally lock it.
+  - The app-like launcher stores runtime config, workflow data, logs, and the managed server binary in the user data directory described in [Note Maker app handoff](../handoffs/app-handoff-2026-05-03.md).
 
 ## API Direction
 

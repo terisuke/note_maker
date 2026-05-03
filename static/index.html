@@ -30,6 +30,19 @@
         </div>
 
         <div class="config-grid">
+          <div class="field-row persona-field">
+            <label for="persona-select">書き手</label>
+            <div class="inline-select-action">
+              <select id="persona-select"></select>
+              <button id="edit-persona-btn" class="secondary-btn compact-btn" type="button">編集</button>
+              <button id="delete-persona-btn" class="secondary-btn compact-btn danger-btn" type="button">削除</button>
+              <button id="add-persona-btn" class="secondary-btn compact-btn" type="button">+ Add persona</button>
+            </div>
+          </div>
+          <div class="field-row">
+            <label for="format-select">出力先</label>
+            <select id="format-select"></select>
+          </div>
           <div class="field-row">
             <label for="style-model">文体分析モデル</label>
             <select id="style-model"></select>
@@ -41,6 +54,121 @@
           <div class="field-row">
             <label for="draft-model">下書き生成モデル</label>
             <select id="draft-model"></select>
+          </div>
+          <div class="field-row">
+            <label for="verify-model">最終検証モデル</label>
+            <select id="verify-model"></select>
+          </div>
+        </div>
+        <form id="add-persona-form" class="persona-form hidden">
+          <div class="section-heading">
+            <h3 id="persona-form-title">書き手を追加</h3>
+            <div class="button-row">
+              <button id="save-persona-btn" class="primary-btn" type="submit">保存</button>
+              <button id="cancel-persona-btn" class="secondary-btn" type="button">キャンセル</button>
+            </div>
+          </div>
+          <div class="config-grid">
+            <div class="field-row">
+              <label for="persona-id-input">ID</label>
+              <input id="persona-id-input" type="text" autocomplete="off" placeholder="my_persona">
+            </div>
+            <div class="field-row">
+              <label for="persona-display-name-input">表示名</label>
+              <input id="persona-display-name-input" type="text" autocomplete="off" placeholder="新しい書き手">
+            </div>
+            <div class="field-row">
+              <label for="persona-default-format-select">初期出力先</label>
+              <select id="persona-default-format-select"></select>
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-description-input">説明</label>
+              <input id="persona-description-input" type="text" autocomplete="off" placeholder="どんな書き方をするか">
+            </div>
+            <div class="field-row">
+              <label for="persona-first-person-input">一人称</label>
+              <input id="persona-first-person-input" type="text" autocomplete="off" placeholder="私 / 僕">
+            </div>
+            <div class="field-row">
+              <label for="persona-source-kind-input">ソース種別</label>
+              <input id="persona-source-kind-input" type="text" autocomplete="off" placeholder="note / zenn / qiita">
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-source-ref-input">ソース参照</label>
+              <input id="persona-source-ref-input" type="text" autocomplete="off" placeholder="username or URL">
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-source-url-input">ソースURL</label>
+              <input id="persona-source-url-input" type="text" autocomplete="off" placeholder="https://example.com/feed">
+            </div>
+          </div>
+          <div id="persona-status" class="persona-status" aria-live="polite">IDと表示名だけで追加できます。ソースは後から文体ソース欄で変更できます。</div>
+        </form>
+        <div class="storage-config">
+          <div class="section-heading">
+            <h3>保存方式</h3>
+            <button id="save-storage-btn" class="secondary-btn" type="button">保存方式を保存</button>
+          </div>
+          <div class="config-grid">
+            <div class="field-row">
+              <label for="storage-driver">保存先</label>
+              <select id="storage-driver">
+                <option value="json">JSONファイル</option>
+                <option value="sqlite">SQLite</option>
+              </select>
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="storage-path">保存パス</label>
+              <input id="storage-path" type="text" autocomplete="off">
+            </div>
+          </div>
+          <div id="storage-summary" class="storage-summary" aria-live="polite"></div>
+        </div>
+        <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
+
+        <div class="history-config">
+          <div class="section-heading">
+            <h3>履歴から再開</h3>
+            <button id="refresh-history-btn" class="secondary-btn" type="button">履歴を更新</button>
+          </div>
+          <div class="history-picker-grid">
+            <div class="field-row">
+              <label for="history-persona-select">履歴の書き手</label>
+              <select id="history-persona-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-project-select">プロジェクト</label>
+              <select id="history-project-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-article-select">記事</label>
+              <select id="history-article-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-draft-select">下書き</label>
+              <select id="history-draft-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-style-select">保存済み文体ガイド</label>
+              <select id="history-style-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-session-select">保存済み取材セッション</label>
+              <select id="history-session-select"></select>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="open-history-btn" class="primary-btn" type="button" disabled>選択した履歴を開く</button>
+            <button id="clear-history-selection-btn" class="secondary-btn" type="button">選択を解除</button>
+          </div>
+          <div id="history-status" class="history-status" aria-live="polite"></div>
+          <div id="history-article-detail" class="history-detail" aria-live="polite">
+            <div id="history-project-card" class="artifact-card empty"></div>
+            <div id="history-article-card" class="artifact-card empty"></div>
+            <div id="history-article-brief-card" class="artifact-card empty"></div>
+            <div id="history-current-draft-card" class="artifact-card empty"></div>
+            <div id="history-draft-versions-card" class="artifact-card empty"></div>
+            <div id="history-source-snapshot-card" class="artifact-card empty"></div>
           </div>
         </div>
 
@@ -60,13 +188,13 @@
         <div class="panel-header">
           <div>
             <span class="step-label">1</span>
-            <h2>文体分析</h2>
+            <h2>文体分析 / プリセット</h2>
           </div>
-          <p>Note記事を収集し、再利用できる文体ガイドを作ります。</p>
+          <p>選択中の書き手と出力先に合わせて、note / Zenn / Qiita / 自社ブログから文体ガイドを作ります。</p>
         </div>
 
         <div class="field-row">
-          <label for="style-username">Noteユーザー名</label>
+          <label for="style-username">文体ソース</label>
           <input id="style-username" type="text" value="cor_instrument" autocomplete="off">
         </div>
         <div class="field-row compact">
@@ -78,7 +206,10 @@
             <option value="8">8</option>
           </select>
         </div>
-        <button id="analyze-style-btn" class="primary-btn">文体を分析</button>
+        <div class="button-row">
+          <button id="analyze-style-btn" class="primary-btn">文体を分析</button>
+          <button id="use-preset-style-btn" class="secondary-btn" type="button">選択中の書き手プリセットを使う</button>
+        </div>
 
         <div id="style-result" class="result-box hidden">
           <div class="result-grid">
@@ -96,7 +227,11 @@
             </div>
           </div>
           <h3>文体ガイド</h3>
-          <pre id="guide-preview"></pre>
+          <div id="style-guide-card" class="artifact-card"></div>
+          <details class="artifact-raw">
+            <summary>Markdownを表示</summary>
+            <pre id="guide-preview"></pre>
+          </details>
         </div>
       </section>
 
@@ -118,13 +253,18 @@
           </div>
           <div class="button-row">
             <button id="submit-answer-btn" class="primary-btn">回答を送信</button>
+            <button id="cancel-answer-btn" class="secondary-btn hidden" type="button">停止</button>
             <button id="skip-deep-dive-btn" class="secondary-btn hidden">深掘りをスキップ</button>
           </div>
         </div>
 
         <div id="brief-result" class="result-box hidden">
           <h3>記事ブリーフ</h3>
-          <pre id="brief-preview"></pre>
+          <div id="brief-card" class="artifact-card"></div>
+          <details class="artifact-raw">
+            <summary>JSONを表示</summary>
+            <pre id="brief-preview"></pre>
+          </details>
         </div>
       </section>
 
@@ -137,21 +277,38 @@
           <p>文体ガイドと記事ブリーフだけを使って下書きを生成します。</p>
         </div>
 
-        <button id="generate-draft-btn" class="primary-btn" disabled>下書きを生成</button>
+        <div class="button-row">
+          <button id="generate-draft-btn" class="primary-btn" disabled>下書きを生成</button>
+          <button id="cancel-draft-btn" class="secondary-btn hidden" type="button">停止</button>
+        </div>
         <div id="draft-status" class="status-line"></div>
 
         <div id="draft-result" class="hidden">
           <div id="evaluation-summary" class="evaluation"></div>
+          <div id="verification-summary" class="evaluation"></div>
           <div class="tabs">
             <button class="tab-btn active" data-tab="preview">プレビュー</button>
             <button class="tab-btn" data-tab="markdown">Markdown</button>
           </div>
           <div id="preview-tab" class="tab-pane active">
             <div id="preview-content"></div>
+            <button id="copy-preview-btn" class="secondary-btn" type="button">プレビューをコピー</button>
           </div>
           <div id="markdown-tab" class="tab-pane">
-            <textarea id="markdown-output" readonly></textarea>
-            <button id="copy-btn" class="secondary-btn">コピー</button>
+            <textarea id="markdown-output"></textarea>
+            <div class="button-row">
+              <button id="copy-btn" class="secondary-btn" type="button">Markdownをコピー</button>
+              <button id="regenerate-section-btn" class="secondary-btn" type="button" disabled>このセクションを再生成</button>
+            </div>
+            <div id="section-status" class="status-line"></div>
+            <div id="section-candidate" class="section-candidate hidden">
+              <h3>再生成候補</h3>
+              <textarea id="section-candidate-output" rows="10"></textarea>
+              <div class="button-row">
+                <button id="accept-section-btn" class="primary-btn" type="button">候補を反映</button>
+                <button id="reject-section-btn" class="secondary-btn" type="button">破棄</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>

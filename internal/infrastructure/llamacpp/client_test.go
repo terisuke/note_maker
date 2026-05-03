@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,6 +66,143 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamCallsChatCompletionsAndAssemblesChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !request.Stream {
+			t.Fatal("stream should be enabled")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# Draft\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nBody\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL+"/v1", "gemma4:31b", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	var chunks []string
+	draft, err := client.GenerateStream(context.Background(), "write", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate stream: %v", err)
+	}
+	if draft != "# Draft\n\nBody" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+	if strings.Join(chunks, "") != draft {
+		t.Fatalf("chunks did not assemble to draft: %#v", chunks)
+	}
+}
+
+func TestGenerateStreamFallsBackAfterIdlePrimaryStream(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer primaryServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# Fallback\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "primary")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback")
+	t.Setenv("LLM_STREAM_IDLE_TIMEOUT_MILLISECONDS", "20")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	var chunks []string
+	draft, err := client.GenerateStream(context.Background(), "write", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate stream with fallback: %v", err)
+	}
+	if draft != "# Fallback" || strings.Join(chunks, "") != "# Fallback" {
+		t.Fatalf("unexpected fallback stream: draft=%q chunks=%q", draft, strings.Join(chunks, ""))
+	}
+}
+
+func TestGenerateStreamFallsBackWhenPrimaryStreamNeverStarts(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer primaryServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# First Byte Fallback\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "primary")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback")
+	t.Setenv("LLM_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS", "20")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.GenerateStream(context.Background(), "write", nil)
+	if err != nil {
+		t.Fatalf("generate stream with first-byte fallback: %v", err)
+	}
+	if draft != "# First Byte Fallback" {
+		t.Fatalf("unexpected fallback stream: %q", draft)
+	}
+}
+
+func TestGenerateWithSystemUsesCallerPrompt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Messages[0].Content != "<|nothink|>\nverify only" {
+			t.Fatalf("unexpected system prompt: %q", request.Messages[0].Content)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"PASS\nSummary: OK"}}]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL+"/v1", "gemma4:latest", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	report, err := client.GenerateWithSystem(context.Background(), "<|nothink|>\nverify only", "check")
+	if err != nil {
+		t.Fatalf("generate with system: %v", err)
+	}
+	if report != "PASS\nSummary: OK" {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
 func TestNewClientFromEnvUsesGenericLLMSettings(t *testing.T) {
 	t.Setenv("LLM_BASE_URL", "http://example.test/v1")
 	t.Setenv("LLM_MODEL", "gemma4:e2b")
@@ -119,6 +257,54 @@ func TestNewClientFromEnvFallsBackToLegacySettings(t *testing.T) {
 	}
 }
 
+func TestNewClientFromEnvDefaultsToEvoX2TailnetPrimary(t *testing.T) {
+	clearLLMEnv(t)
+
+	client, err := NewClientFromEnvForPurpose("brief")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.baseURL != defaultBaseURL {
+		t.Fatalf("unexpected primary base URL: %s", client.baseURL)
+	}
+	if client.model != "qwen3.6:27b" {
+		t.Fatalf("unexpected brief model: %s", client.model)
+	}
+	if client.fallback == nil || client.fallback.baseURL != defaultEvoX2LlamaCPPBaseURL {
+		t.Fatalf("unexpected first fallback: %#v", client.fallback)
+	}
+	if client.fallback.fallback == nil || client.fallback.fallback.baseURL != defaultLocalBaseURL {
+		t.Fatalf("unexpected second fallback: %#v", client.fallback.fallback)
+	}
+}
+
+func clearLLMEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"LLM_BASE_URL",
+		"LLAMACPP_BASE_URL",
+		"LLM_MODEL",
+		"LLAMACPP_MODEL",
+		"STYLE_LLM_MODEL",
+		"BRIEF_LLM_MODEL",
+		"ARTICLE_LLM_MODEL",
+		"DRAFT_LLM_MODEL",
+		"VERIFY_LLM_MODEL",
+		"LLM_FALLBACK_BASE_URLS",
+		"FALLBACK_LLM_BASE_URLS",
+		"FALLBACK_LLM_BASE_URL",
+		"FALLBACK_LLAMACPP_BASE_URL",
+		"BRIEF_LLM_FALLBACK_BASE_URLS",
+		"BRIEF_FALLBACK_LLM_BASE_URLS",
+		"BRIEF_FALLBACK_LLM_BASE_URL",
+		"BRIEF_LLM_FALLBACK_MODELS",
+		"BRIEF_FALLBACK_LLM_MODELS",
+		"BRIEF_FALLBACK_LLM_MODEL",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
 	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -142,6 +328,101 @@ func TestGenerateUsesFallbackClientWhenPrimaryFails(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	if draft != "# Fallback Draft" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+}
+
+func TestGenerateDoesNotFallbackAfterContextDeadline(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Too Late"}}]}`))
+	}))
+	defer primaryServer.Close()
+	fallbackCalled := false
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalled = true
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Fallback Draft"}}]}`))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "remote")
+	t.Setenv("FALLBACK_LLM_BASE_URL", fallbackServer.URL+"/v1")
+	t.Setenv("FALLBACK_LLM_MODEL", "fallback")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	if _, err := client.Generate(ctx, "write"); err == nil {
+		t.Fatal("expected deadline error")
+	}
+	if fallbackCalled {
+		t.Fatal("fallback should not be called after context deadline")
+	}
+}
+
+func TestGenerateUsesOrderedFallbackChain(t *testing.T) {
+	firstFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "first fallback unavailable", http.StatusServiceUnavailable)
+	}))
+	defer firstFallback.Close()
+	secondFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "local-qwen" {
+			t.Fatalf("unexpected final fallback model: %s", request.Model)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Ordered Fallback"}}]}`))
+	}))
+	defer secondFallback.Close()
+
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+	t.Setenv("LLM_MODEL", "remote-ollama")
+	t.Setenv("DRAFT_LLM_FALLBACK_BASE_URLS", firstFallback.URL+"/v1, "+secondFallback.URL+"/v1")
+	t.Setenv("DRAFT_LLM_FALLBACK_MODELS", "remote-llama, local-qwen")
+
+	client, err := NewClientFromEnvForPurpose("draft")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Ordered Fallback" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+}
+
+func TestGenerateFallsBackWhenResponseContentIsEmpty(t *testing.T) {
+	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""}}]}`))
+	}))
+	defer emptyServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Non Empty"}}]}`))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", emptyServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "thinking-model")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback-model")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Non Empty" {
 		t.Fatalf("unexpected draft: %q", draft)
 	}
 }

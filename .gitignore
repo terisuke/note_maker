@@ -28,7 +28,7 @@ Thumbs.db
 bin/
 dist/
 tmp/
-server
+/server
 data/
 
 # ログ関連
@@ -38,6 +38,11 @@ logs/
 # 依存関係
 vendor/
 node_modules/
+
+# Python/E2E
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # その他
 *.bak

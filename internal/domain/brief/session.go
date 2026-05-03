@@ -60,6 +60,49 @@ func (s *ArticleBriefSession) RecordAnswer(content string) (ArticleQuestion, err
 	return question, nil
 }
 
+// ForkWithEditedAnswer creates a child session whose history is rewritten from one answer.
+func (s ArticleBriefSession) ForkWithEditedAnswer(newID, answerID, content string) (ArticleBriefSession, error) {
+	newID = strings.TrimSpace(newID)
+	answerID = strings.TrimSpace(answerID)
+	if newID == "" {
+		return ArticleBriefSession{}, fmt.Errorf("new session id is required")
+	}
+	if answerID == "" {
+		return ArticleBriefSession{}, fmt.Errorf("answer id is required")
+	}
+	answerIndex := -1
+	for i, answer := range s.Answers {
+		if answer.QuestionID == answerID {
+			answerIndex = i
+			break
+		}
+	}
+	if answerIndex < 0 {
+		return ArticleBriefSession{}, fmt.Errorf("answer %q was not found", answerID)
+	}
+	question, ok := s.questionForAnswer(s.Answers[answerIndex])
+	if !ok {
+		return ArticleBriefSession{}, fmt.Errorf("question metadata for answer %q was not found", answerID)
+	}
+	edited, err := NewBriefAnswer(question, content)
+	if err != nil {
+		return ArticleBriefSession{}, err
+	}
+
+	answers := make([]BriefAnswer, 0, answerIndex+1)
+	answers = append(answers, s.Answers[:answerIndex]...)
+	answers = append(answers, edited)
+
+	fork := s
+	fork.ID = newID
+	fork.ParentSessionID = s.ID
+	fork.Answers = answers
+	fork.Completed = false
+	fork.DeepDiveSkipped = false
+	fork.refreshPhase()
+	return fork, nil
+}
+
 // NewBriefAnswer normalizes answer content and copies question metadata onto the answer.
 func NewBriefAnswer(question ArticleQuestion, content string) (BriefAnswer, error) {
 	content = strings.TrimSpace(content)
@@ -111,6 +154,9 @@ func (s ArticleBriefSession) CustomAnswers() []BriefAnswer {
 	}
 	answers := make([]BriefAnswer, 0)
 	for _, answer := range s.Answers {
+		if strings.TrimSpace(answer.Content) == "" {
+			continue
+		}
 		if answer.FlowType == QuestionFlowMain && !fixed[answer.QuestionID] {
 			answers = append(answers, answer)
 		}
@@ -194,40 +240,47 @@ func NewDeepDiveQuestion(target ArticleQuestion, followUpIndex int, text string)
 
 // FallbackFollowUpText returns a safe rule-based question when generated wording is unavailable.
 func FallbackFollowUpText(target ArticleQuestion, answer BriefAnswer, followUpIndex int) string {
+	var question string
 	switch target.ID {
 	case QuestionIDOpeningEpisode:
 		if followUpIndex == 1 {
-			return "What specific scene from that opening episode should the reader see first?"
+			question = "その場面で、読者に最初に見せたいものを1つだけ挙げると何ですか？"
+			break
 		}
-		return "What emotion at the time should the article make clear?"
+		question = "その時の気持ちを短く書くなら、どんな言葉になりますか？"
 	case QuestionIDMustInclude:
 		if followUpIndex == 1 {
-			return "Which included point needs the most concrete detail, and what detail should be used?"
+			question = "必ず入れたいことの中で、特に詳しく説明したいものはどれですか？"
+			break
 		}
-		return "What lesson should the reader take from that required point?"
+		question = "その話を信じてもらうために、足せそうな根拠は何ですか？"
 	case QuestionIDPersonalContext:
 		if followUpIndex == 1 {
-			return "Which personal experience should be connected most directly to the article's argument?"
+			question = "あなた自身の経験として、記事に入れると伝わりやすい出来事は何ですか？"
+			break
 		}
-		return "What personal value or hesitation should the article make visible?"
+		question = "その経験から、今の考え方が変わった点はありますか？"
 	case QuestionIDExpectedReaderAction:
 		if followUpIndex == 1 {
-			return "What reason should make the reader want to take that action?"
+			question = "読者が最初に試せる小さな一歩は何ですか？"
+			break
 		}
-		return "What concrete first step should the reader imagine after reading?"
+		question = "その一歩を試すと、読者にどんな良いことがありますか？"
 	case QuestionIDToneStance:
 		if followUpIndex == 1 {
-			return "What stance should the article explain most carefully?"
+			question = "この文章で一番大事にしたい温度感は何ですか？"
+			break
 		}
-		return "What experience should support that tone or stance?"
+		question = "その温度感にしたい理由は何ですか？"
 	default:
-		return "What concrete detail should the article add to make this answer useful?"
+		question = "記事に足すと読みやすくなる具体的な情報を1つ挙げるなら何ですか？"
 	}
+	return contextualFollowUpQuestion(answer.Content, question)
 }
 
 // IsAllowedFollowUpQuestion checks that a generated follow-up is open-ended enough for the workflow.
 func IsAllowedFollowUpQuestion(text string) bool {
-	trimmed := strings.TrimSpace(strings.ToLower(text))
+	trimmed := strings.TrimSpace(strings.ToLower(stripFollowUpContextPrefix(text)))
 	if trimmed == "" {
 		return false
 	}
@@ -244,6 +297,50 @@ func IsAllowedFollowUpQuestion(text string) bool {
 		return false
 	}
 	return true
+}
+
+func contextualFollowUpQuestion(answerContent, question string) string {
+	excerpt := followUpContextExcerpt(answerContent, 72)
+	if excerpt == "" {
+		return question
+	}
+	return fmt.Sprintf("「%s」というご回答を踏まえて、%s", excerpt, question)
+}
+
+func followUpContextExcerpt(content string, maxRunes int) string {
+	content = strings.Join(strings.Fields(strings.TrimSpace(content)), " ")
+	if content == "" {
+		return ""
+	}
+	content = strings.Trim(content, "「」\"'")
+	runes := []rune(content)
+	if maxRunes > 0 && len(runes) > maxRunes {
+		content = string(runes[:maxRunes-1]) + "..."
+	}
+	return content
+}
+
+func stripFollowUpContextPrefix(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "「") {
+		return trimmed
+	}
+	end := strings.Index(trimmed, "」")
+	if end < 0 {
+		return trimmed
+	}
+	rest := strings.TrimSpace(trimmed[end+len("」"):])
+	for _, prefix := range []string{
+		"というご回答を踏まえて、",
+		"という回答を踏まえて、",
+		"を踏まえて、",
+		"を受けて、",
+	} {
+		if strings.HasPrefix(rest, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(rest, prefix))
+		}
+	}
+	return trimmed
 }
 
 // MarkDeepDiveSkipped allows completion when the user explicitly skips deep dives.
@@ -303,6 +400,8 @@ func (s ArticleBriefSession) AssembleBrief() ArticleBrief {
 	}
 	return ArticleBrief{
 		StyleProfileID:        s.StyleProfileID,
+		PersonaID:             s.PersonaID,
+		OutputFormatID:        s.OutputFormatID,
 		Theme:                 get(QuestionIDTheme),
 		OpeningEpisode:        get(QuestionIDOpeningEpisode),
 		Reader:                get(QuestionIDReader),
@@ -364,6 +463,36 @@ func questionByID(questions []ArticleQuestion) map[string]ArticleQuestion {
 		result[question.ID] = question
 	}
 	return result
+}
+
+func (s ArticleBriefSession) questionForAnswer(answer BriefAnswer) (ArticleQuestion, bool) {
+	if answer.FlowType == QuestionFlowMain {
+		for _, question := range s.Questions {
+			if question.ID == answer.QuestionID {
+				return question, true
+			}
+		}
+		return ArticleQuestion{}, false
+	}
+	if answer.FlowType == QuestionFlowDeepDiveFollowUp {
+		targetField := "custom"
+		for _, question := range s.Questions {
+			if question.ID == answer.TargetQuestionID {
+				targetField = question.TargetField
+				break
+			}
+		}
+		return ArticleQuestion{
+			ID:               answer.QuestionID,
+			Text:             "Edited deep-dive answer",
+			FlowType:         QuestionFlowDeepDiveFollowUp,
+			Required:         true,
+			TargetField:      targetField,
+			TargetQuestionID: answer.TargetQuestionID,
+			FollowUpIndex:    answer.FollowUpIndex,
+		}, true
+	}
+	return ArticleQuestion{}, false
 }
 
 func isDeepDiveCandidate(content string) bool {

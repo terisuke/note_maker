@@ -1,6 +1,7 @@
 package llamacpp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,8 +15,10 @@ import (
 )
 
 const (
-	defaultBaseURL = "http://127.0.0.1:8081/v1"
-	defaultModel   = "gemma4:31b"
+	defaultBaseURL              = "http://evo-x2.tailb30e58.ts.net/v1"
+	defaultEvoX2LlamaCPPBaseURL = "http://evo-x2.tailb30e58.ts.net/llama/v1"
+	defaultLocalBaseURL         = "http://127.0.0.1:8081/v1"
+	defaultModel                = "gemma4:31b"
 )
 
 // Client calls an OpenAI-compatible local LLM API such as llama.cpp or Ollama.
@@ -50,8 +53,10 @@ func NewClientFromEnvForPurpose(purpose string) (*Client, error) {
 
 func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) {
 	baseURL := firstEnv("LLM_BASE_URL", "LLAMACPP_BASE_URL")
+	usingDefaultBaseURL := false
 	if baseURL == "" {
 		baseURL = defaultBaseURL
+		usingDefaultBaseURL = true
 	}
 	model := strings.TrimSpace(modelOverride)
 	if model == "" {
@@ -64,7 +69,7 @@ func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
-	fallback, err := fallbackClientFromEnv(purpose, model)
+	fallback, err := fallbackChainFromEnv(purpose, model, usingDefaultBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +89,42 @@ func timeoutFromEnv() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func streamIdleTimeoutFromEnv() time.Duration {
+	if raw := strings.TrimSpace(firstEnv("LLM_STREAM_IDLE_TIMEOUT_MILLISECONDS", "LLAMACPP_STREAM_IDLE_TIMEOUT_MILLISECONDS")); raw != "" {
+		ms, err := strconv.Atoi(raw)
+		if err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	raw := strings.TrimSpace(firstEnv("LLM_STREAM_IDLE_TIMEOUT_SECONDS", "LLAMACPP_STREAM_IDLE_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func streamFirstByteTimeoutFromEnv() time.Duration {
+	if raw := strings.TrimSpace(firstEnv("LLM_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS", "LLAMACPP_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS")); raw != "" {
+		ms, err := strconv.Atoi(raw)
+		if err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	raw := strings.TrimSpace(firstEnv("LLM_STREAM_FIRST_BYTE_TIMEOUT_SECONDS", "LLAMACPP_STREAM_FIRST_BYTE_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func modelFromEnv(purpose string) string {
 	purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	if purpose != "" {
@@ -91,7 +132,21 @@ func modelFromEnv(purpose string) string {
 			return model
 		}
 	}
-	return firstEnv("LLM_MODEL", "LLAMACPP_MODEL")
+	if model := firstEnv("LLM_MODEL", "LLAMACPP_MODEL"); model != "" {
+		return model
+	}
+	switch purpose {
+	case "STYLE", "ARTICLE":
+		return "gemma4:e2b"
+	case "BRIEF":
+		return "qwen3.6:27b"
+	case "DRAFT":
+		return "gemma4:31b"
+	case "VERIFY":
+		return "gemma4:latest"
+	default:
+		return ""
+	}
 }
 
 func firstEnv(names ...string) string {
@@ -103,7 +158,7 @@ func firstEnv(names ...string) string {
 	return ""
 }
 
-func fallbackClientFromEnv(purpose, primaryModel string) (*Client, error) {
+func fallbackChainFromEnv(purpose, primaryModel string, usingDefaultBaseURL bool) (*Client, error) {
 	purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	keys := func(suffix string) []string {
 		if purpose == "" {
@@ -111,24 +166,92 @@ func fallbackClientFromEnv(purpose, primaryModel string) (*Client, error) {
 		}
 		return []string{purpose + "_FALLBACK_" + suffix, "FALLBACK_" + suffix}
 	}
-	baseURL := firstEnv(keys("LLM_BASE_URL")...)
-	if baseURL == "" {
-		baseURL = firstEnv("FALLBACK_LLAMACPP_BASE_URL")
+	listKeys := func(suffix string) []string {
+		if purpose == "" {
+			return []string{"LLM_FALLBACK_" + suffix, "FALLBACK_LLM_" + suffix}
+		}
+		return []string{
+			purpose + "_LLM_FALLBACK_" + suffix,
+			purpose + "_FALLBACK_LLM_" + suffix,
+			"LLM_FALLBACK_" + suffix,
+			"FALLBACK_LLM_" + suffix,
+		}
 	}
-	model := firstEnv(keys("LLM_MODEL")...)
-	if model == "" && purpose == "" {
-		model = firstEnv("FALLBACK_LLM_MODEL", "FALLBACK_LLAMACPP_MODEL")
+
+	baseURLs := splitEnvList(firstEnv(listKeys("BASE_URLS")...))
+	if len(baseURLs) == 0 {
+		baseURL := firstEnv(keys("LLM_BASE_URL")...)
+		if baseURL == "" {
+			baseURL = firstEnv("FALLBACK_LLAMACPP_BASE_URL")
+		}
+		if baseURL != "" {
+			baseURLs = []string{baseURL}
+		}
 	}
-	if baseURL == "" && model == "" {
+	if len(baseURLs) == 0 && usingDefaultBaseURL {
+		baseURLs = []string{defaultEvoX2LlamaCPPBaseURL, defaultLocalBaseURL}
+	}
+	models := splitEnvList(firstEnv(listKeys("MODELS")...))
+	if len(models) == 0 {
+		model := firstEnv(keys("LLM_MODEL")...)
+		if model == "" && purpose == "" {
+			model = firstEnv("FALLBACK_LLM_MODEL", "FALLBACK_LLAMACPP_MODEL")
+		}
+		if model != "" {
+			models = []string{model}
+		}
+	}
+	if len(baseURLs) == 0 && len(models) == 0 {
 		return nil, nil
 	}
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	if len(baseURLs) == 0 {
+		baseURLs = []string{defaultBaseURL}
 	}
-	if model == "" {
-		model = primaryModel
+
+	var head *Client
+	var previous *Client
+	for index, baseURL := range baseURLs {
+		model := fallbackModelForIndex(models, index, primaryModel)
+		client, err := NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
+		if err != nil {
+			return nil, err
+		}
+		if head == nil {
+			head = client
+		}
+		if previous != nil {
+			previous.fallback = client
+		}
+		previous = client
 	}
-	return NewClient(baseURL, model, &http.Client{Timeout: timeoutFromEnv()})
+	return head, nil
+}
+
+func splitEnvList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if cleaned := strings.TrimSpace(part); cleaned != "" {
+			values = append(values, cleaned)
+		}
+	}
+	return values
+}
+
+func fallbackModelForIndex(models []string, index int, primaryModel string) string {
+	if len(models) == 0 {
+		return primaryModel
+	}
+	if index < len(models) {
+		return models[index]
+	}
+	if len(models) == 1 {
+		return models[0]
+	}
+	return primaryModel
 }
 
 // NewClient creates a llama.cpp client.
@@ -153,14 +276,80 @@ func NewClient(baseURL, model string, httpClient *http.Client) (*Client, error) 
 	return &Client{baseURL: baseURL, model: model, httpClient: httpClient}, nil
 }
 
+// BaseURL returns the OpenAI-compatible endpoint used by this client.
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+// Model returns the model name used by this client.
+func (c *Client) Model() string {
+	return c.model
+}
+
 // Generate sends a prompt to /v1/chat/completions and returns the first text response.
 func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
+	return c.GenerateWithSystem(ctx, defaultSystemPrompt, prompt)
+}
+
+// GenerateWithSystem sends a non-streaming chat completion with a caller-provided system prompt.
+func (c *Client) GenerateWithSystem(ctx context.Context, systemPrompt, prompt string) (string, error) {
+	body := c.chatCompletionRequest(systemPrompt, prompt, false)
+
+	var response chatCompletionResponse
+	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
+		if c.fallback != nil && ctx.Err() == nil {
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
+		}
+		return "", err
+	}
+	if len(response.Choices) == 0 {
+		if c.fallback != nil {
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
+		}
+		return "", fmt.Errorf("llama.cpp response had no choices")
+	}
+	content := strings.TrimSpace(response.Choices[0].Message.Content)
+	if content == "" {
+		if c.fallback != nil {
+			return c.fallback.GenerateWithSystem(ctx, systemPrompt, prompt)
+		}
+		return "", fmt.Errorf("llama.cpp response choice was empty")
+	}
+	return content, nil
+}
+
+// GenerateStream sends a streaming chat completion request and calls onChunk for
+// every text delta. It returns the assembled response so callers can validate it
+// with the same path as the non-streaming API.
+func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	content, err := c.generateStream(ctx, prompt, onChunk)
+	if err != nil {
+		if c.fallback != nil && strings.TrimSpace(content) == "" && ctx.Err() == nil {
+			if streamingFallback, ok := any(c.fallback).(interface {
+				GenerateStream(context.Context, string, func(string) error) (string, error)
+			}); ok {
+				return streamingFallback.GenerateStream(ctx, prompt, onChunk)
+			}
+			return c.fallback.Generate(ctx, prompt)
+		}
+		return content, err
+	}
+	return content, nil
+}
+
+const defaultSystemPrompt = "You are a careful Japanese editor. Return only a paste-ready Markdown article. Do not include reasoning, preambles, or code fences."
+
+func (c *Client) chatCompletionRequest(systemPrompt, prompt string, stream bool) chatCompletionRequest {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = defaultSystemPrompt
+	}
 	body := chatCompletionRequest{
 		Model: c.model,
 		Messages: []message{
 			{
 				Role:    "system",
-				Content: "You are a careful Japanese editor. Return only a paste-ready Markdown article. Do not include reasoning, preambles, or code fences.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -170,24 +359,157 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 		Temperature: 1.0,
 		TopP:        0.95,
 		MaxTokens:   4096,
-		Stream:      false,
+		Stream:      stream,
+	}
+	return body
+}
+
+func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	encoded, err := json.Marshal(c.chatCompletionRequest(defaultSystemPrompt, prompt, true))
+	if err != nil {
+		return "", fmt.Errorf("encode llama.cpp request: %w", err)
+	}
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(encoded))
+	if err != nil {
+		return "", fmt.Errorf("create llama.cpp stream request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+
+	firstByteTimeout := streamFirstByteTimeoutFromEnv()
+	var firstByteTimer *time.Timer
+	if firstByteTimeout > 0 {
+		firstByteTimer = time.AfterFunc(firstByteTimeout, cancelStream)
+		defer firstByteTimer.Stop()
+	}
+	response, err := c.httpClient.Do(request)
+	if firstByteTimer != nil {
+		firstByteTimer.Stop()
+	}
+	if err != nil {
+		if streamCtx.Err() != nil && ctx.Err() == nil {
+			return "", fmt.Errorf("call llama.cpp stream first byte timeout after %s: %w", firstByteTimeout, err)
+		}
+		return "", fmt.Errorf("call llama.cpp stream: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("call llama.cpp stream: unexpected status %s", response.Status)
 	}
 
-	var response chatCompletionResponse
-	if err := c.post(ctx, "/chat/completions", body, &response); err != nil {
-		if c.fallback != nil {
-			return c.fallback.Generate(ctx, prompt)
+	var builder strings.Builder
+	idleTimeout := streamIdleTimeoutFromEnv()
+	events := make(chan streamEvent, 32)
+	go readStreamEvents(streamCtx, response.Body, events)
+	var idleTimer <-chan time.Time
+	var timer *time.Timer
+	if idleTimeout > 0 {
+		timer = time.NewTimer(idleTimeout)
+		defer timer.Stop()
+		idleTimer = timer.C
+	}
+	resetIdleTimer := func() {
+		if timer == nil {
+			return
 		}
-		return "", err
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(idleTimeout)
 	}
-	if len(response.Choices) == 0 {
-		return "", fmt.Errorf("llama.cpp response had no choices")
+	for {
+		select {
+		case event := <-events:
+			if event.err != nil {
+				return builder.String(), event.err
+			}
+			if event.done {
+				content := strings.TrimSpace(builder.String())
+				if content == "" {
+					return "", fmt.Errorf("llama.cpp stream response was empty")
+				}
+				return content, nil
+			}
+			if event.content == "" {
+				continue
+			}
+			resetIdleTimer()
+			builder.WriteString(event.content)
+			if onChunk != nil {
+				if err := onChunk(event.content); err != nil {
+					return builder.String(), err
+				}
+			}
+		case <-idleTimer:
+			cancelStream()
+			_ = response.Body.Close()
+			return builder.String(), fmt.Errorf("read llama.cpp stream idle timeout after %s", idleTimeout)
+		case <-ctx.Done():
+			cancelStream()
+			_ = response.Body.Close()
+			return builder.String(), fmt.Errorf("read llama.cpp stream context done: %w", ctx.Err())
+		}
 	}
-	content := strings.TrimSpace(response.Choices[0].Message.Content)
-	if content == "" {
-		return "", fmt.Errorf("llama.cpp response choice was empty")
+}
+
+type streamEvent struct {
+	content string
+	done    bool
+	err     error
+}
+
+func readStreamEvents(ctx context.Context, body httpBody, events chan<- streamEvent) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			sendStreamEvent(ctx, events, streamEvent{done: true})
+			return
+		}
+		var chunk chatCompletionStreamResponse
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			sendStreamEvent(ctx, events, streamEvent{err: fmt.Errorf("decode llama.cpp stream chunk: %w", err)})
+			return
+		}
+		for _, choice := range chunk.Choices {
+			content := choice.Delta.Content
+			if content == "" {
+				content = choice.Message.Content
+			}
+			if content != "" {
+				sendStreamEvent(ctx, events, streamEvent{content: content})
+			}
+		}
 	}
-	return content, nil
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		sendStreamEvent(ctx, events, streamEvent{err: fmt.Errorf("read llama.cpp stream: %w", err)})
+		return
+	}
+	sendStreamEvent(ctx, events, streamEvent{done: true})
+}
+
+type httpBody interface {
+	Read([]byte) (int, error)
+}
+
+func sendStreamEvent(ctx context.Context, events chan<- streamEvent, event streamEvent) {
+	select {
+	case events <- event:
+	case <-ctx.Done():
+	}
 }
 
 // ListModels returns model IDs exposed by llama-server.
@@ -198,7 +520,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		if c.fallback != nil {
+		if c.fallback != nil && ctx.Err() == nil {
 			return c.fallback.ListModels(ctx)
 		}
 		return nil, fmt.Errorf("list llama.cpp models: %w", err)
@@ -265,6 +587,13 @@ type message struct {
 
 type chatCompletionResponse struct {
 	Choices []struct {
+		Message message `json:"message"`
+	} `json:"choices"`
+}
+
+type chatCompletionStreamResponse struct {
+	Choices []struct {
+		Delta   message `json:"delta"`
 		Message message `json:"message"`
 	} `json:"choices"`
 }
