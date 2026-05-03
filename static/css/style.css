@@ -130,7 +130,7 @@ body {
 
 .inline-select-action {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 8px;
     align-items: center;
 }
@@ -402,6 +402,12 @@ button:disabled {
     border: 1px solid var(--line);
 }
 
+.danger-btn {
+    color: var(--danger);
+    background: var(--danger-bg);
+    border-color: #fecdca;
+}
+
 .button-row {
     display: flex;
     flex-wrap: wrap;
@@ -470,6 +476,13 @@ pre {
     gap: 12px;
 }
 
+.artifact-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
 .artifact-card-header strong {
     line-height: 1.35;
 }
@@ -511,6 +524,37 @@ pre {
 
 .artifact-section li {
     overflow-wrap: anywhere;
+}
+
+.artifact-subheader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.brief-version-history {
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.brief-version-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding-left: 22px;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.inline-status {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.inline-status.warning {
+    color: var(--warning);
 }
 
 .artifact-edit-form {

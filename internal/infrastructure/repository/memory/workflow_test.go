@@ -32,6 +32,11 @@ func TestPersistentWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	if err := store.SaveBrief(session.ID, brief); err != nil {
 		t.Fatalf("save brief: %v", err)
 	}
+	editedBrief := brief
+	editedBrief.Theme = "Edited local workflow brief"
+	if err := store.SaveBrief(session.ID, editedBrief); err != nil {
+		t.Fatalf("save edited brief: %v", err)
+	}
 
 	reopened, err := NewPersistentWorkflowStore(path)
 	if err != nil {
@@ -55,8 +60,15 @@ func TestPersistentWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected brief after reopen")
 	}
-	if restoredBrief.PersonalContext == "" || len(restoredBrief.DeepDives) != 1 || len(restoredBrief.CustomAnswers) != 1 {
+	if restoredBrief.Theme != editedBrief.Theme || restoredBrief.PersonalContext == "" || len(restoredBrief.DeepDives) != 1 || len(restoredBrief.CustomAnswers) != 1 {
 		t.Fatalf("brief did not preserve generation context: %#v", restoredBrief)
+	}
+	versions, err := reopened.ListBriefVersions(session.ID)
+	if err != nil {
+		t.Fatalf("list brief versions: %v", err)
+	}
+	if len(versions) != 2 || versions[0].Brief.Theme == editedBrief.Theme || versions[1].Brief.Theme != editedBrief.Theme {
+		t.Fatalf("unexpected brief versions: %#v", versions)
 	}
 }
 
@@ -88,6 +100,37 @@ func TestPersistentWorkflowStoreRestoresCustomPersonas(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].ID != persona.ID {
 		t.Fatalf("unexpected persona list: %#v", listed)
+	}
+}
+
+func TestWorkflowStoreDeletesOnlyUnreferencedCustomPersonas(t *testing.T) {
+	store := NewWorkflowStore()
+	persona := testCustomPersona()
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("save persona: %v", err)
+	}
+	if err := store.DeletePersona(persona.ID); err != nil {
+		t.Fatalf("delete unreferenced persona: %v", err)
+	}
+	if _, ok := store.GetPersona(persona.ID); ok {
+		t.Fatal("persona should be deleted")
+	}
+	if err := store.DeletePersona(persona.ID); err != personadomain.ErrPersonaNotFound {
+		t.Fatalf("delete missing persona err = %v, want ErrPersonaNotFound", err)
+	}
+
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("resave persona: %v", err)
+	}
+	session, err := briefdomain.NewArticleBriefSessionWithOptions("session_custom", "profile_custom", persona.ID, outputformat.IDNoteArticle, "", briefdomain.FixedQuestions())
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := store.SaveSession(session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	if err := store.DeletePersona(persona.ID); err != personadomain.ErrPersonaReferenced {
+		t.Fatalf("delete referenced persona err = %v, want ErrPersonaReferenced", err)
 	}
 }
 

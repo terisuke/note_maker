@@ -75,6 +75,13 @@ document.addEventListener('DOMContentLoaded', () => {
     briefEditMode: false,
     briefEditStatus: '',
     briefEditStatusType: '',
+    briefVersionsVisible: false,
+    briefVersionsLoading: false,
+    briefVersionsError: '',
+    briefVersionsSessionId: '',
+    briefVersions: [],
+    personaFormMode: 'create',
+    editingPersonaId: '',
     personaCreateStatus: '',
     personaCreateStatusType: '',
   };
@@ -83,7 +90,10 @@ document.addEventListener('DOMContentLoaded', () => {
     modelStatus: document.getElementById('model-status'),
     personaSelect: document.getElementById('persona-select'),
     addPersonaToggle: document.getElementById('add-persona-btn'),
+    editPersona: document.getElementById('edit-persona-btn'),
+    deletePersona: document.getElementById('delete-persona-btn'),
     addPersonaForm: document.getElementById('add-persona-form'),
+    personaFormTitle: document.getElementById('persona-form-title'),
     personaIdInput: document.getElementById('persona-id-input'),
     personaNameInput: document.getElementById('persona-display-name-input'),
     personaDefaultFormatSelect: document.getElementById('persona-default-format-select'),
@@ -174,6 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   el.personaSelect.addEventListener('change', onPersonaChange);
   el.addPersonaToggle.addEventListener('click', togglePersonaForm);
+  el.editPersona.addEventListener('click', startPersonaEdit);
+  el.deletePersona.addEventListener('click', deleteSelectedPersona);
   el.addPersonaForm.addEventListener('submit', createPersona);
   el.cancelPersona.addEventListener('click', hidePersonaForm);
   el.formatSelect.addEventListener('change', onFormatChange);
@@ -805,6 +817,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!el.personaSelect.value && state.personas[0]) {
       el.personaSelect.value = state.personas[0].id;
     }
+    renderPersonaActions();
   }
 
   function populateFormatSelect() {
@@ -850,17 +863,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const willShow = el.addPersonaForm.classList.contains('hidden');
     el.addPersonaForm.classList.toggle('hidden', !willShow);
     if (willShow) {
-      resetPersonaForm();
+      startPersonaCreate();
       el.personaNameInput.focus();
     }
   }
 
-  function hidePersonaForm() {
-    el.addPersonaForm.classList.add('hidden');
+  function startPersonaCreate() {
+    state.personaFormMode = 'create';
+    state.editingPersonaId = '';
+    el.personaFormTitle.textContent = '書き手を追加';
+    el.savePersona.textContent = '保存';
+    el.personaIdInput.disabled = false;
     resetPersonaForm();
   }
 
+  function startPersonaEdit() {
+    const persona = currentPersona();
+    if (!persona) {
+      setPersonaStatus('編集する書き手を選択してください。', 'warning');
+      return;
+    }
+    state.personaFormMode = 'edit';
+    state.editingPersonaId = persona.id;
+    el.personaFormTitle.textContent = '書き手を編集';
+    el.savePersona.textContent = '更新';
+    el.addPersonaForm.classList.remove('hidden');
+    fillPersonaForm(persona);
+    setPersonaStatus('表示名、説明、一人称、ソースを更新できます。IDは変更できません。');
+    el.personaNameInput.focus();
+  }
+
+  function hidePersonaForm() {
+    el.addPersonaForm.classList.add('hidden');
+    startPersonaCreate();
+  }
+
   function resetPersonaForm() {
+    el.personaIdInput.disabled = state.personaFormMode === 'edit';
     el.personaIdInput.value = '';
     el.personaNameInput.value = '';
     el.personaDescriptionInput.value = '';
@@ -870,6 +909,27 @@ document.addEventListener('DOMContentLoaded', () => {
     el.personaSourceURLInput.value = '';
     populatePersonaDefaultFormatSelect();
     setPersonaStatus('IDと表示名だけで追加できます。ソースは後から文体ソース欄で変更できます。');
+  }
+
+  function fillPersonaForm(persona) {
+    const sources = arrayFrom(persona.sources);
+    const source = sources[0] || {};
+    let voice = arrayFrom(persona.voice_notes?.first_person || persona.voiceNotes?.first_person);
+    if (!voice.length && (persona.voice || persona.Voice)) {
+      voice = String(persona.voice || persona.Voice).split(/[、,/]/).map((item) => item.trim()).filter(Boolean);
+    }
+    el.personaIdInput.disabled = true;
+    el.personaIdInput.value = persona.id || '';
+    el.personaNameInput.value = persona.display_name || '';
+    el.personaDescriptionInput.value = persona.description || '';
+    populatePersonaDefaultFormatSelect();
+    if (persona.default_format && state.formats.some((format) => format.id === persona.default_format)) {
+      el.personaDefaultFormatSelect.value = persona.default_format;
+    }
+    el.personaVoiceInput.value = voice.join(' / ');
+    el.personaSourceKindInput.value = source.kind || source.Kind || '';
+    el.personaSourceRefInput.value = source.ref || source.Ref || '';
+    el.personaSourceURLInput.value = source.url || source.URL || '';
   }
 
   async function createPersona(event) {
@@ -887,10 +947,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     el.savePersona.disabled = true;
-    setPersonaStatus('書き手を保存しています...');
+    const editing = state.personaFormMode === 'edit';
+    const personaId = editing ? state.editingPersonaId : payload.id;
+    setPersonaStatus(editing ? '書き手を更新しています...' : '書き手を保存しています...');
     try {
-      const data = await requestJSON('/api/personas', {
-        method: 'POST',
+      const data = await requestJSON(editing ? `/api/personas/${encodeURIComponent(personaId)}` : '/api/personas', {
+        method: editing ? 'PATCH' : 'POST',
         body: payload,
       });
       const persona = normalizePersonaForSelect({ ...payload, ...data });
@@ -908,9 +970,17 @@ document.addEventListener('DOMContentLoaded', () => {
       renderModeSummary();
       await loadQuestionTemplate();
       await loadWorkflowHistory();
-      setPersonaStatus('書き手を追加しました。現在の書き手として選択しています。', 'success');
+      state.personaFormMode = 'create';
+      state.editingPersonaId = '';
+      el.personaIdInput.disabled = false;
+      el.personaFormTitle.textContent = '書き手を追加';
+      el.savePersona.textContent = '保存';
+      setPersonaStatus(editing ? '書き手を更新しました。' : '書き手を追加しました。現在の書き手として選択しています。', 'success');
     } catch (error) {
-      const message = additiveEndpointStatus(error, '書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。');
+      const fallback = editing
+        ? '書き手更新APIはまだ接続されていません。バックエンド実装後に保存できます。'
+        : '書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。';
+      const message = additiveEndpointStatus(error, fallback);
       setPersonaStatus(message, 'warning');
     } finally {
       el.savePersona.disabled = false;
@@ -972,6 +1042,53 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
   }
 
+  async function deleteSelectedPersona() {
+    clearError();
+    const persona = currentPersona();
+    if (!persona) {
+      setPersonaStatus('削除する書き手を選択してください。', 'warning');
+      return;
+    }
+    const label = persona.display_name || persona.id;
+    if (!window.confirm(`「${label}」を削除しますか？`)) {
+      return;
+    }
+    el.deletePersona.disabled = true;
+    setPersonaStatus('書き手を削除しています...');
+    try {
+      await requestJSON(`/api/personas/${encodeURIComponent(persona.id)}`, {
+        method: 'DELETE',
+      });
+      state.personas = state.personas.filter((item) => item.id !== persona.id);
+      const nextPersona = state.personas[0] || null;
+      config.mode.persona = nextPersona?.id || '';
+      if (nextPersona?.default_format) {
+        config.mode.format = nextPersona.default_format;
+      }
+      saveConfig();
+      hidePersonaForm();
+      populatePersonaSelect();
+      populateHistoryPersonaSelect();
+      applyPersonaDefaults(false);
+      applyStyleSourceDefault(true);
+      renderModeSummary();
+      await loadQuestionTemplate();
+      await loadWorkflowHistory();
+      setPersonaStatus('書き手を削除しました。', 'success');
+    } catch (error) {
+      setPersonaStatus(additiveEndpointStatus(error, '書き手削除APIはまだ接続されていません。バックエンド実装後に削除できます。'), 'warning');
+    } finally {
+      el.deletePersona.disabled = false;
+      renderPersonaActions();
+    }
+  }
+
+  function renderPersonaActions() {
+    const hasPersona = Boolean(currentPersona());
+    el.editPersona.disabled = !hasPersona;
+    el.deletePersona.disabled = !hasPersona;
+  }
+
   function setPersonaStatus(message, type = '') {
     state.personaCreateStatus = message;
     state.personaCreateStatusType = type;
@@ -981,6 +1098,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function onPersonaChange() {
     config.mode.persona = currentPersonaId();
+    renderPersonaActions();
     applyPersonaDefaults(true);
     applyStyleSourceDefault(true);
     saveConfig();
@@ -2486,6 +2604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!brief) {
       el.briefCard.className = 'artifact-card empty';
       el.briefCard.textContent = '記事ブリーフはまだありません。取材完了後、または保存済みセッション選択後に表示します。';
+      resetBriefVersions();
       return;
     }
     el.briefCard.className = 'artifact-card';
@@ -2494,19 +2613,16 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const theme = briefField(brief, 'theme', 'Theme') || '記事ブリーフ';
+    const sessionId = currentBriefSessionId(brief);
     el.briefCard.appendChild(createArtifactHeader(
       theme,
       [
+        ['Session', sessionId],
         ['Persona', briefField(brief, 'persona_id', 'PersonaID')],
         ['Format', briefField(brief, 'output_format_id', 'OutputFormatID')],
         ['Style', briefField(brief, 'style_profile_id', 'StyleProfileID')],
       ],
-      createCardEditButton('記事ブリーフを編集', () => {
-        state.briefEditMode = true;
-        state.briefEditStatus = '';
-        state.briefEditStatusType = '';
-        renderBriefCard(state.completedBrief || brief);
-      }, 'edit-brief-btn'),
+      createBriefCardActions(brief),
     ));
     appendArtifactStatus(el.briefCard, state.briefEditStatus, state.briefEditStatusType);
     [
@@ -2529,6 +2645,93 @@ document.addEventListener('DOMContentLoaded', () => {
     if (deepDives.length) {
       el.briefCard.appendChild(createAnswerSection('深掘りメモ', deepDives));
     }
+    renderBriefVersionHistory(brief);
+  }
+
+  function createBriefCardActions(brief) {
+    const actions = document.createElement('div');
+    actions.className = 'artifact-card-actions';
+    actions.append(
+      createCardEditButton('記事ブリーフを編集', () => {
+        state.briefEditMode = true;
+        state.briefEditStatus = '';
+        state.briefEditStatusType = '';
+        renderBriefCard(state.completedBrief || brief);
+      }, 'edit-brief-btn'),
+      createCardActionButton('履歴', '記事ブリーフのバージョン履歴を表示', () => toggleBriefVersions(brief), 'show-brief-versions-btn'),
+    );
+    return actions;
+  }
+
+  async function toggleBriefVersions(brief) {
+    const sessionId = currentBriefSessionId(brief);
+    if (!sessionId) {
+      state.briefVersionsVisible = true;
+      state.briefVersionsError = '履歴を取得する取材セッションIDがありません。';
+      state.briefVersions = [];
+      renderBriefCard(brief);
+      return;
+    }
+    if (state.briefVersionsVisible && state.briefVersionsSessionId === sessionId && !state.briefVersionsError) {
+      resetBriefVersions();
+      renderBriefCard(brief);
+      return;
+    }
+    state.briefVersionsVisible = true;
+    state.briefVersionsLoading = true;
+    state.briefVersionsError = '';
+    state.briefVersionsSessionId = sessionId;
+    state.briefVersions = [];
+    renderBriefCard(brief);
+    try {
+      const data = await requestJSON(`/api/briefs/${encodeURIComponent(sessionId)}/versions`);
+      state.briefVersions = normalizeBriefVersions(data);
+    } catch (error) {
+      state.briefVersionsError = briefVersionErrorMessage(error);
+    } finally {
+      state.briefVersionsLoading = false;
+      renderBriefCard(state.completedBrief || brief);
+    }
+  }
+
+  function renderBriefVersionHistory(brief) {
+    if (!state.briefVersionsVisible) {
+      return;
+    }
+    const sessionId = currentBriefSessionId(brief);
+    const section = document.createElement('section');
+    section.id = 'brief-version-history';
+    section.className = 'brief-version-history';
+    const heading = document.createElement('div');
+    heading.className = 'artifact-subheader';
+    const title = document.createElement('strong');
+    title.textContent = 'ブリーフ履歴';
+    heading.appendChild(title);
+    section.appendChild(heading);
+    if (state.briefVersionsLoading) {
+      section.appendChild(createInlineStatus('履歴を読み込んでいます...'));
+      el.briefCard.appendChild(section);
+      return;
+    }
+    if (state.briefVersionsError) {
+      section.appendChild(createInlineStatus(state.briefVersionsError, 'warning'));
+      el.briefCard.appendChild(section);
+      return;
+    }
+    if (state.briefVersionsSessionId !== sessionId || !state.briefVersions.length) {
+      section.appendChild(createInlineStatus('保存済みバージョンはまだありません。'));
+      el.briefCard.appendChild(section);
+      return;
+    }
+    const list = document.createElement('ol');
+    list.className = 'brief-version-list';
+    state.briefVersions.slice().reverse().slice(0, 8).forEach((version) => {
+      const item = document.createElement('li');
+      item.textContent = briefVersionLine(version);
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+    el.briefCard.appendChild(section);
   }
 
   function renderStyleGuideEditForm(style) {
@@ -2699,6 +2902,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.completedBrief = { ...originalBrief, ...updatedBrief };
       el.briefPreview.textContent = JSON.stringify(state.completedBrief, null, 2);
       state.briefEditMode = false;
+      resetBriefVersions();
       setBriefEditStatus('記事ブリーフを保存しました。', 'success');
       renderBriefCard(state.completedBrief);
       el.generateDraft.disabled = !state.profileId;
@@ -2725,16 +2929,72 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function createCardEditButton(label, onClick, id = '') {
+    return createCardActionButton('編集', label, onClick, id);
+  }
+
+  function createCardActionButton(text, label, onClick, id = '') {
     const button = document.createElement('button');
     if (id) {
       button.id = id;
     }
     button.type = 'button';
     button.className = 'secondary-btn compact-btn';
-    button.textContent = '編集';
+    button.textContent = text;
     button.setAttribute('aria-label', label);
     button.addEventListener('click', onClick);
     return button;
+  }
+
+  function resetBriefVersions() {
+    state.briefVersionsVisible = false;
+    state.briefVersionsLoading = false;
+    state.briefVersionsError = '';
+    state.briefVersionsSessionId = '';
+    state.briefVersions = [];
+  }
+
+  function normalizeBriefVersions(data = {}) {
+    const values = arrayFrom(data.versions || data.Versions || data.brief_versions || data.briefVersions);
+    return values.map((item) => {
+      const brief = item.brief || item.Brief || item.article_brief || item.articleBrief || {};
+      return {
+        sessionId: item.session_id || item.sessionId || item.SessionID || currentBriefSessionId(brief),
+        version: item.version ?? item.Version ?? '',
+        createdAt: item.created_at || item.createdAt || item.CreatedAt || '',
+        brief,
+      };
+    }).filter((item) => item.version || Object.keys(item.brief).length);
+  }
+
+  function currentBriefSessionId(brief = {}) {
+    return briefField(brief, 'session_id', 'SessionID')
+      || briefField(brief, 'brief_session_id', 'BriefSessionID')
+      || state.selectedHistorySession?.id
+      || state.sessionId
+      || '';
+  }
+
+  function briefVersionLine(version) {
+    const prefix = version.version ? `v${version.version}` : 'version';
+    const updatedAt = formatDateTime(version.createdAt);
+    const theme = briefField(version.brief, 'theme', 'Theme') || 'テーマ未設定';
+    const reader = briefField(version.brief, 'reader', 'Reader');
+    return [prefix, updatedAt, theme, reader].filter(Boolean).join(' / ');
+  }
+
+  function briefVersionErrorMessage(error) {
+    const message = error.message || '';
+    if (message.includes('HTTP 404')) {
+      return 'ブリーフ履歴APIはまだ接続されていません。保存後のバージョン履歴はバックエンド実装後に表示されます。';
+    }
+    return `ブリーフ履歴の取得に失敗しました: ${message}`;
+  }
+
+  function createInlineStatus(message, type = '') {
+    const status = document.createElement('div');
+    status.className = `inline-status${type ? ` ${type}` : ''}`;
+    status.textContent = message;
+    return status;
   }
 
   function appendArtifactStatus(container, message, type = '') {
@@ -3137,6 +3397,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.error?.message || `HTTP ${response.status}`);
+    }
+    if (response.status === 204) {
+      return null;
     }
     return response.json();
   }

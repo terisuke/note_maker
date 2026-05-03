@@ -72,7 +72,10 @@ func TestPersonaAuthoringContract(t *testing.T) {
 
 	for _, selector := range []string{
 		"#add-persona-btn",
+		"#edit-persona-btn",
+		"#delete-persona-btn",
 		"#add-persona-form",
+		"#persona-form-title",
 		"#persona-id-input",
 		"#persona-display-name-input",
 		"#persona-default-format-select",
@@ -96,13 +99,27 @@ func TestPersonaAuthoringContract(t *testing.T) {
 
 	assertScriptContains(t, contract.script, []string{
 		"el.addPersonaToggle.addEventListener('click', togglePersonaForm)",
+		"el.editPersona.addEventListener('click', startPersonaEdit)",
+		"el.deletePersona.addEventListener('click', deleteSelectedPersona)",
 		"el.addPersonaForm.addEventListener('submit', createPersona)",
 		"el.cancelPersona.addEventListener('click', hidePersonaForm)",
-		"requestJSON('/api/personas', {",
+		"editing ? `/api/personas/${encodeURIComponent(personaId)}` : '/api/personas'",
 		"method: 'POST'",
+		"`/api/personas/${encodeURIComponent(personaId)}`",
+		"method: editing ? 'PATCH' : 'POST'",
+		"`/api/personas/${encodeURIComponent(persona.id)}`",
+		"method: 'DELETE'",
 		"populatePersonaSelect()",
 		"populateHistoryPersonaSelect()",
-		"additiveEndpointStatus(error, '書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。')",
+		"書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。",
+		"書き手更新APIはまだ接続されていません。バックエンド実装後に保存できます。",
+		"書き手削除APIはまだ接続されていません。バックエンド実装後に削除できます。",
+	})
+	assertFunctionContains(t, contract.script, "startPersonaEdit", []string{
+		"state.personaFormMode = 'edit'",
+		"state.editingPersonaId = persona.id",
+		"el.personaFormTitle.textContent = '書き手を編集'",
+		"fillPersonaForm(persona)",
 	})
 	assertFunctionContains(t, contract.script, "personaPayloadFromForm", []string{
 		"id: slugifyPersonaId(el.personaIdInput.value || el.personaNameInput.value)",
@@ -115,6 +132,12 @@ func TestPersonaAuthoringContract(t *testing.T) {
 	assertFunctionContains(t, contract.script, "upsertPersona", []string{
 		"state.personas = [",
 		"...state.personas.filter((item) => item.id !== persona.id)",
+	})
+	assertFunctionContains(t, contract.script, "deleteSelectedPersona", []string{
+		"window.confirm",
+		"state.personas = state.personas.filter((item) => item.id !== persona.id)",
+		"config.mode.persona = nextPersona?.id || ''",
+		"await loadWorkflowHistory()",
 	})
 }
 
@@ -392,11 +415,14 @@ func TestArtifactCardEditContract(t *testing.T) {
 	assertScriptContains(t, contract.script, []string{
 		"styleEditMode: false",
 		"briefEditMode: false",
+		"briefVersionsVisible: false",
 		"'edit-brief-btn'",
+		"'show-brief-versions-btn'",
 		"'edit-style-guide-btn'",
 		"PATCH",
 		"`/api/author-style/${encodeURIComponent(styleId)}`",
 		"`/api/briefs/${encodeURIComponent(sessionId)}`",
+		"`/api/briefs/${encodeURIComponent(sessionId)}/versions`",
 		"additiveEndpointStatus(error, '文体ガイド編集APIはまだ接続されていません。内容は保存されませんでした。')",
 		"additiveEndpointStatus(error, '記事ブリーフ編集APIはまだ接続されていません。内容は保存されませんでした。')",
 	})
@@ -410,8 +436,24 @@ func TestArtifactCardEditContract(t *testing.T) {
 	assertFunctionContains(t, contract.script, "renderBriefCard", []string{
 		"if (state.briefEditMode)",
 		"renderBriefEditForm(brief)",
-		"createCardEditButton('記事ブリーフを編集'",
+		"createBriefCardActions(brief)",
 		"appendArtifactStatus(el.briefCard, state.briefEditStatus, state.briefEditStatusType)",
+		"renderBriefVersionHistory(brief)",
+	})
+	assertFunctionContains(t, contract.script, "createBriefCardActions", []string{
+		"createCardEditButton('記事ブリーフを編集'",
+		"createCardActionButton('履歴', '記事ブリーフのバージョン履歴を表示'",
+	})
+	assertFunctionContains(t, contract.script, "toggleBriefVersions", []string{
+		"`/api/briefs/${encodeURIComponent(sessionId)}/versions`",
+		"normalizeBriefVersions(data)",
+		"briefVersionErrorMessage(error)",
+	})
+	assertFunctionContains(t, contract.script, "renderBriefVersionHistory", []string{
+		"section.id = 'brief-version-history'",
+		"state.briefVersionsLoading",
+		"state.briefVersionsError",
+		"briefVersionLine(version)",
 	})
 	assertFunctionContains(t, contract.script, "renderBriefEditForm", []string{
 		"form.id = 'brief-edit-form'",

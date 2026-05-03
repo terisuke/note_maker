@@ -48,17 +48,54 @@ LLAMACPP_BASE_URL=http://127.0.0.1:8081/v1
 LLAMACPP_MODEL=gemma4:31b
 ```
 
-### まとめて起動する
+### アプリ風 launcher で起動する
 
-`llama-server` と Go サーバーをまとめて起動できます。
+通常利用は launcher 経由を推奨します。launcher は空いているローカルポートを選び、Evo X2 Tailnet の primary LLM health を確認し、Go サーバーをビルドして起動し、終了時に子プロセスを停止します。既定では Mac 側のローカル fallback LLM は起動しません。
 
 ```bash
-make app
+make launcher
+```
+
+または mise を使う場合:
+
+```bash
+mise run launcher
+```
+
+`make app` も同じ launcher を起動する alias です。
+
+起動後はブラウザが自動で開きます。終了するときは launcher を実行したターミナルで `Ctrl-C` を押します。`PORT` が使用中の場合は、既定で次の空きポートを選びます。固定ポートで失敗させたい場合は `./scripts/launcher.sh --strict-port` を使います。
+
+launcher の既定保存先:
+
+- macOS: `~/Library/Application Support/Note Maker`
+- Linux/その他: `$XDG_DATA_HOME/note-maker` または `~/.local/share/note-maker`
+
+この配下に `app_config.json`、`workflow_store.json`、`logs/`、ビルド済みサーバーバイナリを置きます。保存先を変える場合は `NOTE_MAKER_DATA_DIR=/path/to/dir make launcher` または `./scripts/launcher.sh --data-dir /path/to/dir` を指定します。
+
+Evo X2 Tailnet が到達不能な場合、既定ではアプリを起動しません。UIだけを起動したい検証時は `make launcher-status` で状態を確認し、必要に応じて `./scripts/launcher.sh --allow-degraded` を使います。ローカル `llama-server` を明示的に起動して primary として使う場合だけ、次を実行します。
+
+```bash
+make launcher-local
+```
+
+`llama-server` の場所やモデルを変える場合は `.env` の `LLAMA_SERVER`、`LLAMACPP_HF_REPO`、`LLAMACPP_HF_FILE`、`LLAMACPP_MODEL` を変更します。
+
+launcher 自体の検証:
+
+```bash
+make launcher-check
+```
+
+### 旧 dev script でまとめて起動する
+
+従来の `scripts/dev.sh` は残しています。`LLM_RUNTIME=local` を明示した検証では `llama-server` と Go サーバーをまとめて起動できます。
+
+```bash
+make dev
 ```
 
 ブラウザで `http://localhost:8080` にアクセスします。終了するときは `Ctrl-C` で両方のプロセスを停止できます。
-
-`llama-server` の場所やモデルを変える場合は `.env` の `LLAMA_SERVER`、`LLAMACPP_HF_REPO`、`LLAMACPP_HF_FILE`、`LLAMACPP_MODEL` を変更します。
 
 ### Evo X2 の Ollama を Tailscale VPN 経由で使って起動する
 
@@ -122,6 +159,28 @@ make scenario-evo-x2
 ```
 
 このシナリオは文体分析、一問一答、深掘り、下書き生成を通し、文体スコア80点以上と一定以上の本文量を確認します。
+
+### ローカル llama.cpp fallback だけを検証する
+
+Evo X2 primary とは別に、作業端末上で既に起動済みの `llama.cpp` fallback だけを検証する場合は専用ターゲットを使います。このターゲットは Ollama や `llama-server` を起動せず、Evo X2 への fallback chain も無効化します。
+
+まず plan/report だけを作る場合:
+
+```bash
+make scenario-local-llamacpp-fallback
+```
+
+実際に draft 生成まで走らせる場合は、誤って Evo X2 primary 検証と混同しないように明示的な gate が必要です。`LOCAL_LLAMACPP_FALLBACK_BASE_URL` は loopback の OpenAI互換 `/v1` endpoint だけを受け付けます。
+
+```bash
+RUN_LOCAL_LLAMACPP_FALLBACK_SCENARIO=1 \
+LOCAL_LLAMACPP_FALLBACK_BASE_URL=http://127.0.0.1:8081/v1 \
+LOCAL_LLAMACPP_FALLBACK_MODEL=qwen3:30b-a3b \
+LOCAL_LLAMACPP_FALLBACK_LOAD_FLAGS='--host 127.0.0.1 --port 8081 --alias qwen3:30b-a3b --reasoning off ...' \
+make scenario-local-llamacpp-fallback
+```
+
+結果は `tmp/local_llamacpp_fallback/report.md` と `tmp/local_llamacpp_fallback/report.json` に記録されます。Issue #36 の合格条件は `score >= 82.0`、`keyword_overlap >= 70`、`runes >= 2800` です。記録テンプレートは `docs/validation/issue-36-local-llamacpp-fallback-template.md` です。
 
 ### 個別に起動する
 

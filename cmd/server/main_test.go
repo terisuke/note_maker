@@ -31,9 +31,12 @@ func TestRegisterRoutesIncludesWorkflowReadAPIs(t *testing.T) {
 		{method: http.MethodGet, path: "/api/models"},
 		{method: http.MethodGet, path: "/api/personas"},
 		{method: http.MethodPost, path: "/api/personas"},
+		{method: http.MethodPatch, path: "/api/personas/custom-writer"},
+		{method: http.MethodDelete, path: "/api/personas/custom-writer"},
 		{method: http.MethodGet, path: "/api/formats"},
 		{method: http.MethodPatch, path: "/api/author-style/style-1"},
 		{method: http.MethodPost, path: "/api/author-style/style-1/versions"},
+		{method: http.MethodGet, path: "/api/briefs/session-1/versions"},
 		{method: http.MethodPatch, path: "/api/briefs/session-1"},
 	} {
 		request, err := http.NewRequest(tt.method, tt.path, nil)

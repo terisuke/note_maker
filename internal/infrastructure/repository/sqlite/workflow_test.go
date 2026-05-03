@@ -35,6 +35,11 @@ func TestWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	if err := store.SaveBrief(session.ID, brief); err != nil {
 		t.Fatalf("save brief: %v", err)
 	}
+	editedBrief := brief
+	editedBrief.Theme = "Edited SQLite workflow brief"
+	if err := store.SaveBrief(session.ID, editedBrief); err != nil {
+		t.Fatalf("save edited brief: %v", err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -67,8 +72,15 @@ func TestWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected brief after reopen")
 	}
-	if restoredBrief.PersonalContext == "" || len(restoredBrief.DeepDives) != 1 || len(restoredBrief.CustomAnswers) != 1 {
+	if restoredBrief.Theme != editedBrief.Theme || restoredBrief.PersonalContext == "" || len(restoredBrief.DeepDives) != 1 || len(restoredBrief.CustomAnswers) != 1 {
 		t.Fatalf("brief did not preserve generation context: %#v", restoredBrief)
+	}
+	versions, err := reopened.ListBriefVersions(session.ID)
+	if err != nil {
+		t.Fatalf("list brief versions: %v", err)
+	}
+	if len(versions) != 2 || versions[0].Brief.Theme == editedBrief.Theme || versions[1].Brief.Theme != editedBrief.Theme {
+		t.Fatalf("unexpected brief versions: %#v", versions)
 	}
 }
 
@@ -107,6 +119,41 @@ func TestWorkflowStoreRestoresCustomPersonas(t *testing.T) {
 	}
 }
 
+func TestWorkflowStoreDeletesOnlyUnreferencedCustomPersonas(t *testing.T) {
+	store, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	persona := testCustomPersona()
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("save persona: %v", err)
+	}
+	if err := store.DeletePersona(persona.ID); err != nil {
+		t.Fatalf("delete unreferenced persona: %v", err)
+	}
+	if _, ok := store.GetPersona(persona.ID); ok {
+		t.Fatal("persona should be deleted")
+	}
+	if err := store.DeletePersona(persona.ID); err != personadomain.ErrPersonaNotFound {
+		t.Fatalf("delete missing persona err = %v, want ErrPersonaNotFound", err)
+	}
+
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("resave persona: %v", err)
+	}
+	session, err := briefdomain.NewArticleBriefSessionWithOptions("session_custom", "profile_custom", persona.ID, outputformat.IDNoteArticle, "", briefdomain.FixedQuestions())
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := store.SaveSession(session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	if err := store.DeletePersona(persona.ID); err != personadomain.ErrPersonaReferenced {
+		t.Fatalf("delete referenced persona err = %v, want ErrPersonaReferenced", err)
+	}
+}
+
 func TestWorkflowStoreAppliesSchemaMigrations(t *testing.T) {
 	store, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
 	if err != nil {
@@ -121,11 +168,54 @@ func TestWorkflowStoreAppliesSchemaMigrations(t *testing.T) {
 	if migrationCount != 1 {
 		t.Fatalf("migration count = %d, want 1", migrationCount)
 	}
-	for _, table := range []string{"projects", "articles", "brief_sessions", "brief_answers", "briefs", "custom_personas", "drafts", "section_regenerations", "source_selector_snapshots"} {
+	if err := store.DB().QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 3`).Scan(&migrationCount); err != nil {
+		t.Fatalf("query brief version migration: %v", err)
+	}
+	if migrationCount != 1 {
+		t.Fatalf("brief version migration count = %d, want 1", migrationCount)
+	}
+	for _, table := range []string{"projects", "articles", "brief_sessions", "brief_answers", "briefs", "brief_versions", "custom_personas", "drafts", "section_regenerations", "source_selector_snapshots"} {
 		var name string
 		if err := store.DB().QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
 			t.Fatalf("expected table %s: %v", table, err)
 		}
+	}
+}
+
+func TestBriefVersionsMigrationBackfillIsIdempotent(t *testing.T) {
+	store, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	session := testCompletedSession(t, "profile-idempotent")
+	if err := store.SaveSession(session); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	brief := session.AssembleBrief()
+	if err := store.SaveBrief(session.ID, brief); err != nil {
+		t.Fatalf("save brief: %v", err)
+	}
+	if _, err := store.DB().Exec(`DELETE FROM brief_versions WHERE session_id = ?`, session.ID); err != nil {
+		t.Fatalf("clear brief versions: %v", err)
+	}
+
+	migration, err := migrationFiles.ReadFile("migrations/0003_brief_versions.sql")
+	if err != nil {
+		t.Fatalf("read brief versions migration: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := store.DB().Exec(string(migration)); err != nil {
+			t.Fatalf("rerun brief versions migration %d: %v", i+1, err)
+		}
+	}
+	var count int
+	if err := store.DB().QueryRow(`SELECT count(*) FROM brief_versions WHERE session_id = ?`, session.ID).Scan(&count); err != nil {
+		t.Fatalf("count brief versions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("backfilled version count = %d, want 1", count)
 	}
 }
 

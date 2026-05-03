@@ -1,6 +1,7 @@
 package persona
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,6 +13,11 @@ const (
 )
 
 var customIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
+
+var (
+	ErrPersonaNotFound   = errors.New("persona was not found")
+	ErrPersonaReferenced = errors.New("persona is referenced by workflow history")
+)
 
 // AuthorSource identifies public material used to derive a persona's style.
 type AuthorSource struct {
