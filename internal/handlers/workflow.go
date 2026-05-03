@@ -152,14 +152,180 @@ type regenerateDraftSectionRequest struct {
 
 type generateDraftResponse struct {
 	Draft        string                     `json:"draft"`
+	DraftPath    string                     `json:"draft_path,omitempty"`
 	Evaluation   draftapp.StyleEvaluation   `json:"evaluation"`
 	Verification draftapp.FinalVerification `json:"verification"`
+	QualityGate  draftQualityGateDetails    `json:"quality_gate"`
+}
+
+type draftQualityGateDetails struct {
+	Passed        bool                    `json:"passed"`
+	Score         float64                 `json:"score"`
+	FailedScore   *float64                `json:"failed_score,omitempty"`
+	Runes         int                     `json:"runes"`
+	Failures      []string                `json:"failures,omitempty"`
+	FailedMetrics []draftFailedMetric     `json:"failed_metrics,omitempty"`
+	Verification  draftVerificationStatus `json:"verification"`
+	Draft         draftArtifactDetails    `json:"draft"`
+}
+
+type draftFailedMetric struct {
+	Name      string   `json:"name"`
+	Score     *float64 `json:"score,omitempty"`
+	Threshold *float64 `json:"threshold,omitempty"`
+	Missing   bool     `json:"missing,omitempty"`
+	Message   string   `json:"message,omitempty"`
+}
+
+type draftVerificationStatus struct {
+	Performed bool     `json:"performed"`
+	Passed    bool     `json:"passed"`
+	Status    string   `json:"status"`
+	Summary   string   `json:"summary,omitempty"`
+	Failures  []string `json:"failures,omitempty"`
+}
+
+type draftArtifactDetails struct {
+	Text  string `json:"text,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Runes int    `json:"runes"`
+}
+
+type draftGenerationErrorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details string `json:"details,omitempty"`
+	} `json:"error"`
+	Draft        string                     `json:"draft,omitempty"`
+	DraftPath    string                     `json:"draft_path,omitempty"`
+	Evaluation   draftapp.StyleEvaluation   `json:"evaluation,omitempty"`
+	Verification draftapp.FinalVerification `json:"verification,omitempty"`
+	QualityGate  *draftQualityGateDetails   `json:"quality_gate,omitempty"`
 }
 
 type regenerateDraftSectionResponse struct {
 	Section              draftapp.MarkdownSection `json:"section"`
 	ReplacementMarkdown  string                   `json:"replacement_markdown"`
 	UpdatedDraftMarkdown string                   `json:"updated_draft_markdown"`
+}
+
+func toGenerateDraftResponse(result draftapp.GenerateResult, draftPath string) generateDraftResponse {
+	markdown := result.Draft.Markdown()
+	return generateDraftResponse{
+		Draft:        markdown,
+		DraftPath:    draftPath,
+		Evaluation:   result.Evaluation,
+		Verification: result.Verification,
+		QualityGate:  buildDraftQualityGateDetails(markdown, draftPath, result.Evaluation, result.Verification),
+	}
+}
+
+func buildDraftQualityGateDetails(markdown, draftPath string, evaluation draftapp.StyleEvaluation, verification draftapp.FinalVerification) draftQualityGateDetails {
+	score := evaluation.Comparison.Score
+	var failedScore *float64
+	if !evaluation.Passed {
+		failedScore = &score
+	}
+	return draftQualityGateDetails{
+		Passed:        evaluation.Passed && (!verification.Performed || verification.Passed),
+		Score:         score,
+		FailedScore:   failedScore,
+		Runes:         len([]rune(markdown)),
+		Failures:      append([]string(nil), evaluation.Failures...),
+		FailedMetrics: failedMetricsFromEvaluation(evaluation),
+		Verification:  verificationStatus(verification),
+		Draft: draftArtifactDetails{
+			Text:  markdown,
+			Path:  draftPath,
+			Runes: len([]rune(markdown)),
+		},
+	}
+}
+
+func failedMetricsFromEvaluation(evaluation draftapp.StyleEvaluation) []draftFailedMetric {
+	if evaluation.Passed && len(evaluation.Failures) == 0 {
+		return nil
+	}
+	metrics := make([]draftFailedMetric, 0, len(evaluation.Failures))
+	if evaluation.Comparison.Score < evaluation.Thresholds.TotalScore {
+		metrics = append(metrics, failedMetric("total_style_score", evaluation.Comparison.Score, evaluation.Thresholds.TotalScore, ""))
+	}
+	for _, threshold := range []struct {
+		name  string
+		value int
+	}{
+		{"paragraph_length", evaluation.Thresholds.ParagraphLength},
+		{"sentence_length", evaluation.Thresholds.SentenceLength},
+		{"keyword_overlap", evaluation.Thresholds.KeywordOverlap},
+		{"quote_density", evaluation.Thresholds.QuoteDensity},
+		{"first_person", evaluation.Thresholds.FirstPerson},
+	} {
+		value, ok := evaluation.Comparison.MetricScores[threshold.name]
+		if !ok {
+			thresholdValue := float64(threshold.value)
+			metrics = append(metrics, draftFailedMetric{Name: threshold.name, Threshold: &thresholdValue, Missing: true, Message: threshold.name + " missing"})
+			continue
+		}
+		if value < threshold.value {
+			metrics = append(metrics, failedMetric(threshold.name, float64(value), float64(threshold.value), ""))
+		}
+	}
+	for _, failure := range evaluation.Failures {
+		if strings.Contains(failure, "preferred_first_person") {
+			metrics = append(metrics, draftFailedMetric{Name: "preferred_first_person", Message: failure})
+		}
+	}
+	return metrics
+}
+
+func failedMetric(name string, score, threshold float64, message string) draftFailedMetric {
+	if message == "" {
+		message = fmt.Sprintf("%s=%.1f below %.1f", name, score, threshold)
+	}
+	return draftFailedMetric{
+		Name:      name,
+		Score:     &score,
+		Threshold: &threshold,
+		Message:   message,
+	}
+}
+
+func verificationStatus(verification draftapp.FinalVerification) draftVerificationStatus {
+	status := "not_run"
+	if verification.Performed {
+		status = "failed"
+		if verification.Passed {
+			status = "passed"
+		}
+	}
+	return draftVerificationStatus{
+		Performed: verification.Performed,
+		Passed:    verification.Passed,
+		Status:    status,
+		Summary:   verification.Summary,
+		Failures:  append([]string(nil), verification.Failures...),
+	}
+}
+
+func draftGenerationErrorPayload(result draftapp.GenerateResult, err error, code, message, draftPath string) (draftGenerationErrorResponse, bool) {
+	var response draftGenerationErrorResponse
+	markdown := result.Draft.Markdown()
+	if strings.TrimSpace(markdown) == "" && len(result.Evaluation.Failures) == 0 && result.Evaluation.Comparison.Score == 0 && !result.Verification.Performed {
+		return response, false
+	}
+	response.Error.Code = code
+	response.Error.Message = message
+	if err != nil {
+		response.Error.Details = err.Error()
+	}
+	response.Draft = markdown
+	response.DraftPath = draftPath
+	response.Evaluation = result.Evaluation
+	response.Verification = result.Verification
+	qualityGate := buildDraftQualityGateDetails(markdown, draftPath, result.Evaluation, result.Verification)
+	response.QualityGate = &qualityGate
+	return response, true
 }
 
 // ListPersonasHandler returns built-in writing personas.
@@ -711,14 +877,14 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		OutputFormat:  format,
 	})
 	if err != nil {
+		if response, ok := draftGenerationErrorPayload(result, err, "DRAFT_GENERATION_FAILED", "Failed to generate draft", ""); ok {
+			respondWithJSON(w, http.StatusUnprocessableEntity, response)
+			return
+		}
 		respondWithError(w, "DRAFT_GENERATION_FAILED", "Failed to generate draft", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	respondWithJSON(w, http.StatusOK, generateDraftResponse{
-		Draft:        result.Draft.Markdown(),
-		Evaluation:   result.Evaluation,
-		Verification: result.Verification,
-	})
+	respondWithJSON(w, http.StatusOK, toGenerateDraftResponse(result, ""))
 }
 
 func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDraftRequest, profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) {
@@ -757,14 +923,24 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 		},
 	})
 	if err != nil {
+		if response, ok := draftGenerationErrorPayload(result, err, "DRAFT_GENERATION_FAILED", "Failed to generate draft", ""); ok {
+			_ = stream.Send("error", streamError{
+				Code:         response.Error.Code,
+				Message:      response.Error.Message,
+				Detail:       response.Error.Details,
+				ElapsedMS:    stream.ElapsedMS(),
+				Draft:        response.Draft,
+				DraftPath:    response.DraftPath,
+				Evaluation:   &response.Evaluation,
+				Verification: &response.Verification,
+				QualityGate:  response.QualityGate,
+			})
+			return
+		}
 		_ = stream.Send("error", streamError{Code: "DRAFT_GENERATION_FAILED", Message: "Failed to generate draft", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 		return
 	}
-	_ = stream.Send("result", generateDraftResponse{
-		Draft:        result.Draft.Markdown(),
-		Evaluation:   result.Evaluation,
-		Verification: result.Verification,
-	})
+	_ = stream.Send("result", toGenerateDraftResponse(result, ""))
 	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
 }
 
@@ -893,10 +1069,15 @@ type streamChunk struct {
 }
 
 type streamError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Detail    string `json:"detail,omitempty"`
-	ElapsedMS int64  `json:"elapsed_ms"`
+	Code         string                      `json:"code"`
+	Message      string                      `json:"message"`
+	Detail       string                      `json:"detail,omitempty"`
+	ElapsedMS    int64                       `json:"elapsed_ms"`
+	Draft        string                      `json:"draft,omitempty"`
+	DraftPath    string                      `json:"draft_path,omitempty"`
+	Evaluation   *draftapp.StyleEvaluation   `json:"evaluation,omitempty"`
+	Verification *draftapp.FinalVerification `json:"verification,omitempty"`
+	QualityGate  *draftQualityGateDetails    `json:"quality_gate,omitempty"`
 }
 
 func newSSEStream(w http.ResponseWriter) (*sseStream, bool) {

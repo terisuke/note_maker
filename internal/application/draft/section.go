@@ -127,7 +127,7 @@ func (s *Service) RegenerateSection(ctx context.Context, req RegenerateSectionRe
 		var ok bool
 		format, ok = outputformat.DefaultRegistry().Get(req.Brief.OutputFormatID)
 		if !ok {
-			format, _ = outputformat.DefaultRegistry().Get(outputformat.IDNoteArticle)
+			return RegenerateSectionResult{}, fmt.Errorf("unknown output format %q", req.Brief.OutputFormatID)
 		}
 	}
 	prompt := BuildSectionRegenerationPrompt(req.StyleGuide, req.Brief, req.AuthorProfile, persona, format, req.DraftMarkdown, section)

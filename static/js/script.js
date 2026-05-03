@@ -423,7 +423,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           if (event === 'error') {
-            throw new Error(data.message || data.detail || 'stream error');
+            if (data.quality_gate) {
+              renderDraft(data);
+              el.draftStatus.textContent = '品質ゲートで停止しました。生成済みMarkdownと評価詳細を残しています。';
+            }
+            const error = new Error(data.message || data.detail || 'stream error');
+            error.payload = data;
+            throw error;
           }
           if (event === 'done') {
             el.draftStatus.textContent = draftDoneText(data);
@@ -433,6 +439,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       if (error.name === 'AbortError') {
         el.draftStatus.textContent = '停止しました。途中まで生成されたMarkdownは残しています。';
+      } else if (error.payload?.quality_gate) {
+        showError(`下書き生成は品質ゲートで停止しました: ${error.message}`);
       } else {
         showError(`下書き生成に失敗しました: ${error.message}`);
       }
@@ -1141,23 +1149,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderDraft(data) {
+    const qualityGate = data.quality_gate || data.qualityGate || {};
     const evaluation = data.evaluation;
     const passed = evaluation?.Passed ?? evaluation?.passed;
     const comparison = evaluation?.Comparison ?? evaluation?.comparison;
     const failures = evaluation?.Failures ?? evaluation?.failures ?? [];
-    const score = comparison?.score ?? comparison?.Score ?? 0;
+    const score = qualityGate.score ?? comparison?.score ?? comparison?.Score ?? 0;
+    const runes = qualityGate.runes ?? qualityGate.draft?.runes ?? 0;
+    const failedMetrics = qualityGate.failed_metrics || qualityGate.failedMetrics || [];
+    const draftText = data.draft ?? qualityGate.draft?.text ?? qualityGate.draft_text ?? '';
 
     el.evaluationSummary.className = `evaluation ${passed ? 'passed' : 'failed'}`;
     el.evaluationSummary.innerHTML = `
       <strong>${passed ? 'PASS' : 'NEEDS REVIEW'}</strong>
       <span>style score: ${Number(score).toFixed(1)}</span>
+      ${runes ? `<span>${Number(runes).toLocaleString()}字</span>` : ''}
+      ${failedMetrics.length ? `<p>${failedMetrics.map(failedMetricSummary).join('<br>')}</p>` : ''}
       ${failures.length ? `<p>${failures.join('<br>')}</p>` : ''}
     `;
-    renderVerification(data.verification);
-    el.markdownOutput.value = data.draft;
+    renderVerification(data.verification || qualityGate.verification);
+    el.markdownOutput.value = draftText;
     syncDraftEditor();
     el.draftResult.classList.remove('hidden');
     setActiveTab('preview');
+  }
+
+  function failedMetricSummary(metric) {
+    const name = escapeHTML(metric.name || metric.Name || 'metric');
+    const score = metric.score ?? metric.Score;
+    const threshold = metric.threshold ?? metric.Threshold;
+    const message = metric.message || metric.Message || '';
+    if (message) {
+      return escapeHTML(message);
+    }
+    if (metric.missing || metric.Missing) {
+      return `${name} missing`;
+    }
+    if (score !== undefined && threshold !== undefined) {
+      return `${name}: ${Number(score).toFixed(1)} / ${Number(threshold).toFixed(1)}`;
+    }
+    return name;
   }
 
   function syncDraftEditor() {

@@ -214,6 +214,145 @@ func TestGenerateDraftHandlerReturnsJSONDraft(t *testing.T) {
 	}
 }
 
+func TestGenerateDraftHandlerReturnsQualityGateDetailsForFailedJSONDraft(t *testing.T) {
+	const failedDraft = "# Draft\n\nこれは短い説明です。"
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		if payload.Stream {
+			t.Fatal("JSON draft path should not request streaming")
+		}
+		switch payload.Model {
+		case "draft-failed-json-test":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":` + quoteJSONString(failedDraft) + `}}]}`))
+		case "verify-failed-json-test":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"NEEDS REVIEW\nSummary: ブリーフの具体性が不足しています\n- MustInclude is under-covered"}}]}`))
+		default:
+			t.Fatalf("unexpected model: %s", payload.Model)
+		}
+	}))
+	defer llmServer.Close()
+	t.Setenv("LLM_BASE_URL", llmServer.URL+"/v1")
+	t.Setenv("DRAFT_LLM_MODEL", "draft-failed-json-test")
+	t.Setenv("VERIFY_LLM_MODEL", "verify-failed-json-test")
+
+	style := setupWorkflowStyle(t)
+	if err := workflowStore.SaveBrief("session_failed_json_draft", briefdomain.ArticleBrief{
+		StyleProfileID:        style.Profile.ID,
+		PersonaID:             personadomain.IDTerisuke,
+		OutputFormatID:        outputformat.IDNoteArticle,
+		Theme:                 "失敗詳細を返す",
+		Reader:                "UIを保守する開発者",
+		MustInclude:           "品質ゲート、評価詳細、下書き本文",
+		TargetLengthStructure: "2500字前後",
+	}); err != nil {
+		t.Fatalf("save brief: %v", err)
+	}
+
+	body := `{"style_profile_id":"` + style.Profile.ID + `","session_id":"session_failed_json_draft","draft_model":"draft-failed-json-test","verify_model":"verify-failed-json-test"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/drafts", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	GenerateDraftHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var payload generateDraftResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Draft != failedDraft || payload.QualityGate.Draft.Text != failedDraft {
+		t.Fatalf("failed draft was not preserved: %#v", payload.QualityGate.Draft)
+	}
+	if payload.QualityGate.Passed || payload.QualityGate.FailedScore == nil {
+		t.Fatalf("expected failed quality gate with score: %#v", payload.QualityGate)
+	}
+	if payload.QualityGate.Runes != len([]rune(failedDraft)) {
+		t.Fatalf("runes = %d, want %d", payload.QualityGate.Runes, len([]rune(failedDraft)))
+	}
+	if len(payload.QualityGate.FailedMetrics) == 0 || len(payload.QualityGate.Failures) == 0 {
+		t.Fatalf("expected failed metrics and failures: %#v", payload.QualityGate)
+	}
+	if payload.QualityGate.Verification.Status != "failed" {
+		t.Fatalf("verification status = %q, want failed", payload.QualityGate.Verification.Status)
+	}
+}
+
+func TestGenerateDraftHandlerStreamsQualityGateDetailsForFailedDraft(t *testing.T) {
+	const failedDraft = "# Draft\n\nこれは短い説明です。"
+	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var payload struct {
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode llm request: %v", err)
+		}
+		switch payload.Model {
+		case "draft-failed-stream-test":
+			if !payload.Stream {
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":` + quoteJSONString(failedDraft) + `}}]}`))
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":` + quoteJSONString(failedDraft) + `}}]}` + "\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case "verify-failed-stream-test":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"NEEDS REVIEW\nSummary: ブリーフの具体性が不足しています\n- MustInclude is under-covered"}}]}`))
+		default:
+			t.Fatalf("unexpected model: %s", payload.Model)
+		}
+	}))
+	defer llmServer.Close()
+	t.Setenv("LLM_BASE_URL", llmServer.URL+"/v1")
+	t.Setenv("DRAFT_LLM_MODEL", "draft-failed-stream-test")
+	t.Setenv("VERIFY_LLM_MODEL", "verify-failed-stream-test")
+
+	style := setupWorkflowStyle(t)
+	if err := workflowStore.SaveBrief("session_failed_stream_draft", briefdomain.ArticleBrief{
+		StyleProfileID:        style.Profile.ID,
+		PersonaID:             personadomain.IDTerisuke,
+		OutputFormatID:        outputformat.IDNoteArticle,
+		Theme:                 "失敗詳細をストリームする",
+		Reader:                "UIを保守する開発者",
+		MustInclude:           "品質ゲート、評価詳細、下書き本文",
+		TargetLengthStructure: "2500字前後",
+	}); err != nil {
+		t.Fatalf("save brief: %v", err)
+	}
+
+	body := `{"style_profile_id":"` + style.Profile.ID + `","session_id":"session_failed_stream_draft","draft_model":"draft-failed-stream-test","verify_model":"verify-failed-stream-test"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/drafts", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+	response := httptest.NewRecorder()
+
+	GenerateDraftHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	stream := response.Body.String()
+	for _, want := range []string{"event: result", `"quality_gate"`, `"failed_score"`, `"failed_metrics"`, `"verification"`, "# Draft"} {
+		if !strings.Contains(stream, want) {
+			t.Fatalf("stream missing %q:\n%s", want, stream)
+		}
+	}
+}
+
 func quoteJSONString(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `"`, `\"`)

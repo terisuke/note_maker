@@ -107,7 +107,7 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		var ok bool
 		format, ok = outputformat.DefaultRegistry().Get(req.Brief.OutputFormatID)
 		if !ok {
-			format, _ = outputformat.DefaultRegistry().Get(outputformat.IDNoteArticle)
+			return GenerateResult{}, fmt.Errorf("unknown output format %q", req.Brief.OutputFormatID)
 		}
 	}
 
@@ -134,7 +134,11 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		}
 		repairedRaw, repairErr := s.generator.Generate(ctx, BuildFormatRepairPrompt(format, rawDraft, err))
 		if repairErr != nil {
-			return GenerateResult{}, fmt.Errorf("repair draft format with local llm: %w", repairErr)
+			return GenerateResult{}, &UnusableDraftError{
+				FormatID: format.ID,
+				Attempts: attempts,
+				Err:      fmt.Errorf("repair draft format with local llm: %w", repairErr),
+			}
 		}
 		articleDraft, repairErr = articledomain.NewDraftForFormat(repairedRaw, format.ID)
 		attempts = appendGenerationAttempt(attempts, "format_repair", repairedRaw, repairErr)
@@ -286,6 +290,12 @@ func validateRequest(req GenerateRequest) error {
 	}
 	if err := req.AuthorProfile.Validate(); err != nil {
 		return fmt.Errorf("author style profile is invalid: %w", err)
+	}
+	if strings.TrimSpace(req.StyleGuide.ProfileID) != strings.TrimSpace(req.AuthorProfile.ID) {
+		return fmt.Errorf("writing style guide profile id %q does not match author profile id %q", req.StyleGuide.ProfileID, req.AuthorProfile.ID)
+	}
+	if strings.TrimSpace(req.Brief.StyleProfileID) != "" && strings.TrimSpace(req.Brief.StyleProfileID) != strings.TrimSpace(req.AuthorProfile.ID) {
+		return fmt.Errorf("article brief style profile id %q does not match author profile id %q", req.Brief.StyleProfileID, req.AuthorProfile.ID)
 	}
 	return nil
 }

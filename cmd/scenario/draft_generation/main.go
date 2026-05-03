@@ -39,6 +39,9 @@ func main() {
 	readJSON(profilePath, &profile)
 	readJSON(guidePath, &guide)
 	readJSON(briefPath, &brief)
+	if err := validateScenarioInputs(profile, guide, brief); err != nil {
+		fatalf("invalid scenario inputs: %v", err)
+	}
 
 	baseURL := envFirst("http://127.0.0.1:8081/v1", "LLM_BASE_URL", "LLAMACPP_BASE_URL")
 	model := envFirst("gemma4:31b", "DRAFT_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
@@ -116,7 +119,7 @@ func main() {
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("verification_attempt_%d.json", attempt)), result.Verification)
-		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes {
+		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes && verificationGatePassed(result.Verification) {
 			break
 		}
 	}
@@ -126,7 +129,7 @@ func main() {
 	writeJSON(filepath.Join(outputDir, "verification.json"), result.Verification)
 
 	runes := len([]rune(result.Draft.Markdown()))
-	passesScenario := result.Evaluation.Comparison.Score >= minStyleScore && runes >= minDraftRunes
+	passesScenario := result.Evaluation.Comparison.Score >= minStyleScore && runes >= minDraftRunes && verificationGatePassed(result.Verification)
 	fmt.Printf("draft generation scenario completed\n")
 	fmt.Printf("scenario_passed=%v\n", passesScenario)
 	fmt.Printf("attempt=%d\n", finalAttempt)
@@ -155,6 +158,9 @@ func main() {
 	}
 	if runes < minDraftRunes {
 		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
+	}
+	if result.Verification.Performed && !result.Verification.Passed {
+		fatalf("final verification failed: %s", result.Verification.Summary)
 	}
 }
 
@@ -244,6 +250,20 @@ func validationErrorFromGenerateError(err error) string {
 		return unusable.Err.Error()
 	}
 	return ""
+}
+
+func verificationGatePassed(verification draftapp.FinalVerification) bool {
+	return !verification.Performed || verification.Passed
+}
+
+func validateScenarioInputs(profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, brief briefdomain.ArticleBrief) error {
+	if strings.TrimSpace(guide.ProfileID) != strings.TrimSpace(profile.ID) {
+		return fmt.Errorf("writing guide profile id %q does not match author profile id %q", guide.ProfileID, profile.ID)
+	}
+	if strings.TrimSpace(brief.StyleProfileID) != "" && strings.TrimSpace(brief.StyleProfileID) != strings.TrimSpace(profile.ID) {
+		return fmt.Errorf("article brief style profile id %q does not match author profile id %q", brief.StyleProfileID, profile.ID)
+	}
+	return nil
 }
 
 func finalFirstChunkMs(firstChunk time.Duration) int64 {
