@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
+	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
@@ -85,6 +87,8 @@ type caseResult struct {
 	TargetLengthStructure string              `json:"target_length_structure"`
 	SourceSelectors       []string            `json:"source_selectors"`
 	BriefPath             string              `json:"brief_path"`
+	ProfilePath           string              `json:"profile_path"`
+	GuidePath             string              `json:"guide_path"`
 	PromptPath            string              `json:"prompt_path"`
 	ActiveGates           scenarioGates       `json:"active_gates"`
 	PromptChecks          []promptCheckResult `json:"prompt_checks"`
@@ -108,8 +112,9 @@ type promptCheckResult struct {
 func main() {
 	outputDir := envOrDefault("SCENARIO_OUTPUT_DIR", defaultOutputDir)
 	briefDir := filepath.Join(outputDir, "briefs")
+	styleDir := filepath.Join(outputDir, "styles")
 	promptDir := filepath.Join(outputDir, "prompts")
-	for _, dir := range []string{outputDir, briefDir, promptDir} {
+	for _, dir := range []string{outputDir, briefDir, styleDir, promptDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fatalf("create output dir %s: %v", dir, err)
 		}
@@ -120,7 +125,6 @@ func main() {
 	sourceResults := verifyExpectedSources(personas.List())
 	questionTemplate := fixedQuestionTemplate()
 	composedTemplates := composedQuestionTemplates()
-	guide := scenarioGuide()
 
 	results := make([]caseResult, 0, len(plannedCases()))
 	for _, item := range plannedCases() {
@@ -136,17 +140,29 @@ func main() {
 		gates := activeGatesForCase(item)
 		questions := briefdomain.ComposeFixedQuestions(item.PersonaID, item.OutputFormatID)
 		questionIDs := questionIDsFromQuestions(questions)
+		profile, guide := scenarioStyleAssets(item, persona, format)
 
-		brief := buildBriefFromSession(item)
+		brief := buildBriefFromSession(item, profile.ID)
 		if brief.PersonaID != persona.ID || brief.OutputFormatID != format.ID {
 			fatalf("%s assembled mismatched brief persona/format", item.ID)
 		}
-		prompt := draftapp.BuildPromptForMode(guide, brief, persona, format)
+		if brief.StyleProfileID != profile.ID || guide.ProfileID != profile.ID {
+			fatalf("%s assembled mismatched style artifacts", item.ID)
+		}
+		prompt := draftapp.BuildPromptForModeWithProfile(guide, brief, profile, persona, format)
 		checks := verifyPrompt(item, persona, format, prompt)
 
 		briefPath := filepath.Join(briefDir, item.ID+".json")
+		caseStyleDir := filepath.Join(styleDir, item.ID)
+		if err := os.MkdirAll(caseStyleDir, 0o755); err != nil {
+			fatalf("create style dir %s: %v", caseStyleDir, err)
+		}
+		profilePath := filepath.Join(caseStyleDir, "profile.json")
+		guidePath := filepath.Join(caseStyleDir, "guide.json")
 		promptPath := filepath.Join(promptDir, item.ID+".prompt.md")
 		writeJSON(briefPath, brief)
+		writeJSON(profilePath, profile)
+		writeJSON(guidePath, guide)
 		writeFile(promptPath, prompt)
 
 		results = append(results, caseResult{
@@ -161,11 +177,13 @@ func main() {
 			TargetLengthStructure: item.TargetLengthStructure,
 			SourceSelectors:       append([]string(nil), item.SourceSelectors...),
 			BriefPath:             briefPath,
+			ProfilePath:           profilePath,
+			GuidePath:             guidePath,
 			PromptPath:            promptPath,
 			ActiveGates:           gates,
 			PromptChecks:          checks,
 			QuestionIDs:           append([]string(nil), questionIDs...),
-			PlannedLLMCommand:     plannedLLMCommand(outputDir, item.ID, briefPath, gates),
+			PlannedLLMCommand:     plannedLLMCommand(outputDir, item.ID, briefPath, profilePath, guidePath, gates),
 			ExpectedMetrics: []string{
 				"elapsed_seconds",
 				"score",
@@ -389,8 +407,8 @@ func verifyCaseSources(item matrixCase, sources []sourceSelectorResult) {
 	}
 }
 
-func buildBriefFromSession(item matrixCase) briefdomain.ArticleBrief {
-	session, err := briefdomain.NewArticleBriefSessionWithOptions(item.ID, "profile_media_matrix", item.PersonaID, item.OutputFormatID, "", briefdomain.ComposeFixedQuestions(item.PersonaID, item.OutputFormatID))
+func buildBriefFromSession(item matrixCase, styleProfileID string) briefdomain.ArticleBrief {
+	session, err := briefdomain.NewArticleBriefSessionWithOptions(item.ID, styleProfileID, item.PersonaID, item.OutputFormatID, "", briefdomain.ComposeFixedQuestions(item.PersonaID, item.OutputFormatID))
 	if err != nil {
 		fatalf("%s create brief session: %v", item.ID, err)
 	}
@@ -577,29 +595,83 @@ func activeGatesForCase(item matrixCase) scenarioGates {
 	}
 }
 
-func plannedLLMCommand(outputDir, caseID, briefPath string, gates scenarioGates) string {
+func plannedLLMCommand(outputDir, caseID, briefPath, profilePath, guidePath string, gates scenarioGates) string {
 	return fmt.Sprintf(
-		"RUN_LOCAL_LLM_SCENARIO=1 SCENARIO_MIN_STYLE_SCORE=%.1f SCENARIO_MIN_DRAFT_RUNES=%d ARTICLE_BRIEF_PATH=%s SCENARIO_OUTPUT_DIR=%s go run ./cmd/scenario/draft_generation",
+		"RUN_LOCAL_LLM_SCENARIO=1 SCENARIO_MIN_STYLE_SCORE=%.1f SCENARIO_MIN_DRAFT_RUNES=%d ARTICLE_BRIEF_PATH=%s AUTHOR_PROFILE_PATH=%s WRITING_GUIDE_PATH=%s SCENARIO_OUTPUT_DIR=%s go run ./cmd/scenario/draft_generation",
 		gates.MinStyleScore,
 		gates.MinRunes,
 		briefPath,
+		profilePath,
+		guidePath,
 		filepath.Join(outputDir, "live", caseID),
 	)
 }
 
-func scenarioGuide() authordomain.WritingStyleGuide {
-	return authordomain.WritingStyleGuide{
-		ID:                   "guide_media_matrix",
-		ProfileID:            "profile_media_matrix",
-		Markdown:             "実体験、検証、読者への次の行動を媒体ごとに配分する。媒体が技術寄りなら手順と根拠を厚くし、noteやホームページでは読者の判断につながる文脈を厚くする。",
-		PreferredFirstPerson: "僕",
-		RecurringThemes:      []string{"AI", "検証", "発信", "実装"},
-		ParagraphRhythm:      "媒体ごとの読み方に合わせて段落密度を変える。",
-		SentenceRhythm:       "結論、根拠、次の行動が追える明快な文にする。",
-		HeadingGuidance:      "読者が期待する粒度で具体的な見出しにする。",
-		QuoteGuidance:        "引用は主張の転換点に限定する。",
-		OpeningPatterns:      []string{"具体的な違和感から始める", "検証結果から始める", "読者の作業場面から始める"},
-		ConclusionPatterns:   []string{"次の行動で締める", "検証の残課題で締める"},
+func scenarioStyleAssets(item matrixCase, persona personadomain.Persona, format outputformat.OutputFormat) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide) {
+	fetchedAt := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
+	content := scenarioStyleCorpus(item, persona, format)
+	source := authordomain.AuthorSource{
+		Username: persona.ID + "_" + format.ID,
+		Articles: []authordomain.SourceArticle{{
+			ID:    item.ID + "_style_fixture",
+			URL:   "scenario://media_matrix/" + item.ID,
+			Title: item.Theme,
+			At:    fetchedAt,
+		}},
+		FetchedAt: fetchedAt,
+	}
+	profile, err := authordomain.BuildAuthorStyleProfile(source, []articledomain.Article{{
+		URL:     "scenario://media_matrix/" + item.ID,
+		Title:   item.Theme,
+		Content: content,
+	}})
+	if err != nil {
+		fatalf("%s build style profile: %v", item.ID, err)
+	}
+	if len(persona.VoiceNotes.FirstPerson) > 0 {
+		profile.PreferredFirstPerson = persona.VoiceNotes.FirstPerson[0]
+	}
+	guide, err := authordomain.BuildWritingStyleGuide(profile)
+	if err != nil {
+		fatalf("%s build writing guide: %v", item.ID, err)
+	}
+	guide.PreferredFirstPerson = profile.PreferredFirstPerson
+	guide.RecurringThemes = append([]string(nil), profile.RecurringKeywords...)
+	guide.ParagraphRhythm = persona.VoiceNotes.Tone + "\n" + item.ToneStance
+	guide.SentenceRhythm = "媒体に合わせて、短すぎる箇条書きだけで終わらせず、手順・根拠・読者の次の行動を一文ずつ明確にする。"
+	guide.HeadingGuidance = "出力先「" + format.DisplayName + "」で読みやすい粒度の見出しを置く。"
+	guide.OpeningPatterns = []string{item.OpeningEpisode, "読者の困りごとから始めて、テーマへ接続する"}
+	guide.ConclusionPatterns = []string{item.ExpectedReaderAction, "検証結果と次の一歩で締める"}
+	guide.Warnings = append([]string{"scenario_style_fixture"}, persona.VoiceNotes.AntiPatterns...)
+	guide.Markdown = authordomain.GuideMarkdown(guide)
+	if err := guide.Validate(); err != nil {
+		fatalf("%s validate writing guide: %v", item.ID, err)
+	}
+	return profile, guide
+}
+
+func scenarioStyleCorpus(item matrixCase, persona personadomain.Persona, format outputformat.OutputFormat) string {
+	firstPerson := "僕"
+	if len(persona.VoiceNotes.FirstPerson) > 0 {
+		firstPerson = persona.VoiceNotes.FirstPerson[0]
+	}
+	switch persona.ID {
+	case personadomain.IDCloudia:
+		return strings.Repeat(fmt.Sprintf(`## %s
+
+%sは、%sを読者と一緒に小さく試していくばい。%s と %s の違いでつまずくところを先に拾い、コード、検証、結果の順番で楽しく案内するとよ。
+
+%s。%s。%s。クラウディア流！という明るい入口を置きつつ、ZennやQiitaの記法は混ぜず、初心者が自分の手元で再現できるようにするばい。
+
+`, item.Theme, firstPerson, item.Theme, format.DisplayName, item.Medium, item.MustInclude, item.PersonalContext, item.ToneStance), 8)
+	default:
+		return strings.Repeat(fmt.Sprintf(`## %s
+
+%sは、%sについて、実装判断、検証結果、読者が次に取る行動を順番に言語化する。%s。%s。
+
+%s。%s。%s。媒体に合わせて、noteでは違和感と体験を厚くし、会社ブログでは技術知見とビジョン共有を具体的に残す。
+
+`, item.Theme, firstPerson, item.Theme, item.OpeningEpisode, item.MustInclude, item.PersonalContext, item.ExpectedReaderAction, item.ToneStance), 8)
 	}
 }
 

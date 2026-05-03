@@ -457,6 +457,85 @@ func TestGenerateRejectsUnusableMarkdown(t *testing.T) {
 	}
 }
 
+func TestGenerateRejectsMismatchedStyleArtifacts(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	styleGuide.ProfileID = "other_profile"
+
+	_, err := NewService(&fakeGenerator{draft: matchingDraft()}).Generate(context.Background(), GenerateRequest{
+		StyleGuide:    styleGuide,
+		Brief:         ArticleBrief{StyleProfileID: profile.ID, Theme: "不一致を検出する"},
+		AuthorProfile: profile,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match author profile id") {
+		t.Fatalf("expected guide/profile mismatch error, got %v", err)
+	}
+
+	profile, styleGuide = profileAndGuideFromDraft(t, matchingDraft())
+	_, err = NewService(&fakeGenerator{draft: matchingDraft()}).Generate(context.Background(), GenerateRequest{
+		StyleGuide:    styleGuide,
+		Brief:         ArticleBrief{StyleProfileID: "wrong_profile", Theme: "不一致を検出する"},
+		AuthorProfile: profile,
+	})
+	if err == nil || !strings.Contains(err.Error(), "article brief style profile id") {
+		t.Fatalf("expected brief/profile mismatch error, got %v", err)
+	}
+}
+
+func TestGenerateRejectsUnknownBriefOutputFormat(t *testing.T) {
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+
+	_, err := NewService(&fakeGenerator{draft: matchingDraft()}).Generate(context.Background(), GenerateRequest{
+		StyleGuide:    styleGuide,
+		Brief:         ArticleBrief{StyleProfileID: profile.ID, Theme: "未知形式", OutputFormatID: "missing_format"},
+		AuthorProfile: profile,
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown output format "missing_format"`) {
+		t.Fatalf("expected unknown output format error, got %v", err)
+	}
+}
+
+func TestGeneratePreservesInitialAttemptWhenRepairTransportFails(t *testing.T) {
+	invalidZenn := "---\n" +
+		"title: \"Goで検証する\"\n" +
+		"emoji: \"🧪\"\n" +
+		"type: \"tech\"\n" +
+		"topics: [\"go\", \"test\"]\n" +
+		"published: false\n" +
+		"---\n\n" +
+		"## 実装\n\n" +
+		":::note info\nQiitaの補足です\n:::\n"
+	profile, styleGuide := profileAndGuideFromDraft(t, strings.ReplaceAll(invalidZenn, ":::note info", ":::message"))
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDCloudia)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDZennArticle)
+	generator := &sequenceGenerator{drafts: []string{invalidZenn}, errAtCall: 2, err: errors.New("repair endpoint unavailable")}
+
+	_, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			PersonaID:      persona.ID,
+			OutputFormatID: format.ID,
+			Theme:          "Goで検証する",
+		},
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	})
+	if err == nil {
+		t.Fatal("expected repair transport error")
+	}
+	var unusable *UnusableDraftError
+	if !errors.As(err, &unusable) {
+		t.Fatalf("expected UnusableDraftError, got %T: %v", err, err)
+	}
+	if len(unusable.Attempts) != 1 || unusable.Attempts[0].RawOutput != invalidZenn {
+		t.Fatalf("initial raw attempt was not preserved: %#v", unusable.Attempts)
+	}
+	if !strings.Contains(unusable.Error(), "repair endpoint unavailable") {
+		t.Fatalf("repair error not surfaced: %v", unusable)
+	}
+}
+
 func TestEvaluateStylePassesStrictThresholdsAndOverride(t *testing.T) {
 	text := strings.ReplaceAll(matchingDraft(), "僕", "私")
 	articleDraft, err := articledomain.NewDraft(text)
@@ -492,13 +571,19 @@ func (g *fakeGenerator) Generate(ctx context.Context, prompt string) (string, er
 }
 
 type sequenceGenerator struct {
-	prompts []string
-	drafts  []string
-	calls   int
+	prompts   []string
+	drafts    []string
+	calls     int
+	errAtCall int
+	err       error
 }
 
 func (g *sequenceGenerator) Generate(ctx context.Context, prompt string) (string, error) {
 	g.prompts = append(g.prompts, prompt)
+	if g.errAtCall > 0 && g.calls+1 == g.errAtCall {
+		g.calls++
+		return "", g.err
+	}
 	if g.calls >= len(g.drafts) {
 		g.calls++
 		return g.drafts[len(g.drafts)-1], nil

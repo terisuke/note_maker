@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 func TestActiveGatesForCaseSeparatesHomepageFromLongForm(t *testing.T) {
@@ -58,16 +61,44 @@ func TestActiveGatesForCaseSeparatesHomepageFromLongForm(t *testing.T) {
 
 func TestPlannedLLMCommandIncludesActiveGateEnv(t *testing.T) {
 	gates := scenarioGates{MinRunes: 1800, MinStyleScore: 82}
-	command := plannedLLMCommand("tmp/media_matrix", "case_id", "tmp/media_matrix/briefs/case_id.json", gates)
+	command := plannedLLMCommand(
+		"tmp/media_matrix",
+		"case_id",
+		"tmp/media_matrix/briefs/case_id.json",
+		"tmp/media_matrix/styles/case_id/profile.json",
+		"tmp/media_matrix/styles/case_id/guide.json",
+		gates,
+	)
 	for _, expected := range []string{
 		"RUN_LOCAL_LLM_SCENARIO=1",
 		"SCENARIO_MIN_STYLE_SCORE=82.0",
 		"SCENARIO_MIN_DRAFT_RUNES=1800",
 		"ARTICLE_BRIEF_PATH=tmp/media_matrix/briefs/case_id.json",
+		"AUTHOR_PROFILE_PATH=tmp/media_matrix/styles/case_id/profile.json",
+		"WRITING_GUIDE_PATH=tmp/media_matrix/styles/case_id/guide.json",
 		"SCENARIO_OUTPUT_DIR=tmp/media_matrix/live/case_id",
 	} {
 		if !strings.Contains(command, expected) {
 			t.Fatalf("planned command missing %q: %s", expected, command)
+		}
+	}
+}
+
+func TestScenarioStyleAssetsMatchBriefProfile(t *testing.T) {
+	for _, item := range plannedCases() {
+		persona, _ := personadomain.DefaultRegistry().Get(item.PersonaID)
+		format, _ := outputformat.DefaultRegistry().Get(item.OutputFormatID)
+		profile, guide := scenarioStyleAssets(item, persona, format)
+		brief := buildBriefFromSession(item, profile.ID)
+
+		if brief.StyleProfileID != profile.ID {
+			t.Fatalf("%s brief profile = %q, want %q", item.ID, brief.StyleProfileID, profile.ID)
+		}
+		if guide.ProfileID != profile.ID {
+			t.Fatalf("%s guide profile = %q, want %q", item.ID, guide.ProfileID, profile.ID)
+		}
+		if item.PersonaID == "cloudia" && profile.PreferredFirstPerson != "クラウディア" {
+			t.Fatalf("%s preferred first person = %q", item.ID, profile.PreferredFirstPerson)
 		}
 	}
 }

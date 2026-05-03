@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
+	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
+	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 )
 
 func TestWriteFailureAttemptPreservesRawOutputsAndRuntimeMetrics(t *testing.T) {
@@ -89,5 +91,32 @@ func TestWriteFailureAttemptPreservesRawOutputsAndRuntimeMetrics(t *testing.T) {
 	}
 	if len(report.RawOutputs) != 2 || report.RawOutputs[0].ValidationError == "" {
 		t.Fatalf("raw output metadata not preserved: %#v", report.RawOutputs)
+	}
+}
+
+func TestValidateScenarioInputsRejectsMismatchedStyleArtifacts(t *testing.T) {
+	profile := authordomain.AuthorStyleProfile{ID: "profile_case"}
+	guide := authordomain.WritingStyleGuide{ProfileID: "other_profile"}
+	brief := briefdomain.ArticleBrief{StyleProfileID: "profile_case"}
+
+	err := validateScenarioInputs(profile, guide, brief)
+	if err == nil {
+		t.Fatal("expected guide/profile mismatch")
+	}
+
+	guide.ProfileID = "profile_case"
+	brief.StyleProfileID = "other_profile"
+	err = validateScenarioInputs(profile, guide, brief)
+	if err == nil {
+		t.Fatal("expected brief/profile mismatch")
+	}
+}
+
+func TestVerificationGateFailsPerformedFailedVerification(t *testing.T) {
+	if !verificationGatePassed(draftapp.FinalVerification{}) {
+		t.Fatal("not-performed verification should not block scenario")
+	}
+	if verificationGatePassed(draftapp.FinalVerification{Performed: true, Passed: false}) {
+		t.Fatal("performed failed verification should block scenario")
 	}
 }
