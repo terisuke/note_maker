@@ -105,7 +105,7 @@ Adapters remain outside the domain:
     2. Evo X2 `llama.cpp` / `llama-server` OpenAI-compatible API, normally `http://evo-x2.tailb30e58.ts.net/llama/v1`.
     3. Workstation-local `llama.cpp`, normally `http://127.0.0.1:8081/v1`, as the last resort only.
   - SSH port forwarding is a developer diagnostic path only. It must not be the product default because it depends on per-device SSH configuration and prevents other authorized Tailnet devices from using the shared Evo X2 endpoint.
-  - `llama.cpp` model swapping remains a later operational hardening item tracked by Issue [#45](https://github.com/terisuke/note_maker/issues/45). Until model swap/restart orchestration is reliable, `llama-server` is a fallback route rather than the primary multi-model route.
+  - `llama.cpp` model swapping is tracked by Issue [#45](https://github.com/terisuke/note_maker/issues/45). The current recommended implementation is a conservative systemd/profile swap for one shared fallback `llama-server` behind `/llama/v1`, with dry-run default scripts and explicit restart gates. Until live Evo X2 validation proves brief/draft quality, first-token latency, and no Ollama disruption, `llama-server` remains a fallback route rather than the primary multi-model route.
   - Direct local Ollama on `127.0.0.1:11434` must not be used as the default verification path; it is only acceptable when explicitly selected for a one-off diagnostic.
   - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
 

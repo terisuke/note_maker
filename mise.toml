@@ -1,5 +1,17 @@
+[tasks.launcher]
+description = "Start the app-like launcher against Evo X2 Tailnet"
+run = "make launcher"
+
+[tasks.launcher-status]
+description = "Check launcher storage, port, and LLM health without starting the app"
+run = "make launcher-status"
+
+[tasks.launcher-check]
+description = "Run launcher syntax checks and shell tests"
+run = "make launcher-check"
+
 [tasks.dev]
-description = "Start local llama.cpp and the Note Maker web app"
+description = "Start the legacy development script"
 run = "make dev"
 
 [tasks.evo-x2]
@@ -9,6 +21,10 @@ run = "make evo-x2"
 [tasks.scenario-evo-x2]
 description = "Run the full 3000-character scenario against Ollama on Evo X2"
 run = "make scenario-evo-x2"
+
+[tasks.scenario-local-llamacpp-fallback]
+description = "Plan or explicitly run local llama.cpp fallback validation"
+run = "make scenario-local-llamacpp-fallback"
 
 [tasks.check]
 description = "Run Go tests"

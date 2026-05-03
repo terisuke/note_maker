@@ -169,6 +169,32 @@ func TestUpdateBriefArtifactHandlerUpdatesSavedBriefWithoutRewritingSessionHisto
 	if savedSession.Answers[0].Content != originalThemeAnswer {
 		t.Fatalf("session answer history was rewritten: %#v", savedSession.Answers[0])
 	}
+
+	versionsRequest := httptest.NewRequest(http.MethodGet, "/api/briefs/session-brief-edit/versions", nil)
+	versionsRequest = mux.SetURLVars(versionsRequest, map[string]string{"id": session.ID})
+	versionsResponse := httptest.NewRecorder()
+
+	ListBriefVersionsHandler(versionsResponse, versionsRequest)
+
+	if versionsResponse.Code != http.StatusOK {
+		t.Fatalf("versions status = %d, body = %s", versionsResponse.Code, versionsResponse.Body.String())
+	}
+	var versions briefVersionListResponse
+	if err := json.NewDecoder(versionsResponse.Body).Decode(&versions); err != nil {
+		t.Fatalf("decode versions: %v", err)
+	}
+	if len(versions.Versions) != 2 {
+		t.Fatalf("versions = %#v, want 2 entries", versions.Versions)
+	}
+	if versions.SessionID != session.ID || versions.CurrentVersion != 2 {
+		t.Fatalf("unexpected version envelope: %#v", versions)
+	}
+	if versions.Versions[0].Version != 1 || versions.Versions[0].Brief.Theme == "Edited saved theme" {
+		t.Fatalf("original version was not preserved: %#v", versions.Versions[0])
+	}
+	if versions.Versions[1].Version != 2 || !versions.Versions[1].Current || versions.Versions[1].Title != "Edited saved theme" || versions.Versions[1].StyleProfileID != style.Profile.ID || versions.Versions[1].Brief.Theme != "Edited saved theme" {
+		t.Fatalf("edited version was not appended: %#v", versions.Versions[1])
+	}
 }
 
 func TestUpdateBriefArtifactHandlerValidatesFields(t *testing.T) {

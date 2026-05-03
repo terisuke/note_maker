@@ -494,7 +494,36 @@ func (s *WorkflowStore) SaveBrief(sessionID string, brief briefdomain.ArticleBri
 		return fmt.Errorf("encode brief: %w", err)
 	}
 	now := nowUTC()
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin save brief: %w", err)
+	}
+	defer rollbackUnlessDone(tx)
+	var previousStyleProfileID, previousPersonaID, previousOutputFormatID, previousBriefJSON, previousCreatedAt string
+	previousErr := tx.QueryRow(`
+SELECT style_profile_id, persona_id, output_format_id, brief_json, created_at
+FROM briefs
+WHERE session_id = ?`, sessionID).Scan(&previousStyleProfileID, &previousPersonaID, &previousOutputFormatID, &previousBriefJSON, &previousCreatedAt)
+	if previousErr != nil && previousErr != sql.ErrNoRows {
+		return fmt.Errorf("load previous brief: %w", previousErr)
+	}
+	var maxVersion int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE session_id = ?`, sessionID).Scan(&maxVersion); err != nil {
+		return fmt.Errorf("load brief version: %w", err)
+	}
+	if maxVersion == 0 && previousErr == nil {
+		_, err = tx.Exec(`
+INSERT INTO brief_versions (
+	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at
+)
+VALUES (?, 1, ?, ?, ?, ?, ?)`,
+			sessionID, previousStyleProfileID, previousPersonaID, previousOutputFormatID, previousBriefJSON, previousCreatedAt)
+		if err != nil {
+			return fmt.Errorf("seed previous brief version: %w", err)
+		}
+		maxVersion = 1
+	}
+	_, err = tx.Exec(`
 INSERT INTO briefs (session_id, style_profile_id, persona_id, output_format_id, brief_json, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
@@ -506,6 +535,18 @@ ON CONFLICT(session_id) DO UPDATE SET
 		sessionID, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now), formatTime(now))
 	if err != nil {
 		return fmt.Errorf("save brief: %w", err)
+	}
+	_, err = tx.Exec(`
+INSERT INTO brief_versions (
+	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, maxVersion+1, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now))
+	if err != nil {
+		return fmt.Errorf("save brief version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit save brief: %w", err)
 	}
 	return nil
 }
@@ -550,6 +591,37 @@ ORDER BY updated_at DESC, session_id`)
 		return nil, fmt.Errorf("iterate briefs: %w", err)
 	}
 	return briefs, nil
+}
+
+// ListBriefVersions returns persisted brief revisions for a session.
+func (s *WorkflowStore) ListBriefVersions(sessionID string) ([]briefdomain.ArticleBriefVersion, error) {
+	rows, err := s.db.Query(`
+SELECT version, brief_json, created_at
+FROM brief_versions
+WHERE session_id = ?
+ORDER BY version`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list brief versions: %w", err)
+	}
+	defer rows.Close()
+	var versions []briefdomain.ArticleBriefVersion
+	for rows.Next() {
+		var version briefdomain.ArticleBriefVersion
+		var briefJSON, createdAt string
+		if err := rows.Scan(&version.Version, &briefJSON, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan brief version: %w", err)
+		}
+		if err := unmarshalString(briefJSON, &version.Brief); err != nil {
+			return nil, fmt.Errorf("decode brief version %d: %w", version.Version, err)
+		}
+		version.SessionID = sessionID
+		version.CreatedAt = parseTime(createdAt)
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate brief versions: %w", err)
+	}
+	return versions, nil
 }
 
 // SavePersona stores a user-authored persona.
@@ -620,6 +692,51 @@ ORDER BY created_at, id`)
 		return nil, fmt.Errorf("iterate personas: %w", err)
 	}
 	return personas, nil
+}
+
+// DeletePersona removes an unreferenced user-authored persona.
+func (s *WorkflowStore) DeletePersona(id string) error {
+	id = strings.TrimSpace(id)
+	var exists int
+	err := s.db.QueryRow(`SELECT 1 FROM custom_personas WHERE id = ?`, id).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return personadomain.ErrPersonaNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("check persona: %w", err)
+	}
+	referenced, err := s.personaReferenced(id)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return personadomain.ErrPersonaReferenced
+	}
+	if _, err := s.db.Exec(`DELETE FROM custom_personas WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete persona: %w", err)
+	}
+	return nil
+}
+
+func (s *WorkflowStore) personaReferenced(id string) (bool, error) {
+	checks := []string{
+		`SELECT 1 FROM brief_sessions WHERE persona_id = ? LIMIT 1`,
+		`SELECT 1 FROM briefs WHERE persona_id = ? LIMIT 1`,
+		`SELECT 1 FROM brief_versions WHERE persona_id = ? LIMIT 1`,
+		`SELECT 1 FROM articles WHERE persona_id = ? LIMIT 1`,
+		`SELECT 1 FROM drafts WHERE persona_id = ? LIMIT 1`,
+	}
+	for _, query := range checks {
+		var exists int
+		err := s.db.QueryRow(query, id).Scan(&exists)
+		if err == nil {
+			return true, nil
+		}
+		if err != sql.ErrNoRows {
+			return false, fmt.Errorf("check persona references: %w", err)
+		}
+	}
+	return false, nil
 }
 
 // SaveProject stores a project aggregate.

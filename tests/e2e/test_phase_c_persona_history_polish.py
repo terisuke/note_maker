@@ -149,6 +149,78 @@ def test_add_persona_updates_current_and_history_selectors_after_reload(page: Pa
     assert any(call["method"] == "POST" for call in state.calls_to("/api/personas"))
 
 
+def test_custom_persona_edit_and_delete_controls_call_product_memory_api(page: Page, base_url: str) -> None:
+    personas = [*PERSONAS, PHASE_C_PERSONA]
+    updated_persona = {
+        **PHASE_C_PERSONA,
+        "display_name": "Phase C Writer Updated",
+        "description": "Edited from browser E2E",
+        "voice_notes": {"first_person": ["僕"]},
+        "sources": [{"kind": "zenn", "ref": "phase-c-edited-feed"}],
+    }
+
+    def personas_handler(route: Route, request: Request, call: dict[str, Any], state: StubState) -> None:
+        assert call["method"] == "GET"
+        fulfill_json(route, personas)
+        return None
+
+    def persona_detail_handler(route: Route, request: Request, call: dict[str, Any], state: StubState) -> None:
+        nonlocal personas
+        if call["method"] == "PATCH":
+            payload = call["payload"]
+            assert payload["id"] == PHASE_C_PERSONA["id"]
+            assert payload["display_name"] == updated_persona["display_name"]
+            assert payload["description"] == updated_persona["description"]
+            assert payload["default_format"] == "note_article"
+            assert payload["voice_notes"]["first_person"] == ["僕"]
+            assert payload["sources"][0]["kind"] == "zenn"
+            assert payload["sources"][0]["ref"] == "phase-c-edited-feed"
+            personas = [updated_persona if item["id"] == PHASE_C_PERSONA["id"] else item for item in personas]
+            fulfill_json(route, updated_persona)
+            return None
+        assert call["method"] == "DELETE"
+        personas = [item for item in personas if item["id"] != PHASE_C_PERSONA["id"]]
+        route.fulfill(status=204, body="")
+        return None
+
+    state = install_routes(
+        page,
+        {
+            "/api/personas": personas_handler,
+            "/api/personas/phase-c-writer": persona_detail_handler,
+        },
+    )
+    open_app(page, base_url)
+
+    page.locator("#persona-select").select_option("phase-c-writer")
+    expect(page.locator("#history-persona-select")).to_have_value("phase-c-writer")
+    page.locator("#edit-persona-btn").click()
+
+    expect(page.locator("#add-persona-form")).to_be_visible()
+    expect(page.locator("#persona-form-title")).to_have_text("書き手を編集")
+    expect(page.locator("#persona-id-input")).to_be_disabled()
+    expect(page.locator("#persona-id-input")).to_have_value("phase-c-writer")
+    phase_c_locator(page, "#persona-name-input", "#persona-display-name-input").fill(updated_persona["display_name"])
+    page.locator("#persona-description-input").fill(updated_persona["description"])
+    phase_c_locator(page, "#persona-voice-input", "#persona-first-person-input").fill("僕")
+    page.locator("#persona-source-kind-input").fill("zenn")
+    page.locator("#persona-source-ref-input").fill("phase-c-edited-feed")
+    page.locator("#save-persona-btn").click()
+
+    expect(page.locator("#persona-status")).to_contain_text("更新しました")
+    expect(page.locator('#persona-select option[value="phase-c-writer"]')).to_have_text(updated_persona["display_name"])
+    expect(page.locator('#history-persona-select option[value="phase-c-writer"]')).to_have_text(updated_persona["display_name"])
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#delete-persona-btn").click()
+
+    expect(page.locator("#persona-status")).to_contain_text("削除しました")
+    expect(page.locator("#persona-select")).to_have_value("terisuke")
+    expect(page.locator("#history-persona-select")).to_have_value("terisuke")
+    expect(page.locator('#persona-select option[value="phase-c-writer"]')).to_have_count(0)
+    assert [call["method"] for call in state.calls_to("/api/personas/phase-c-writer")] == ["PATCH", "DELETE"]
+
+
 def test_saved_history_brief_card_edit_save_cancel_and_error(page: Page, base_url: str) -> None:
     patch_calls = 0
     updated_brief = {
@@ -193,6 +265,38 @@ def test_saved_history_brief_card_edit_save_cancel_and_error(page: Page, base_ur
     expect(page.locator("#brief-edit-status")).to_contain_text(re.compile("失敗|failed|error", re.I))
     expect(page.locator("#brief-card")).not_to_contain_text("失敗するブリーフテーマ")
     assert len(state.calls_to("/api/briefs/session-history")) == 2
+
+
+def test_saved_history_brief_card_shows_version_history(page: Page, base_url: str) -> None:
+    versions = {
+        "versions": [
+            {
+                "session_id": "session-history",
+                "version": 1,
+                "created_at": "2026-05-01T08:00:00Z",
+                "brief": {**BRIEF, "theme": "編集前のブリーフテーマ", "reader": "初稿を確認する編集者"},
+            },
+            {
+                "session_id": "session-history",
+                "version": 2,
+                "created_at": "2026-05-03T09:00:00Z",
+                "brief": {**BRIEF, "theme": "保存後のブリーフテーマ", "reader": "保存状態を確認する編集者"},
+            },
+        ]
+    }
+
+    state = install_routes(page, {"/api/briefs/session-history/versions": lambda *_: versions})
+    open_app(page, base_url)
+    open_history_session(page)
+
+    page.locator("#show-brief-versions-btn").click()
+
+    expect(page.locator("#brief-version-history")).to_be_visible()
+    expect(page.locator("#brief-version-history")).to_contain_text("v2")
+    expect(page.locator("#brief-version-history")).to_contain_text("保存後のブリーフテーマ")
+    expect(page.locator("#brief-version-history")).to_contain_text("v1")
+    expect(page.locator("#brief-version-history")).to_contain_text("編集前のブリーフテーマ")
+    assert [call["method"] for call in state.calls_to("/api/briefs/session-history/versions")] == ["GET"]
 
 
 def test_saved_history_style_card_edit_save_cancel_and_error(page: Page, base_url: str) -> None:

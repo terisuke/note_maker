@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -39,9 +40,11 @@ type workflowStoreBackend interface {
 	SaveBrief(string, briefdomain.ArticleBrief) error
 	GetBrief(string) (briefdomain.ArticleBrief, bool)
 	ListBriefs() (map[string]briefdomain.ArticleBrief, error)
+	ListBriefVersions(string) ([]briefdomain.ArticleBriefVersion, error)
 	SavePersona(personadomain.Persona) error
 	GetPersona(string) (personadomain.Persona, bool)
 	ListPersonas() ([]personadomain.Persona, error)
+	DeletePersona(string) error
 	GetProfileAndGuide(string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool)
 }
 
@@ -105,6 +108,15 @@ type createPersonaRequest struct {
 	DefaultFormat string                       `json:"default_format"`
 	Sources       []personadomain.AuthorSource `json:"sources"`
 	VoiceNotes    personadomain.VoiceNotes     `json:"voice_notes"`
+}
+
+type updatePersonaRequest struct {
+	ID            string                        `json:"id"`
+	DisplayName   *string                       `json:"display_name"`
+	Description   *string                       `json:"description"`
+	DefaultFormat *string                       `json:"default_format"`
+	Sources       *[]personadomain.AuthorSource `json:"sources"`
+	VoiceNotes    *personadomain.VoiceNotes     `json:"voice_notes"`
 }
 
 type authorStyleResponse struct {
@@ -208,6 +220,24 @@ type briefSessionSummaryResponse struct {
 
 type briefArtifactListResponse struct {
 	Briefs []briefArtifactResponse `json:"briefs"`
+}
+
+type briefVersionListResponse struct {
+	SessionID      string                 `json:"session_id"`
+	CurrentVersion int                    `json:"current_version"`
+	Versions       []briefVersionResponse `json:"versions"`
+}
+
+type briefVersionResponse struct {
+	SessionID      string                   `json:"session_id"`
+	Version        int                      `json:"version"`
+	Current        bool                     `json:"current"`
+	CreatedAt      string                   `json:"created_at,omitempty"`
+	Title          string                   `json:"title,omitempty"`
+	StyleProfileID string                   `json:"style_profile_id,omitempty"`
+	PersonaID      string                   `json:"persona_id,omitempty"`
+	OutputFormatID string                   `json:"output_format_id,omitempty"`
+	Brief          briefdomain.ArticleBrief `json:"brief"`
 }
 
 type briefArtifactResponse struct {
@@ -589,6 +619,84 @@ func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithJSON(w, http.StatusCreated, persona)
+}
+
+// UpdatePersonaHandler updates a user-authored writing persona while preserving its ID.
+func UpdatePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	personaID := pathValue(r, "id")
+	if _, ok := personadomain.DefaultRegistry().Get(personaID); ok {
+		respondWithError(w, "PERSONA_ID_RESERVED", "Built-in personas cannot be updated", personaID, http.StatusConflict)
+		return
+	}
+	persona, ok := workflowStore.GetPersona(personaID)
+	if !ok {
+		respondWithError(w, "PERSONA_NOT_FOUND", "Persona was not found", personaID, http.StatusNotFound)
+		return
+	}
+	var req updatePersonaRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.ID) != "" && strings.TrimSpace(req.ID) != personaID {
+		respondWithError(w, "IMMUTABLE_PERSONA_ID", "Persona id cannot be changed", req.ID, http.StatusBadRequest)
+		return
+	}
+	if req.DisplayName != nil {
+		persona.DisplayName = strings.TrimSpace(*req.DisplayName)
+	}
+	if req.Description != nil {
+		persona.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.DefaultFormat != nil {
+		persona.DefaultFormat = strings.TrimSpace(*req.DefaultFormat)
+	}
+	if req.Sources != nil {
+		persona.Sources = *req.Sources
+	}
+	if req.VoiceNotes != nil {
+		persona.VoiceNotes = *req.VoiceNotes
+	}
+	if persona.Description == "" && persona.DisplayName != "" {
+		persona.Description = "User-authored persona: " + persona.DisplayName
+	}
+	if strings.TrimSpace(persona.VoiceNotes.Tone) == "" && persona.DisplayName != "" {
+		persona.VoiceNotes.Tone = "Write in the voice of " + persona.DisplayName + "."
+	}
+	if err := persona.ValidateCustom(); err != nil {
+		respondWithError(w, "INVALID_PERSONA", "Invalid persona", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok := outputformat.DefaultRegistry().Get(persona.DefaultFormat); !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", persona.DefaultFormat, http.StatusBadRequest)
+		return
+	}
+	if err := workflowStore.SavePersona(persona); err != nil {
+		respondWithError(w, "PERSONA_SAVE_FAILED", "Failed to save persona", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, persona)
+}
+
+// DeletePersonaHandler removes a custom persona only when it is not referenced by history.
+func DeletePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	personaID := pathValue(r, "id")
+	if _, ok := personadomain.DefaultRegistry().Get(personaID); ok {
+		respondWithError(w, "PERSONA_ID_RESERVED", "Built-in personas cannot be deleted", personaID, http.StatusConflict)
+		return
+	}
+	if err := workflowStore.DeletePersona(personaID); err != nil {
+		switch {
+		case errors.Is(err, personadomain.ErrPersonaNotFound):
+			respondWithError(w, "PERSONA_NOT_FOUND", "Persona was not found", personaID, http.StatusNotFound)
+		case errors.Is(err, personadomain.ErrPersonaReferenced):
+			respondWithError(w, "PERSONA_REFERENCED", "Persona is referenced by workflow history", personaID, http.StatusConflict)
+		default:
+			respondWithError(w, "PERSONA_DELETE_FAILED", "Failed to delete persona", err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ListFormatsHandler returns built-in output formats.
@@ -1060,6 +1168,25 @@ func GetBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	session, sessionOK := workflowStore.GetSession(sessionID)
 	respondWithJSON(w, http.StatusOK, toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK))
+}
+
+// ListBriefVersionsHandler returns persisted versions for one completed brief artifact.
+func ListBriefVersionsHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := pathValue(r, "id")
+	if _, ok := workflowStore.GetBrief(sessionID); !ok {
+		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
+		return
+	}
+	versions, err := workflowStore.ListBriefVersions(sessionID)
+	if err != nil {
+		respondWithError(w, "BRIEF_VERSION_LIST_FAILED", "Failed to list brief versions", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, briefVersionListResponse{
+		SessionID:      sessionID,
+		CurrentVersion: currentBriefVersion(versions),
+		Versions:       toBriefVersionResponses(versions),
+	})
 }
 
 // UpdateBriefArtifactHandler updates the saved brief artifact without rewriting session answers.
@@ -2192,6 +2319,35 @@ func toBriefSessionSummaryResponse(session briefdomain.ArticleBriefSession, arti
 		BriefAvailable:  briefAvailable,
 		Title:           briefTitle(session.ID, articleBrief),
 	}
+}
+
+func toBriefVersionResponses(versions []briefdomain.ArticleBriefVersion) []briefVersionResponse {
+	items := make([]briefVersionResponse, 0, len(versions))
+	currentVersion := currentBriefVersion(versions)
+	for _, version := range versions {
+		items = append(items, briefVersionResponse{
+			SessionID:      version.SessionID,
+			Version:        version.Version,
+			Current:        version.Version == currentVersion,
+			CreatedAt:      formatOptionalTime(version.CreatedAt),
+			Title:          briefTitle(version.SessionID, version.Brief),
+			StyleProfileID: version.Brief.StyleProfileID,
+			PersonaID:      version.Brief.PersonaID,
+			OutputFormatID: version.Brief.OutputFormatID,
+			Brief:          version.Brief,
+		})
+	}
+	return items
+}
+
+func currentBriefVersion(versions []briefdomain.ArticleBriefVersion) int {
+	current := 0
+	for _, version := range versions {
+		if version.Version > current {
+			current = version.Version
+		}
+	}
+	return current
 }
 
 func sortBriefSessions(sessions []briefdomain.ArticleBriefSession) {

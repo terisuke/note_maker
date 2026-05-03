@@ -3,6 +3,7 @@ package brief
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 	"github.com/teradakousuke/note_maker/internal/domain/persona"
@@ -96,6 +97,14 @@ type ArticleBrief struct {
 	ToneStance            string
 	DeepDives             []BriefAnswer
 	CustomAnswers         []BriefAnswer
+}
+
+// ArticleBriefVersion records one persisted revision of an assembled brief.
+type ArticleBriefVersion struct {
+	SessionID string
+	Version   int
+	Brief     ArticleBrief
+	CreatedAt time.Time
 }
 
 // ArticleBriefSession owns article-interview state.

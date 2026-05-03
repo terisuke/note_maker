@@ -34,6 +34,8 @@
             <label for="persona-select">書き手</label>
             <div class="inline-select-action">
               <select id="persona-select"></select>
+              <button id="edit-persona-btn" class="secondary-btn compact-btn" type="button">編集</button>
+              <button id="delete-persona-btn" class="secondary-btn compact-btn danger-btn" type="button">削除</button>
               <button id="add-persona-btn" class="secondary-btn compact-btn" type="button">+ Add persona</button>
             </div>
           </div>
@@ -60,7 +62,7 @@
         </div>
         <form id="add-persona-form" class="persona-form hidden">
           <div class="section-heading">
-            <h3>書き手を追加</h3>
+            <h3 id="persona-form-title">書き手を追加</h3>
             <div class="button-row">
               <button id="save-persona-btn" class="primary-btn" type="submit">保存</button>
               <button id="cancel-persona-btn" class="secondary-btn" type="button">キャンセル</button>
