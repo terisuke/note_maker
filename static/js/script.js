@@ -257,9 +257,17 @@ document.addEventListener('DOMContentLoaded', () => {
       el.modelStatus.textContent = models.includes('gemma4:31b')
         ? 'model: gemma4:31b'
         : `model: ${models[0] || 'none'}`;
+      // D2-2: mirror to Alpine.store('app')
+      if (window.Alpine && Alpine.store('app')) {
+        Alpine.store('app').runtime.modelStatusPill = el.modelStatus.textContent;
+      }
     } catch (_) {
       populateModelSelects([]);
       el.modelStatus.textContent = 'model: unavailable';
+      // D2-2: mirror to Alpine.store('app')
+      if (window.Alpine && Alpine.store('app')) {
+        Alpine.store('app').runtime.modelStatusPill = el.modelStatus.textContent;
+      }
     }
   }
 
@@ -803,6 +811,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setOptions(el.draftModel, available, defaults.draft);
     setOptions(el.verifyModel, available, defaults.verify);
     saveModelConfig();
+    // D2-2: mirror to Alpine.store('app')
+    if (window.Alpine && Alpine.store('app')) {
+      Alpine.store('app').config.models = {
+        available: [...available],
+        style: el.styleModel.value,
+        brief: el.briefModel.value,
+        draft: el.draftModel.value,
+        verify: el.verifyModel.value,
+      };
+    }
   }
 
   function populatePersonaSelect() {
@@ -1106,6 +1124,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadQuestionTemplate();
     syncHistoryPersonaToCurrentMode();
     loadWorkflowHistory();
+    // D2-2: mirror to Alpine.store('app')
+    if (window.Alpine && Alpine.store('app')) {
+      Alpine.store('app').personas.selectedId = el.personaSelect.value;
+    }
   }
 
   function onFormatChange() {
@@ -1118,6 +1140,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderModeSummary();
     loadQuestionTemplate();
     loadWorkflowHistory();
+    // D2-2: mirror to Alpine.store('app')
+    if (window.Alpine && Alpine.store('app')) {
+      Alpine.store('app').formats.selectedId = el.formatSelect.value;
+    }
   }
 
   function syncHistoryPersonaToCurrentMode() {
@@ -2268,6 +2294,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await requestJSON('/api/config/storage');
       state.storageConfig = data;
       applyStorageConfig(data);
+      // D2-2: mirror to Alpine.store('app')
+      if (window.Alpine && Alpine.store('app')) {
+        Alpine.store('app').config.storage = JSON.parse(JSON.stringify(data));
+      }
     } catch (error) {
       el.storageSummary.className = 'storage-summary warning';
       el.storageSummary.textContent = `保存方式を取得できませんでした: ${error.message}`;

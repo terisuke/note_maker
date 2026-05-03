@@ -37,6 +37,7 @@ logs/
 
 # 依存関係
 vendor/
+!static/vendor/
 node_modules/
 
 # Python/E2E
