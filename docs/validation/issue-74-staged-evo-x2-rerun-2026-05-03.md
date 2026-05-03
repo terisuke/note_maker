@@ -106,8 +106,60 @@ Interpretation:
 
 ## Next proof sequence
 
-1. Run `cloudia_qiita_how_to` next to verify that the Cloudia voice improvement does not introduce Zenn-specific notation into Qiita.
-2. If both Cloudia technical cases pass, run the full live publishing-target matrix for note, Qiita, Zenn, and Cor blog.
+1. Run the full live publishing-target matrix for note, Qiita, Zenn, and Cor blog.
+
+## Adjacent Qiita proof
+
+After the Zenn proof passed, the next bounded run checked the adjacent Cloudia technical target: Qiita.
+
+Purpose:
+
+- Verify that the Cloudia style calibration generalizes beyond Zenn.
+- Confirm that Qiita-specific format and structural gates remain strict.
+- Catch cross-format regression, especially Zenn-only notation leaking into Qiita as an actual block.
+
+Command:
+
+```sh
+LIVE_MEDIA_MATRIX_CASES=cloudia_qiita_how_to make scenario-media-matrix-live
+```
+
+Runtime:
+
+- Endpoint: `http://evo-x2.tailb30e58.ts.net/v1`
+- Draft model: `gemma4:31b`
+- Verify model: `gemma4:latest`
+- Transport: Tailscale VPN / OpenAI-compatible API
+
+Result:
+
+| Case | Status | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification |
+|---|---|---:|---:|---:|---:|---:|---|
+| `cloudia_zenn_tutorial` | passed | `741.93` | `86456ms` | `2205` | `88.1 / 82.0` | `5040 / 1800` | passed |
+| `cloudia_qiita_how_to` | passed | `598.62` | `111645ms` | `1336` | `83.7 / 82.0` | `3318 / 1400` | passed |
+
+Artifacts:
+
+- Aggregate: `tmp/media_matrix/live/aggregate.json`
+- Report: `tmp/media_matrix/live/aggregate.md`
+- Draft: `tmp/media_matrix/live/cloudia_qiita_how_to/draft.md`
+- Evaluation: `tmp/media_matrix/live/cloudia_qiita_how_to/evaluation.json`
+- Verification: `tmp/media_matrix/live/cloudia_qiita_how_to/verification.json`
+- Style profile: `tmp/media_matrix/styles/cloudia_qiita_how_to/profile.json`
+- Style guide: `tmp/media_matrix/styles/cloudia_qiita_how_to/guide.json`
+
+Interpretation:
+
+- The Tailnet path still works for the adjacent Cloudia technical case.
+- The Qiita format validator accepted the article.
+- Required Qiita structural signals were present: frontmatter `title:`, `:::note`, `diff_` code fence, and `## ` headings.
+- The draft used Qiita's `diff_go` style rather than Zenn's `diff go` style.
+- Zenn `:::message` appeared only as explanatory inline/table text, not as an actual block.
+- The rune gate passed.
+- Lightweight final verification passed.
+- The strict style gate passed: `83.7`, above the Qiita gate `82.0`.
+
+The two bounded Cloudia technical proofs now both pass. The next useful Evo X2 spend is the full publishing-target matrix.
 
 ## #40 closure condition
 
