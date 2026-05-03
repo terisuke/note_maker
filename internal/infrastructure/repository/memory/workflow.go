@@ -90,6 +90,17 @@ func (s *WorkflowStore) GetAuthorStyle(id string) (authorstyle.AnalyzeResult, bo
 	return authorstyle.AnalyzeResult{}, false
 }
 
+// ListAuthorStyles returns all stored author style analyses.
+func (s *WorkflowStore) ListAuthorStyles() ([]authorstyle.AnalyzeResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	results := make([]authorstyle.AnalyzeResult, 0, len(s.authorStyles))
+	for _, result := range s.authorStyles {
+		results = append(results, result)
+	}
+	return results, nil
+}
+
 // SaveSession stores a brief interview session.
 func (s *WorkflowStore) SaveSession(session briefdomain.ArticleBriefSession) error {
 	if session.ID == "" {
@@ -107,6 +118,17 @@ func (s *WorkflowStore) GetSession(id string) (briefdomain.ArticleBriefSession, 
 	defer s.mu.RUnlock()
 	session, ok := s.sessions[id]
 	return session, ok
+}
+
+// ListSessions returns all stored brief interview sessions.
+func (s *WorkflowStore) ListSessions() ([]briefdomain.ArticleBriefSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sessions := make([]briefdomain.ArticleBriefSession, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
 }
 
 // SaveBrief stores the completed brief for a session.
@@ -129,6 +151,17 @@ func (s *WorkflowStore) GetBrief(sessionID string) (briefdomain.ArticleBrief, bo
 	defer s.mu.RUnlock()
 	brief, ok := s.briefs[sessionID]
 	return brief, ok
+}
+
+// ListBriefs returns all stored completed briefs by session id.
+func (s *WorkflowStore) ListBriefs() (map[string]briefdomain.ArticleBrief, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	briefs := make(map[string]briefdomain.ArticleBrief, len(s.briefs))
+	for sessionID, brief := range s.briefs {
+		briefs[sessionID] = brief
+	}
+	return briefs, nil
 }
 
 // GetProfileAndGuide returns style assets by profile, guide, or analysis ID.

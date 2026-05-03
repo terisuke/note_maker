@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,10 +32,13 @@ var workflowStore = newWorkflowStore()
 type workflowStoreBackend interface {
 	SaveAuthorStyle(authorstyleapp.AnalyzeResult) error
 	GetAuthorStyle(string) (authorstyleapp.AnalyzeResult, bool)
+	ListAuthorStyles() ([]authorstyleapp.AnalyzeResult, error)
 	SaveSession(briefdomain.ArticleBriefSession) error
 	GetSession(string) (briefdomain.ArticleBriefSession, bool)
+	ListSessions() ([]briefdomain.ArticleBriefSession, error)
 	SaveBrief(string, briefdomain.ArticleBrief) error
 	GetBrief(string) (briefdomain.ArticleBrief, bool)
+	ListBriefs() (map[string]briefdomain.ArticleBrief, error)
 	GetProfileAndGuide(string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool)
 }
 
@@ -78,9 +82,29 @@ type authorStyleResponse struct {
 	GuideID       string `json:"guide_id"`
 	GuideMarkdown string `json:"guide_markdown"`
 	ArticleCount  int    `json:"article_count"`
+	CreatedAt     string `json:"created_at,omitempty"`
 	Source        any    `json:"source"`
 	Profile       any    `json:"profile"`
 	Guide         any    `json:"guide"`
+}
+
+type authorStyleListResponse struct {
+	StyleGuides []styleGuideArtifactResponse `json:"style_guides"`
+}
+
+type styleGuideArtifactResponse struct {
+	ID            string                          `json:"id"`
+	AnalysisID    string                          `json:"analysis_id"`
+	ProfileID     string                          `json:"profile_id"`
+	GuideID       string                          `json:"guide_id"`
+	Title         string                          `json:"title"`
+	Description   string                          `json:"description,omitempty"`
+	CreatedAt     string                          `json:"created_at,omitempty"`
+	ArticleCount  int                             `json:"article_count"`
+	GuideMarkdown string                          `json:"guide_markdown"`
+	Source        authordomain.AuthorSource       `json:"source"`
+	Profile       authordomain.AuthorStyleProfile `json:"profile"`
+	Guide         authordomain.WritingStyleGuide  `json:"guide"`
 }
 
 type createBriefSessionRequest struct {
@@ -114,6 +138,47 @@ type briefSessionResponse struct {
 	NextQuestion    *articleQuestionJSON      `json:"next_question,omitempty"`
 	Brief           *briefdomain.ArticleBrief `json:"brief,omitempty"`
 	Answers         []briefdomain.BriefAnswer `json:"answers"`
+}
+
+type briefSessionListResponse struct {
+	Sessions []briefSessionSummaryResponse `json:"sessions"`
+}
+
+type briefSessionSummaryResponse struct {
+	SessionID       string `json:"session_id"`
+	StyleProfileID  string `json:"style_profile_id"`
+	PersonaID       string `json:"persona_id"`
+	OutputFormatID  string `json:"output_format_id"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	Phase           string `json:"phase"`
+	Completed       bool   `json:"completed"`
+	AnswerCount     int    `json:"answer_count"`
+	QuestionCount   int    `json:"question_count"`
+	BriefAvailable  bool   `json:"brief_available"`
+	Title           string `json:"title,omitempty"`
+}
+
+type briefArtifactListResponse struct {
+	Briefs []briefArtifactResponse `json:"briefs"`
+}
+
+type briefArtifactResponse struct {
+	SessionID       string                   `json:"session_id"`
+	StyleProfileID  string                   `json:"style_profile_id"`
+	PersonaID       string                   `json:"persona_id"`
+	OutputFormatID  string                   `json:"output_format_id"`
+	ParentSessionID string                   `json:"parent_session_id,omitempty"`
+	Title           string                   `json:"title"`
+	Description     string                   `json:"description,omitempty"`
+	AnswerCount     int                      `json:"answer_count"`
+	DeepDiveCount   int                      `json:"deep_dive_count"`
+	Brief           briefdomain.ArticleBrief `json:"brief"`
+}
+
+type workflowArtifactsResponse struct {
+	StyleGuides []styleGuideArtifactResponse  `json:"style_guides"`
+	Sessions    []briefSessionSummaryResponse `json:"sessions"`
+	Briefs      []briefArtifactResponse       `json:"briefs"`
 }
 
 type briefSessionTemplateResponse struct {
@@ -615,6 +680,19 @@ func buildPresetAuthorStyle(persona personadomain.Persona, format outputformat.O
 	}, nil
 }
 
+// ListAuthorStylesHandler returns stored style-guide artifacts for picker UIs.
+func ListAuthorStylesHandler(w http.ResponseWriter, r *http.Request) {
+	results, err := workflowStore.ListAuthorStyles()
+	if err != nil {
+		respondWithError(w, "AUTHOR_STYLE_LIST_FAILED", "Failed to list author styles", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sortAuthorStyles(results)
+	respondWithJSON(w, http.StatusOK, authorStyleListResponse{
+		StyleGuides: toStyleGuideArtifactResponses(results),
+	})
+}
+
 // GetAuthorStyleHandler returns a stored author style analysis result.
 func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 	id := pathValue(r, "id")
@@ -624,6 +702,24 @@ func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithJSON(w, http.StatusOK, toAuthorStyleResponse(result))
+}
+
+// ListBriefSessionsHandler returns saved interview sessions for project history UIs.
+func ListBriefSessionsHandler(w http.ResponseWriter, r *http.Request) {
+	sessions, err := workflowStore.ListSessions()
+	if err != nil {
+		respondWithError(w, "BRIEF_SESSION_LIST_FAILED", "Failed to list brief sessions", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	briefs, err := workflowStore.ListBriefs()
+	if err != nil {
+		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sortBriefSessions(sessions)
+	respondWithJSON(w, http.StatusOK, briefSessionListResponse{
+		Sessions: toBriefSessionSummaryResponses(sessions, briefs),
+	})
 }
 
 // CreateBriefSessionHandler starts the fixed-question interview.
@@ -692,6 +788,56 @@ func GetBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		result.NextQuestion = &question
 	}
 	respondWithJSON(w, http.StatusOK, toBriefSessionResponse(result))
+}
+
+// ListBriefArtifactsHandler returns completed brief artifacts for reuse.
+func ListBriefArtifactsHandler(w http.ResponseWriter, r *http.Request) {
+	briefs, err := workflowStore.ListBriefs()
+	if err != nil {
+		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, briefArtifactListResponse{
+		Briefs: listBriefArtifactResponses(briefs),
+	})
+}
+
+// GetBriefArtifactHandler returns one completed brief artifact by session ID.
+func GetBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := pathValue(r, "id")
+	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	if !ok {
+		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
+		return
+	}
+	session, sessionOK := workflowStore.GetSession(sessionID)
+	respondWithJSON(w, http.StatusOK, toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK))
+}
+
+// ListWorkflowArtifactsHandler returns all currently reusable workflow artifacts.
+func ListWorkflowArtifactsHandler(w http.ResponseWriter, r *http.Request) {
+	styles, err := workflowStore.ListAuthorStyles()
+	if err != nil {
+		respondWithError(w, "AUTHOR_STYLE_LIST_FAILED", "Failed to list author styles", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	briefs, err := workflowStore.ListBriefs()
+	if err != nil {
+		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sessions, err := workflowStore.ListSessions()
+	if err != nil {
+		respondWithError(w, "BRIEF_SESSION_LIST_FAILED", "Failed to list brief sessions", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sortAuthorStyles(styles)
+	sortBriefSessions(sessions)
+	respondWithJSON(w, http.StatusOK, workflowArtifactsResponse{
+		StyleGuides: toStyleGuideArtifactResponses(styles),
+		Sessions:    toBriefSessionSummaryResponses(sessions, briefs),
+		Briefs:      listBriefArtifactResponses(briefs),
+	})
 }
 
 // EditBriefAnswerHandler creates a new child session from an edited past answer.
@@ -1156,10 +1302,75 @@ func toAuthorStyleResponse(result authorstyleapp.AnalyzeResult) authorStyleRespo
 		GuideID:       result.Guide.ID,
 		GuideMarkdown: result.Guide.Markdown,
 		ArticleCount:  result.ArticleCount,
+		CreatedAt:     formatOptionalTime(result.CreatedAt),
 		Source:        result.Source,
 		Profile:       result.Profile,
 		Guide:         result.Guide,
 	}
+}
+
+func toStyleGuideArtifactResponses(results []authorstyleapp.AnalyzeResult) []styleGuideArtifactResponse {
+	items := make([]styleGuideArtifactResponse, 0, len(results))
+	for _, result := range results {
+		items = append(items, toStyleGuideArtifactResponse(result))
+	}
+	return items
+}
+
+func toStyleGuideArtifactResponse(result authorstyleapp.AnalyzeResult) styleGuideArtifactResponse {
+	return styleGuideArtifactResponse{
+		ID:            result.Guide.ID,
+		AnalysisID:    result.ID,
+		ProfileID:     result.Profile.ID,
+		GuideID:       result.Guide.ID,
+		Title:         styleGuideTitle(result),
+		Description:   styleGuideDescription(result),
+		CreatedAt:     formatOptionalTime(result.CreatedAt),
+		ArticleCount:  result.ArticleCount,
+		GuideMarkdown: result.Guide.Markdown,
+		Source:        result.Source,
+		Profile:       result.Profile,
+		Guide:         result.Guide,
+	}
+}
+
+func sortAuthorStyles(results []authorstyleapp.AnalyzeResult) {
+	sort.SliceStable(results, func(i, j int) bool {
+		left := results[i].CreatedAt
+		right := results[j].CreatedAt
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return results[i].ID < results[j].ID
+	})
+}
+
+func styleGuideTitle(result authorstyleapp.AnalyzeResult) string {
+	if username := strings.TrimSpace(result.Source.Username); username != "" {
+		return username
+	}
+	if len(result.Source.Articles) > 0 {
+		if title := strings.TrimSpace(result.Source.Articles[0].Title); title != "" {
+			return title
+		}
+	}
+	return firstNonEmpty(result.Profile.ID, result.Guide.ID, result.ID)
+}
+
+func styleGuideDescription(result authorstyleapp.AnalyzeResult) string {
+	if len(result.Source.Articles) == 0 {
+		return ""
+	}
+	titles := make([]string, 0, len(result.Source.Articles))
+	for _, article := range result.Source.Articles {
+		if title := strings.TrimSpace(article.Title); title != "" {
+			titles = append(titles, title)
+		}
+		if len(titles) == 3 {
+			break
+		}
+	}
+	return strings.Join(titles, " / ")
 }
 
 func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionResponse {
@@ -1182,6 +1393,83 @@ func toBriefSessionResponse(result briefapp.InterviewResult) briefSessionRespons
 	}
 }
 
+func toBriefSessionSummaryResponses(sessions []briefdomain.ArticleBriefSession, briefs map[string]briefdomain.ArticleBrief) []briefSessionSummaryResponse {
+	items := make([]briefSessionSummaryResponse, 0, len(sessions))
+	for _, session := range sessions {
+		articleBrief, briefAvailable := briefs[session.ID]
+		items = append(items, toBriefSessionSummaryResponse(session, articleBrief, briefAvailable))
+	}
+	return items
+}
+
+func toBriefSessionSummaryResponse(session briefdomain.ArticleBriefSession, articleBrief briefdomain.ArticleBrief, briefAvailable bool) briefSessionSummaryResponse {
+	return briefSessionSummaryResponse{
+		SessionID:       session.ID,
+		StyleProfileID:  session.StyleProfileID,
+		PersonaID:       session.PersonaID,
+		OutputFormatID:  session.OutputFormatID,
+		ParentSessionID: session.ParentSessionID,
+		Phase:           string(session.Phase),
+		Completed:       session.Completed,
+		AnswerCount:     len(session.Answers),
+		QuestionCount:   len(session.Questions),
+		BriefAvailable:  briefAvailable,
+		Title:           briefTitle(session.ID, articleBrief),
+	}
+}
+
+func sortBriefSessions(sessions []briefdomain.ArticleBriefSession) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if sessions[i].Completed != sessions[j].Completed {
+			return sessions[i].Completed
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
+}
+
+func listBriefArtifactResponses(briefs map[string]briefdomain.ArticleBrief) []briefArtifactResponse {
+	sessionIDs := make([]string, 0, len(briefs))
+	for sessionID := range briefs {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	sort.Strings(sessionIDs)
+	items := make([]briefArtifactResponse, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		session, sessionOK := workflowStore.GetSession(sessionID)
+		items = append(items, toBriefArtifactResponse(sessionID, briefs[sessionID], session, sessionOK))
+	}
+	return items
+}
+
+func toBriefArtifactResponse(sessionID string, articleBrief briefdomain.ArticleBrief, session briefdomain.ArticleBriefSession, hasSession bool) briefArtifactResponse {
+	answerCount := 0
+	parentSessionID := ""
+	if hasSession {
+		answerCount = len(session.Answers)
+		parentSessionID = session.ParentSessionID
+	}
+	return briefArtifactResponse{
+		SessionID:       sessionID,
+		StyleProfileID:  articleBrief.StyleProfileID,
+		PersonaID:       articleBrief.PersonaID,
+		OutputFormatID:  articleBrief.OutputFormatID,
+		ParentSessionID: parentSessionID,
+		Title:           briefTitle(sessionID, articleBrief),
+		Description:     briefDescription(articleBrief),
+		AnswerCount:     answerCount,
+		DeepDiveCount:   len(articleBrief.DeepDives),
+		Brief:           articleBrief,
+	}
+}
+
+func briefTitle(sessionID string, articleBrief briefdomain.ArticleBrief) string {
+	return firstNonEmpty(articleBrief.Theme, articleBrief.OpeningEpisode, articleBrief.Reader, sessionID)
+}
+
+func briefDescription(articleBrief briefdomain.ArticleBrief) string {
+	return firstNonEmpty(articleBrief.ExpectedReaderAction, articleBrief.MustInclude, articleBrief.PersonalContext)
+}
+
 func toArticleQuestionJSONList(questions []briefdomain.ArticleQuestion) []articleQuestionJSON {
 	result := make([]articleQuestionJSON, 0, len(questions))
 	for _, question := range questions {
@@ -1199,6 +1487,13 @@ func toArticleQuestionJSON(question briefdomain.ArticleQuestion) articleQuestion
 		TargetQuestionID: question.TargetQuestionID,
 		FollowUpIndex:    question.FollowUpIndex,
 	}
+}
+
+func formatOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func newID(prefix string) string {

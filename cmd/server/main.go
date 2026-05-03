@@ -24,8 +24,15 @@ func main() {
 
 	// ルーターの設定
 	r := mux.NewRouter()
+	registerRoutes(r)
 
-	// 静的ファイルの配信 (staticディレクトリをルートとして提供)
+	log.Printf("Starting server on port %s...", port)
+	if err := http.ListenAndServe(":"+port, r); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func registerRoutes(r *mux.Router) {
 	fs := http.FileServer(http.Dir("static"))
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fs))
 	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -39,11 +46,17 @@ func main() {
 	r.HandleFunc("/api/config/storage", handlers.UpdateStorageConfigHandler).Methods("PATCH")
 	r.HandleFunc("/api/personas", handlers.ListPersonasHandler).Methods("GET")
 	r.HandleFunc("/api/formats", handlers.ListFormatsHandler).Methods("GET")
+	r.HandleFunc("/api/history", handlers.ListWorkflowArtifactsHandler).Methods("GET")
+	r.HandleFunc("/api/workflow/artifacts", handlers.ListWorkflowArtifactsHandler).Methods("GET")
+	r.HandleFunc("/api/author-style", handlers.ListAuthorStylesHandler).Methods("GET")
 	r.HandleFunc("/api/author-style/seed", handlers.SeedAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/analyze", handlers.AnalyzeAuthorStyleHandler).Methods("POST")
 	r.HandleFunc("/api/author-style/{id}", handlers.GetAuthorStyleHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions/templates", handlers.GetBriefSessionTemplateHandler).Methods("GET")
+	r.HandleFunc("/api/brief-sessions", handlers.ListBriefSessionsHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions", handlers.CreateBriefSessionHandler).Methods("POST")
+	r.HandleFunc("/api/briefs", handlers.ListBriefArtifactsHandler).Methods("GET")
+	r.HandleFunc("/api/briefs/{id}", handlers.GetBriefArtifactHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions/{id}", handlers.GetBriefSessionHandler).Methods("GET")
 	r.HandleFunc("/api/brief-sessions/{id}/answers", handlers.AnswerBriefSessionHandler).Methods("POST")
 	r.HandleFunc("/api/brief-sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
@@ -55,9 +68,4 @@ func main() {
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/index.html")
 	})
-
-	log.Printf("Starting server on port %s...", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
-		log.Fatal(err)
-	}
 }

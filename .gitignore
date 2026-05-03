@@ -28,7 +28,7 @@ Thumbs.db
 bin/
 dist/
 tmp/
-server
+/server
 data/
 
 # ログ関連

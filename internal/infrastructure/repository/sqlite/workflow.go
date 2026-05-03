@@ -308,6 +308,41 @@ LIMIT 1`, id, id, id, id).Scan(&result.ID, &sourceJSON, &profileJSON, &guideJSON
 	return result, true
 }
 
+// ListAuthorStyles returns all stored author style analyses in newest-first order.
+func (s *WorkflowStore) ListAuthorStyles() ([]authorstyleapp.AnalyzeResult, error) {
+	rows, err := s.db.Query(`
+SELECT id, source_json, profile_json, guide_json, article_count, created_at
+FROM author_style_results
+ORDER BY created_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list author styles: %w", err)
+	}
+	defer rows.Close()
+	var results []authorstyleapp.AnalyzeResult
+	for rows.Next() {
+		var result authorstyleapp.AnalyzeResult
+		var sourceJSON, profileJSON, guideJSON, createdAt string
+		if err := rows.Scan(&result.ID, &sourceJSON, &profileJSON, &guideJSON, &result.ArticleCount, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan author style: %w", err)
+		}
+		if err := unmarshalString(sourceJSON, &result.Source); err != nil {
+			return nil, fmt.Errorf("decode author source %q: %w", result.ID, err)
+		}
+		if err := unmarshalString(profileJSON, &result.Profile); err != nil {
+			return nil, fmt.Errorf("decode author profile %q: %w", result.ID, err)
+		}
+		if err := unmarshalString(guideJSON, &result.Guide); err != nil {
+			return nil, fmt.Errorf("decode writing style guide %q: %w", result.ID, err)
+		}
+		result.CreatedAt = parseTime(createdAt)
+		results = append(results, result)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate author styles: %w", err)
+	}
+	return results, nil
+}
+
 // GetProfileAndGuide returns style assets by profile, guide, or analysis ID.
 func (s *WorkflowStore) GetProfileAndGuide(id string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool) {
 	result, ok := s.GetAuthorStyle(id)
@@ -413,6 +448,38 @@ WHERE id = ?`, id).Scan(&session.ID, &session.StyleProfileID, &session.PersonaID
 	return session, true
 }
 
+// ListSessions returns all stored brief interview sessions in newest-first order.
+func (s *WorkflowStore) ListSessions() ([]briefdomain.ArticleBriefSession, error) {
+	rows, err := s.db.Query(`
+SELECT id
+FROM brief_sessions
+ORDER BY updated_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan session id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate session ids: %w", err)
+	}
+	sessions := make([]briefdomain.ArticleBriefSession, 0, len(ids))
+	for _, id := range ids {
+		session, ok := s.GetSession(id)
+		if !ok {
+			return nil, fmt.Errorf("session %q disappeared while listing", id)
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
 // SaveBrief stores the completed brief for a session.
 func (s *WorkflowStore) SaveBrief(sessionID string, brief briefdomain.ArticleBrief) error {
 	if sessionID == "" {
@@ -456,6 +523,34 @@ func (s *WorkflowStore) GetBrief(sessionID string) (briefdomain.ArticleBrief, bo
 	return brief, true
 }
 
+// ListBriefs returns all stored completed briefs keyed by session id.
+func (s *WorkflowStore) ListBriefs() (map[string]briefdomain.ArticleBrief, error) {
+	rows, err := s.db.Query(`
+SELECT session_id, brief_json
+FROM briefs
+ORDER BY updated_at DESC, session_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list briefs: %w", err)
+	}
+	defer rows.Close()
+	briefs := map[string]briefdomain.ArticleBrief{}
+	for rows.Next() {
+		var sessionID, briefJSON string
+		var brief briefdomain.ArticleBrief
+		if err := rows.Scan(&sessionID, &briefJSON); err != nil {
+			return nil, fmt.Errorf("scan brief: %w", err)
+		}
+		if err := unmarshalString(briefJSON, &brief); err != nil {
+			return nil, fmt.Errorf("decode brief %q: %w", sessionID, err)
+		}
+		briefs[sessionID] = brief
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate briefs: %w", err)
+	}
+	return briefs, nil
+}
+
 // SaveProject stores a project aggregate.
 func (s *WorkflowStore) SaveProject(project ProjectRecord) error {
 	if strings.TrimSpace(project.ID) == "" {
@@ -497,6 +592,34 @@ func (s *WorkflowStore) GetProject(id string) (ProjectRecord, bool) {
 	project.UpdatedAt = parseTime(updatedAt)
 	_ = unmarshalString(metadataJSON, &project.Metadata)
 	return project, true
+}
+
+// ListProjects returns projects in most-recently-updated order.
+func (s *WorkflowStore) ListProjects() ([]ProjectRecord, error) {
+	rows, err := s.db.Query(`
+SELECT id, name, created_at, updated_at, metadata_json
+FROM projects
+ORDER BY updated_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	var records []ProjectRecord
+	for rows.Next() {
+		var record ProjectRecord
+		var createdAt, updatedAt, metadataJSON string
+		if err := rows.Scan(&record.ID, &record.Name, &createdAt, &updatedAt, &metadataJSON); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		record.CreatedAt = parseTime(createdAt)
+		record.UpdatedAt = parseTime(updatedAt)
+		_ = unmarshalString(metadataJSON, &record.Metadata)
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate projects: %w", err)
+	}
+	return records, nil
 }
 
 // SaveArticle stores an article aggregate.
@@ -558,6 +681,39 @@ FROM articles WHERE id = ?`, id).Scan(&article.ID, &projectID, &article.PersonaI
 	article.UpdatedAt = parseTime(updatedAt)
 	_ = unmarshalString(metadataJSON, &article.Metadata)
 	return article, true
+}
+
+// ListArticlesByProject returns articles for a project in most-recently-updated order.
+func (s *WorkflowStore) ListArticlesByProject(projectID string) ([]ArticleRecord, error) {
+	rows, err := s.db.Query(`
+SELECT id
+FROM articles
+WHERE project_id = ?
+ORDER BY updated_at DESC, id`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list project articles: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan article id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate article ids: %w", err)
+	}
+	records := make([]ArticleRecord, 0, len(ids))
+	for _, id := range ids {
+		record, ok := s.GetArticle(id)
+		if !ok {
+			return nil, fmt.Errorf("article %q disappeared while listing", id)
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 // SaveSourceSnapshot stores source selector and fetch snapshots.

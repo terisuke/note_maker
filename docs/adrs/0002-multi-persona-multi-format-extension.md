@@ -166,6 +166,15 @@ Additions:
 
 Existing `/api/generate` remains a compatibility facade.
 
+Implemented history/artifact read subset as of the #27/#28 cut:
+
+- `GET /api/history` and `GET /api/workflow/artifacts` — combined reusable workflow artifact index with `style_guides`, `sessions`, and `briefs`.
+- `GET /api/author-style` — saved writing style-guide list for picker UIs.
+- `GET /api/brief-sessions` — saved interview session summaries.
+- `GET /api/briefs` and `GET /api/briefs/{id}` — completed brief artifacts for readable card rendering and reuse.
+
+These endpoints are intentionally narrower than the future project/article/draft artifact surface described above. They do not implement add-persona authoring UI, project/article browsing, draft version browsing, or broader edit persistence semantics.
+
 ## Testing Strategy
 
 - Unit tests added per format validator, per persona seed, per fetcher.
@@ -212,6 +221,7 @@ Current implementation status as of 2026-05-03:
 - Phase B2/B3/B4 are implemented: historical source acquisition works for note, Zenn, Qiita, Cor RSS, and Cor GitHub Markdown; all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Validation is recorded in [Issue 22 source fetcher validation](../validation/issue-22-source-fetchers-2026-05-02.md) and [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md).
 - Phase B5 is implemented: fixed interview questions are composed server-side by `persona_id × output_format_id`, Cloudia technical modes include extra viewpoint/context prompts, the frontend reads `GET /api/brief-sessions/templates`, and `cmd/scenario/media_matrix` produces a six-case cross-media evaluation matrix for note, Cor blog, Zenn, Qiita, and homepage output ([#25](https://github.com/terisuke/note_maker/issues/25)).
 - Phase C1 is implemented and merged: `internal/infrastructure/repository/sqlite` adds migrations and storage for author styles, sessions, briefs, projects, articles, source snapshots, draft versions, final verification, and section-regeneration versions. The JSON store remains the compatibility path, while storage mode can now be inspected and switched from the web settings UI unless environment variables lock it ([#26](https://github.com/terisuke/note_maker/issues/26), [#61](https://github.com/terisuke/note_maker/issues/61)).
+- Phase C2/C3 has an implemented first product cut for workflow history and readable artifacts ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)): the web app now exposes reusable history through `GET /api/history` and `GET /api/workflow/artifacts`, plus focused read endpoints `GET /api/author-style`, `GET /api/brief-sessions`, `GET /api/briefs`, and `GET /api/briefs/{id}`. The memory and SQLite stores both expose `ListAuthorStyles`, `ListSessions`, and `ListBriefs`; SQLite also gained `ListProjects` and `ListArticlesByProject` for the richer #26 schema. The UI adds `履歴から再開`, saved style-guide/session pickers, human-readable style-guide cards, and human-readable article-brief cards while keeping raw Markdown/JSON details available. Validation is recorded in [Issue 27/28 history and artifact UI/API validation](../validation/issue-27-28-history-artifacts-2026-05-03.md).
 - Phase D1 is implemented and merged: handler tests now cover template selection, edit/fork errors, SSE follow-up and draft paths, completed-session draft fallback, regenerate-section context recovery, Analyze/Generate compatibility handlers, and SQLite driver selection. `go test ./internal/handlers -cover` reports 80%+ statement coverage ([#29](https://github.com/terisuke/note_maker/issues/29)).
 - Runtime runner support is implemented and merged: `cmd/scenario/live_media_matrix` reads the offline matrix, emits planned aggregate JSON/Markdown by default, and executes live Evo X2 draft runs only when `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` is used ([#57](https://github.com/terisuke/note_maker/issues/57)).
 - The 2026-05-03 browser 500 analysis showed an implementation drift: plain web-app startup still defaulted to workstation-local `127.0.0.1:8081`, while this ADR requires Evo X2 Tailnet as primary. Issue [#63](https://github.com/terisuke/note_maker/issues/63) restores the default order to Evo X2 Ollama over Tailnet → Evo X2 llama.cpp → workstation-local llama.cpp and makes the UI show the actual endpoint/model reported by SSE.
@@ -225,8 +235,9 @@ Current implementation status as of 2026-05-03:
 Near-term execution order:
 
 1. Close [#74](https://github.com/terisuke/note_maker/issues/74) and [#40](https://github.com/terisuke/note_maker/issues/40) for the current note/Qiita/Zenn/Cor blog publishing-target scope after linking the final `5/5` aggregate artifacts. Homepage remains a separate short-format check.
-2. Continue Phase C2/C3 ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)) and Browser E2E ([#13](https://github.com/terisuke/note_maker/issues/13)) in parallel; they are product-readiness work.
-3. Keep fallback-quality and runtime packaging follow-up ([#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15)) outside the #40 closure gate.
+2. Land the #27/#28 history/artifact read cut and add Browser E2E coverage ([#13](https://github.com/terisuke/note_maker/issues/13)) for history opening, readable cards, and the existing edit/fork/stream/regenerate flows.
+3. Follow with the remaining Phase C product gaps that were intentionally not included in the #27/#28 cut: add-persona authoring UI, broader edit persistence semantics beyond existing fork-on-edit/session saving, and richer project/article/draft history surfaces from the #26 SQLite schema.
+4. Keep fallback-quality and runtime packaging follow-up ([#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15)) outside the #40 closure gate.
 
 ## Tracked issues
 
@@ -242,8 +253,8 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - B4 — [#24](https://github.com/terisuke/note_maker/issues/24) Seed persona library with `terisuke` and `cloudia` profiles. Implemented for the built-in registry: seeds include sources, default formats, and voice notes; live source re-analysis remains under [#22](https://github.com/terisuke/note_maker/issues/22).
 - B5 — [#25](https://github.com/terisuke/note_maker/issues/25) Format- and persona-aware fixed question sets
 - C1 — [#26](https://github.com/terisuke/note_maker/issues/26) Replace JSON store with SQLite-backed schema (extends [#14](https://github.com/terisuke/note_maker/issues/14)) — implemented in the current cut as an opt-in SQLite workflow store.
-- C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI
-- C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards
+- C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI — implemented in the current cut for saved style-guide and brief-session reuse through `履歴から再開`, backed by `GET /api/workflow/artifacts`, `GET /api/author-style`, and `GET /api/brief-sessions`. Add-persona authoring UI and broader edit-persistence expectations remain follow-up work.
+- C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards — implemented in the current cut for style-guide cards and article-brief cards, with raw Markdown/JSON details preserved behind disclosure controls. Rich project/article/draft artifact browsing remains a later Phase C layer on top of the #26 SQLite schema.
 - D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` — implemented in the current cut with 80.0% handler package coverage.
 - Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40) — implemented in the current cut.
 - Runtime stabilization epic — [#40](https://github.com/terisuke/note_maker/issues/40) Stabilize Tailnet Evo X2 draft quality and runtime metrics. #70-#73 provide the prerequisite validation and diagnostics. [#74](https://github.com/terisuke/note_maker/issues/74) has passed the bounded Cloudia/Zenn and Cloudia/Qiita proofs plus the final `5/5` publishing-target matrix.

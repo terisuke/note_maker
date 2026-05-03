@@ -25,10 +25,18 @@ Implemented and merged:
 - [#61](https://github.com/terisuke/note_maker/issues/61) / [PR #62](https://github.com/terisuke/note_maker/pull/62) — workflow storage mode can be inspected and switched from the settings UI; environment-locked deployments remain read-only.
 - [#70](https://github.com/terisuke/note_maker/issues/70)-[#73](https://github.com/terisuke/note_maker/issues/73) prerequisite slice for runtime evaluation — interview-template coverage, failed draft artifact preservation, bounded format repair, and output-format-specific scenario gates are in place for staged #74 reruns.
 
+Implemented in the current #27/#28 history/artifact cut:
+
+- [#27](https://github.com/terisuke/note_maker/issues/27) — first saved-history UI cut: `履歴から再開`, persona-scoped saved style-guide and brief-session selectors, and open/clear/refresh controls.
+- [#28](https://github.com/terisuke/note_maker/issues/28) — first readable artifact cut: style-guide cards and article-brief cards replace raw-only `pre` output while keeping Markdown/JSON details available.
+- History read API surface — `GET /api/history`, `GET /api/workflow/artifacts`, `GET /api/author-style`, `GET /api/brief-sessions`, `GET /api/briefs`, and `GET /api/briefs/{id}`.
+- Store list support — memory and SQLite now expose `ListAuthorStyles`, `ListSessions`, and `ListBriefs`; SQLite also has `ListProjects` and `ListArticlesByProject` for the richer #26 schema.
+- Focused tests — `internal/handlers/workflow_history_test.go` covers saved artifact responses and brief detail errors; `static/history_ui_test.go` locks the frontend contract.
+- Validation — [Issue 27/28 history and artifact UI/API validation](../validation/issue-27-28-history-artifacts-2026-05-03.md).
+
 Open and active:
 
 - Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work.
-- History UI and readable artifacts: [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28).
 - Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13).
 - Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40), now satisfied for the current note/Qiita/Zenn/Cor blog publishing-target acceptance scope by the 2026-05-03 full Tailnet Evo X2 matrix.
 - Runtime evaluation sub-issue [#74](https://github.com/terisuke/note_maker/issues/74), satisfied by the staged reruns and the final `5/5` full matrix pass.
@@ -37,6 +45,12 @@ Open and active:
 - Documentation and DDD audit: [#64](https://github.com/terisuke/note_maker/issues/64), with details in [Runtime and DDD alignment audit](../validation/runtime-ui-ddd-audit-2026-05-03.md).
 - Interview usability fixed before measurement: [#66](https://github.com/terisuke/note_maker/issues/66), with details in [Issue 66 plain brief questions validation](../validation/issue-66-plain-brief-questions-2026-05-03.md).
 - Style-source switching fixed before measurement: [#68](https://github.com/terisuke/note_maker/issues/68), with details in [Issue 68 media-aware style source validation](../validation/issue-68-media-aware-style-source-2026-05-03.md).
+
+Remaining Phase C gaps after the current #27/#28 cut:
+
+- Add-persona authoring UI is not implemented; the current UI consumes seeded personas and saved artifacts.
+- Broader edit persistence called out in the issue text is not implemented beyond the existing fork-on-edit/session/brief save paths.
+- Project/article/draft artifact browsing from SQLite's normalized #26 schema is not exposed in the web UI yet; this cut intentionally uses style guides, sessions, and completed briefs as the reusable history surface.
 
 ## Final evaluation target
 
@@ -109,13 +123,15 @@ Use subagents with disjoint write scopes when implementation resumes:
 | Lane | Issue | Subagent role | Write scope | Done when |
 |---|---|---|---|---|
 | A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | Complete for current scope: note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
-| D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | `static/*`, read APIs for projects/sessions/drafts once exposed | persona/session picker and human-readable brief/style cards use persisted state |
-| E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | persona/format switching, edit/fork, streaming, regenerate-section, and legacy localStorage migration are covered |
+| D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | done for this cut | style-guide/session history picker and readable brief/style cards use persisted workflow state |
+| E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | persona/format switching, history open, readable cards, edit/fork, streaming, regenerate-section, and legacy localStorage migration are covered |
+| F | Phase C follow-up | Product worker | future history UI/API files | add-persona UI, broader edit persistence, and project/article/draft browsing are split from the #27/#28 first cut |
 
 Lane A is the next expensive Evo X2 spend. Lane D/E can continue in parallel when they do not need the same frontend files.
 
 ## Recommended order
 
-1. Close #74 and #40 for the current publishing-target acceptance scope after the PR lands and the issue comments link the final aggregate artifacts.
-2. Continue #27/#28 and #13 in parallel as product-readiness work: history picker, readable brief/style cards, and browser E2E coverage are now the highest-value next tasks.
-3. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable. Homepage remains a separate short-format check, not part of the #40 closure gate.
+1. Land the current #27/#28 history/artifact cut with its validation doc, then wire #13 Browser E2E around the new history picker and cards while preserving the existing edit/fork, streaming, and regenerate-section coverage goals.
+2. Split the remaining Phase C work into explicit follow-up issues before implementation: add-persona authoring UI, broader edit persistence semantics, and project/article/draft artifact browsing from the #26 SQLite schema.
+3. Close #74 and #40 for the current publishing-target acceptance scope after the PR lands and the issue comments link the final aggregate artifacts.
+4. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable. Homepage remains a separate short-format check, not part of the #40 closure gate.

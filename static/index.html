@@ -77,6 +77,32 @@
         </div>
         <div id="mode-summary" class="mode-summary" aria-live="polite"></div>
 
+        <div class="history-config">
+          <div class="section-heading">
+            <h3>履歴から再開</h3>
+            <button id="refresh-history-btn" class="secondary-btn" type="button">履歴を更新</button>
+          </div>
+          <div class="history-picker-grid">
+            <div class="field-row">
+              <label for="history-persona-select">履歴の書き手</label>
+              <select id="history-persona-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-style-select">保存済み文体ガイド</label>
+              <select id="history-style-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-session-select">保存済み取材セッション</label>
+              <select id="history-session-select"></select>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="open-history-btn" class="primary-btn" type="button" disabled>選択した履歴を開く</button>
+            <button id="clear-history-selection-btn" class="secondary-btn" type="button">選択を解除</button>
+          </div>
+          <div id="history-status" class="history-status" aria-live="polite"></div>
+        </div>
+
         <div class="question-config">
           <div class="section-heading">
             <h3>取材質問</h3>
@@ -132,7 +158,11 @@
             </div>
           </div>
           <h3>文体ガイド</h3>
-          <pre id="guide-preview"></pre>
+          <div id="style-guide-card" class="artifact-card"></div>
+          <details class="artifact-raw">
+            <summary>Markdownを表示</summary>
+            <pre id="guide-preview"></pre>
+          </details>
         </div>
       </section>
 
@@ -161,7 +191,11 @@
 
         <div id="brief-result" class="result-box hidden">
           <h3>記事ブリーフ</h3>
-          <pre id="brief-preview"></pre>
+          <div id="brief-card" class="artifact-card"></div>
+          <details class="artifact-raw">
+            <summary>JSONを表示</summary>
+            <pre id="brief-preview"></pre>
+          </details>
         </div>
       </section>
 

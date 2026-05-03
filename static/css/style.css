@@ -179,6 +179,48 @@ body {
     color: var(--text);
 }
 
+.history-config {
+    margin: 4px 0 14px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fbfcfe;
+}
+
+.history-config .section-heading {
+    margin-top: 0;
+}
+
+.history-picker-grid {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.65fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+}
+
+.history-status {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    background: var(--surface);
+    font-size: 14px;
+}
+
+.history-status.loading {
+    border-style: dashed;
+}
+
+.history-status.empty {
+    background: #f8fafc;
+}
+
+.history-status.warning {
+    border-color: #fde68a;
+    color: var(--warning);
+    background: var(--warning-bg);
+}
+
 .section-heading {
     display: flex;
     align-items: center;
@@ -331,6 +373,86 @@ pre {
     border: 1px solid var(--line);
     border-radius: 6px;
     padding: 12px;
+}
+
+.artifact-card {
+    display: grid;
+    gap: 12px;
+    margin: 10px 0 12px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+}
+
+.artifact-card.empty {
+    color: var(--muted);
+    background: #f8fafc;
+    border-style: dashed;
+}
+
+.artifact-card-header {
+    display: grid;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.artifact-card-header strong {
+    line-height: 1.35;
+}
+
+.artifact-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.artifact-meta span {
+    max-width: 100%;
+    padding: 3px 7px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #f8fafc;
+    overflow-wrap: anywhere;
+}
+
+.artifact-section {
+    display: grid;
+    gap: 6px;
+}
+
+.artifact-section h4 {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.artifact-section ul {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding-left: 18px;
+}
+
+.artifact-section li {
+    overflow-wrap: anywhere;
+}
+
+.artifact-raw {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.artifact-raw summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+
+.artifact-raw pre {
+    margin-top: 8px;
 }
 
 .question-log {
@@ -581,6 +703,7 @@ pre {
     }
 
     .config-grid,
+    .history-picker-grid,
     .result-grid {
         grid-template-columns: 1fr;
     }
