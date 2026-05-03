@@ -17,8 +17,8 @@ Active issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/
 
 | Issue | Scope | ADR Section | Guardrail |
 | --- | --- | --- | --- |
-| [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
-| [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
+| [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | Closed by PR #87 for the current app baseline: SQLite store, custom persona update/delete, and explicit brief versions are in place. Future product-memory work should be narrower than this umbrella. |
+| [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop/app-like launcher | Out of ADR 0002 scope | Closed by PR #87 with the pragmatic launcher. Native wrapper, signing, icon, and installer work must be split into follow-up packaging issues if required. |
 | [#36](https://github.com/terisuke/note_maker/issues/36) | local llama.cpp fallback quality | ADR 0001/0002 runtime validation | Non-blocking for Phase A. Do not promote fallback as production-quality until it passes strict draft thresholds. |
 | [#45](https://github.com/terisuke/note_maker/issues/45) | Evo X2 llama.cpp swap orchestration | ADR 0001/0002 runtime validation | Non-blocking P2. Keep Ollama primary; llama.cpp swap/start commands must be dry-run by default, require explicit restart gates, target `/llama/v1` directly for validation, and remain open until live brief/draft metrics pass without disrupting Ollama. |
 | [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics epic | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. The current note/Qiita/Zenn/Cor blog publishing-target scope passed on 2026-05-03 with a `5/5` full Tailnet Evo X2 matrix run. |
@@ -31,12 +31,14 @@ Active issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/
 
 Current cut status:
 
-- [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus `WORKFLOW_STORE_DRIVER=sqlite` web-app opt-in. [#14](https://github.com/terisuke/note_maker/issues/14) remains the broader queryable-history umbrella for complete product memory beyond the current custom-persona and brief/style edit surface.
+- [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus storage selection from the web settings UI. [#14](https://github.com/terisuke/note_maker/issues/14) is closed by PR #87 for the current app baseline after custom persona update/delete and brief-version history landed.
 - The [#13](https://github.com/terisuke/note_maker/issues/13) browser-E2E gate is closed by the Playwright validation record. Do not track remaining Phase C product polish as #13 scope.
-- The `codex/phase-c-persona-history-polish` cut implements custom persona create/list plus editable brief/style card persistence. Keep custom persona update/delete and broader version/history semantics separate from the #13 browser-coverage gate.
+- The Phase C persona/history/card work now includes custom persona create/list/update/delete, editable brief/style cards, style-guide versions, and explicit brief versions. Future diff/restore or richer persona-source management should be separate product issues.
+- [#15](https://github.com/terisuke/note_maker/issues/15) is closed by the app-like launcher cut. Keep signed native packaging separate from the runtime/product baseline.
 - [#29](https://github.com/terisuke/note_maker/issues/29) reaches the handler coverage gate: `go test ./internal/handlers -cover` reports 80.0%.
 - [#57](https://github.com/terisuke/note_maker/issues/57) is implemented as `cmd/scenario/live_media_matrix`; it defaults to offline planned aggregate output and requires `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` for Evo X2 calls.
 - [#40](https://github.com/terisuke/note_maker/issues/40) is now an epic with sub-issues [#70](https://github.com/terisuke/note_maker/issues/70)-[#74](https://github.com/terisuke/note_maker/issues/74). The staged validation criteria are met for the current publishing-target scope: the final full matrix passed `5/5` with endpoint, phase models, elapsed time, score, runes, final verification, structural gates, quality gates, and artifacts recorded.
+- The current app handoff is [Note Maker app handoff - 2026-05-03](../handoffs/app-handoff-2026-05-03.md). Use it for develop-to-main promotion and operational startup details.
 
 Closed historical issues:
 
@@ -53,6 +55,8 @@ Closed historical issues:
 | [#23](https://github.com/terisuke/note_maker/issues/23) | Format prompt templates and validators | Format guides and validators exist; new formats must add validator + guide + scenario sample. |
 | [#24](https://github.com/terisuke/note_maker/issues/24) | Seed `terisuke` and `cloudia` personas | Persona seeds are available; third-persona work must wait for SQLite persistence. |
 | [#25](https://github.com/terisuke/note_maker/issues/25) | Persona/format question templates | Server templates exist; frontend must not duplicate template questions when sending custom questions. |
+| [#14](https://github.com/terisuke/note_maker/issues/14) | Queryable product memory | Closed by PR #87 with SQLite-backed memory, custom persona update/delete, and brief versions. |
+| [#15](https://github.com/terisuke/note_maker/issues/15) | App-like launcher | Closed by PR #87 with managed startup, health checks, storage defaults, and explicit-only local LLM startup. |
 
 ## ADR 0002 Phase Map
 
@@ -61,7 +65,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 - Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
 - Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
-- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup. Phase C product completion requires persisted custom personas and editable human-readable artifacts, not only built-in persona selection and read-only cards; the current polish cut covers create/list and brief/style edits, while update/delete and broader artifact versioning remain follow-up scope.
+- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup. The current app baseline includes persisted custom personas, custom persona update/delete with reference protection, editable human-readable artifacts, and explicit brief versions.
 - Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails

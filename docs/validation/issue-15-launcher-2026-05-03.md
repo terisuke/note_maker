@@ -43,4 +43,4 @@ Result: launcher built the server binary, started the app on `http://127.0.0.1:8
 
 ## Closure status
 
-This substantially implements issue #15 with a pragmatic shell launcher. A full Tauri/Electron wrapper, app icon, signing, and installer packaging remain future packaging work, but the user-facing startup path, process lifecycle, health checks, storage defaults, and Make/mise entrypoints are in place.
+Issue #15 is closed by PR #87 for the pragmatic app-like launcher scope. A full Tauri/Electron wrapper, app icon, signing, and installer packaging remain possible future packaging work, but they should be tracked as narrower follow-up issues if needed. The current user-facing startup path, process lifecycle, health checks, storage defaults, and Make/mise entrypoints are in place.

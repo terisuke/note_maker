@@ -106,7 +106,7 @@ Acceptance criteria:
 - human-readable style-guide and brief artifacts can be edited through explicit product actions without losing raw Markdown/JSON audit data;
 - artifact edits create recoverable history or version records rather than silently replacing prior state.
 
-This subsumes Issue [#14](https://github.com/terisuke/note_maker/issues/14) (queryable database). Issue [#14](https://github.com/terisuke/note_maker/issues/14) is kept open as the umbrella tracker; the SQLite migration becomes its acceptance.
+This subsumes Issue [#14](https://github.com/terisuke/note_maker/issues/14) (queryable database). Issue [#14](https://github.com/terisuke/note_maker/issues/14) is closed for the current app baseline by PR #87; future product-memory work should be filed as narrower follow-up issues.
 
 ### Source acquisition direction
 
@@ -220,7 +220,7 @@ The full work is broken into four phases tracked by issues. Each phase is indepe
   - SQLite store with project/article schema, profile/session reuse UI, brief and guide rendered as cards.
   - Issues: [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28).
 - **Phase D — Quality & ops**
-  - Handler test coverage, Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold), Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright), Issue [#15](https://github.com/terisuke/note_maker/issues/15) (desktop packaging) follow-up.
+  - Handler test coverage, Issue [#11](https://github.com/terisuke/note_maker/issues/11) (style threshold), Issue [#13](https://github.com/terisuke/note_maker/issues/13) (Playwright), and Issue [#15](https://github.com/terisuke/note_maker/issues/15) (app-like launcher baseline).
   - Issue: [#29](https://github.com/terisuke/note_maker/issues/29).
 
 Original recommended order was A → C → B → D. Implementation intentionally pulled the minimum B work forward because source acquisition, format validation, persona seeds, and question templates were required before a realistic cross-media evaluation could be defined. With Phases A and B now implemented, the 2026-05-03 implementation cut lands C1, D1, and the #57 runner foundation in parallel. The next order is C2/C3, one bounded Evo X2 runner validation, then the full Evo X2 media-matrix evaluation under #40.
@@ -254,13 +254,15 @@ Current implementation status as of 2026-05-03:
 - The #74 pass required additional hardening that is now part of the architecture: frontmatter preamble/fence normalization, recoverable frontmatter repair, bounded repair/revision/final-verification calls, case-specific style profiles, final verifier format-guide grounding, best-attempt selection across retries, and explicit quality-gate aggregate output.
 - The #70-#73 prerequisite slice is now in place for #74: interview-template coverage exists, failed draft artifacts are preserved, format-only failures can be repaired once without relaxing validators, and scenario gates are split by output format. The first staged #74 Tailnet rerun used `cloudia_zenn_tutorial` and moved past the original failure class but failed strict style (`73.6 / 82.0`). The current cut fixes the reliability gap behind that score by generating case-specific style profile/guide artifacts, passing them into live runs, rejecting profile/guide/brief mismatches, making final verification block `scenario_passed`, enforcing structural signals, and exposing UI `quality_gate` details. The bounded reruns now pass both Cloudia technical proofs: `cloudia_zenn_tutorial` scored `88.1 / 82.0` with `5040 / 1800` runes, and `cloudia_qiita_how_to` scored `83.7 / 82.0` with `3318 / 1400` runes. Both used the Tailnet endpoint `http://evo-x2.tailb30e58.ts.net/v1` and passed lightweight verification. Validation is recorded in [Issue 74 staged Evo X2 rerun](../validation/issue-74-staged-evo-x2-rerun-2026-05-03.md).
 - The #45 llama.cpp swap orchestration cut now has a documented conservative fallback strategy, dry-run default Make targets, and a gated direct `/llama/v1` brief/draft scenario target. It does not change the primary runtime decision: Ollama remains primary until the live #45 criteria prove active-profile quality and operations safety.
+- PR #87 closes the current app-baseline scope for [#14](https://github.com/terisuke/note_maker/issues/14) and [#15](https://github.com/terisuke/note_maker/issues/15): custom personas can be created, updated, and deleted with history-reference protection; saved briefs have explicit versions; the UI exposes brief-version history; and `make launcher` / `make app` provide managed startup with Evo X2 health checks, port selection, storage defaults, and explicit-only local LLM startup. Operational handoff is recorded in [Note Maker app handoff](../handoffs/app-handoff-2026-05-03.md).
+- The remaining open runtime issues are intentionally narrow: [#36](https://github.com/terisuke/note_maker/issues/36) for workstation-local llama.cpp fallback quality and [#45](https://github.com/terisuke/note_maker/issues/45) for Evo X2 llama.cpp latency/quality before any promotion beyond fallback.
 
 Near-term execution order:
 
-1. Close [#74](https://github.com/terisuke/note_maker/issues/74) and [#40](https://github.com/terisuke/note_maker/issues/40) for the current note/Qiita/Zenn/Cor blog publishing-target scope after linking the final `5/5` aggregate artifacts. Homepage remains a separate short-format check.
-2. Treat [#13](https://github.com/terisuke/note_maker/issues/13) as covered by the browser E2E validation cut; do not move Phase C product gaps back into browser-coverage scope.
-3. Keep [#14](https://github.com/terisuke/note_maker/issues/14) open for broader queryable product memory and split custom persona update/delete or brief-version history if those become required beyond this cut.
-4. Keep fallback-quality and runtime packaging follow-up ([#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15)) outside the #40 closure gate. For #45, design/script acceptance can land before closure, but live direct-llama.cpp brief/draft validation remains required.
+1. Promote the app baseline from `develop` to `main` after the docs handoff PR passes.
+2. Keep [#36](https://github.com/terisuke/note_maker/issues/36) open until a workstation-local loopback llama.cpp endpoint records `score >= 82`, `keyword_overlap >= 70`, and `runes >= 2800`.
+3. Keep [#45](https://github.com/terisuke/note_maker/issues/45) open until direct Evo X2 `/llama/v1` validation meets latency and keyword-overlap gates without disrupting Ollama primary.
+4. Split optional signed-native packaging, brief-version diff/restore, or richer persona-source management into new narrow issues only when needed by actual use.
 
 ## Tracked issues
 
