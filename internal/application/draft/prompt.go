@@ -115,6 +115,41 @@ func BuildStyleRevisionPrompt(originalPrompt, draftMarkdown string, evaluation S
 	return prompt.String()
 }
 
+// BuildFormatRepairPrompt asks for one bounded rewrite when the draft uses the wrong platform syntax.
+func BuildFormatRepairPrompt(format outputformat.OutputFormat, rawOutput string, validationErr error) string {
+	var prompt strings.Builder
+	prompt.WriteString("以下の出力は記事本文として使えません。媒体形式だけを修正し、内容の意図は維持してください。\n")
+	prompt.WriteString("前置き、解説、内部メモ、コードフェンスでの囲みは出力しないでください。修正版の記事本文だけを返してください。\n\n")
+
+	prompt.WriteString("## Validator error\n")
+	if validationErr == nil {
+		prompt.WriteString("- unknown validation error\n\n")
+	} else {
+		prompt.WriteString("- " + validationErr.Error() + "\n\n")
+	}
+
+	prompt.WriteString("## Output format rules\n")
+	appendLine(&prompt, "OutputFormat", format.ID+" / "+format.DisplayName)
+	appendLine(&prompt, "媒体ルール", format.PromptFragment)
+	prompt.WriteString("\n")
+
+	if guideMarkdown := formatGuideMarkdown(format.ID); guideMarkdown != "" {
+		prompt.WriteString("## 媒体別Markdownガイド\n")
+		prompt.WriteString(guideMarkdown)
+		prompt.WriteString("\n\n")
+	}
+
+	prompt.WriteString("## 出力条件\n")
+	appendOutputConditions(&prompt, format.ID)
+	prompt.WriteString("修正対象以外の媒体記法を混ぜないでください。\n")
+	prompt.WriteString("必ず修正版の記事本文だけを出力してください。\n\n")
+
+	prompt.WriteString("## Raw model output\n")
+	prompt.WriteString(truncateRunes(rawOutput, 7000))
+	prompt.WriteString("\n")
+	return prompt.String()
+}
+
 // BuildSectionRegenerationPrompt asks for one replacement section only.
 func BuildSectionRegenerationPrompt(guide WritingStyleGuide, brief ArticleBrief, profile AuthorStyleProfile, persona personadomain.Persona, format outputformat.OutputFormat, draftMarkdown string, section MarkdownSection) string {
 	var prompt strings.Builder

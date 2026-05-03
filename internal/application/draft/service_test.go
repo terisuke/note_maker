@@ -2,6 +2,7 @@ package draft
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -225,6 +226,106 @@ func TestGenerateUsesPersonaAndOutputFormat(t *testing.T) {
 	}
 }
 
+func TestGenerateRunsOneFormatRepairRetry(t *testing.T) {
+	invalidZenn := "---\n" +
+		"title: \"Goで検証する\"\n" +
+		"emoji: \"🧪\"\n" +
+		"type: \"tech\"\n" +
+		"topics: [\"go\", \"test\"]\n" +
+		"published: false\n" +
+		"---\n\n" +
+		"## 実装\n\n" +
+		":::note info\nQiitaの補足です\n:::\n"
+	repairedZenn := strings.ReplaceAll(invalidZenn, ":::note info", ":::message")
+	generator := &sequenceGenerator{drafts: []string{invalidZenn, repairedZenn}}
+	profile, styleGuide := profileAndGuideFromDraft(t, repairedZenn)
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDCloudia)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDZennArticle)
+
+	result, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			PersonaID:      persona.ID,
+			OutputFormatID: format.ID,
+			Theme:          "Goで検証する",
+		},
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	})
+	if err != nil {
+		t.Fatalf("generate with format repair: %v", err)
+	}
+	if generator.calls != 2 {
+		t.Fatalf("calls = %d, want 2", generator.calls)
+	}
+	if result.Draft.Markdown() != strings.TrimSpace(repairedZenn) {
+		t.Fatalf("unexpected repaired draft:\n%s", result.Draft.Markdown())
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %#v, want 2 attempts", result.Attempts)
+	}
+	if result.Attempts[0].Kind != "initial" || result.Attempts[0].RawOutput != invalidZenn || !strings.Contains(result.Attempts[0].ValidationError, "Qiita :::note") {
+		t.Fatalf("initial attempt did not preserve validation failure: %#v", result.Attempts[0])
+	}
+	if result.Attempts[1].Kind != "format_repair" || result.Attempts[1].RawOutput != repairedZenn || result.Attempts[1].ValidationError != "" {
+		t.Fatalf("repair attempt not preserved correctly: %#v", result.Attempts[1])
+	}
+	for _, want := range []string{
+		invalidZenn,
+		"zenn article must use :::message, not Qiita :::note",
+		"Use this guide only for `zenn_article` output.",
+		"修正版の記事本文だけ",
+	} {
+		if !strings.Contains(generator.prompts[1], want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, generator.prompts[1])
+		}
+	}
+}
+
+func TestRecoverableFormatValidationErrorsAreBoundedToKnownCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		formatID string
+		err      error
+		want     bool
+	}{
+		{
+			name:     "preamble",
+			formatID: outputformat.IDNoteArticle,
+			err:      errors.New("draft appears to contain preamble before the article"),
+			want:     true,
+		},
+		{
+			name:     "zenn qiita note",
+			formatID: outputformat.IDZennArticle,
+			err:      errors.New("zenn article must use :::message, not Qiita :::note"),
+			want:     true,
+		},
+		{
+			name:     "qiita zenn notation",
+			formatID: outputformat.IDQiitaArticle,
+			err:      errors.New("qiita article must not contain Zenn-specific notation"),
+			want:     true,
+		},
+		{
+			name:     "missing title stays strict",
+			formatID: outputformat.IDNoteArticle,
+			err:      errors.New("note article must start with a level-1 Markdown title"),
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRecoverableFormatValidationError(tt.formatID, tt.err); got != tt.want {
+				t.Fatalf("recoverable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPromptIncludesFormatGuideForEveryRegisteredFormat(t *testing.T) {
 	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
 	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDTerisuke)
@@ -332,7 +433,8 @@ func TestGenerateUsesCorBlogOutputRules(t *testing.T) {
 }
 
 func TestGenerateRejectsUnusableMarkdown(t *testing.T) {
-	service := NewService(&fakeGenerator{draft: "承知しました。記事を書きます。"})
+	generator := &sequenceGenerator{drafts: []string{"承知しました。記事を書きます。", matchingDraft()}}
+	service := NewService(generator)
 	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
 
 	_, err := service.Generate(context.Background(), GenerateRequest{
@@ -342,6 +444,16 @@ func TestGenerateRejectsUnusableMarkdown(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected unusable draft error")
+	}
+	if generator.calls != 1 {
+		t.Fatalf("calls = %d, want no repair retry", generator.calls)
+	}
+	var unusable *UnusableDraftError
+	if !errors.As(err, &unusable) {
+		t.Fatalf("expected UnusableDraftError, got %T", err)
+	}
+	if len(unusable.Attempts) != 1 || unusable.Attempts[0].RawOutput != "承知しました。記事を書きます。" {
+		t.Fatalf("raw validation failure was not preserved: %#v", unusable.Attempts)
 	}
 }
 
