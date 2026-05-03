@@ -65,6 +65,59 @@ func TestDraftGenerationEnvPassesActiveGates(t *testing.T) {
 	}
 }
 
+func TestApplyRunMetricsCapturesAttemptCount(t *testing.T) {
+	row := resultRow{}
+	applyRunMetrics(&row, map[string]string{
+		"attempt":             "2",
+		"scenario_passed":     "true",
+		"score":               "88.1",
+		"min_style_score":     "82.0",
+		"runes":               "5040",
+		"min_draft_runes":     "1800",
+		"verification_passed": "true",
+	}, scenarioGates{MinStyleScore: 82, MinRunes: 1800})
+
+	if row.Attempt != 2 {
+		t.Fatalf("attempt = %d, want 2", row.Attempt)
+	}
+}
+
+func TestAttachQualityGatesReportsScenarioGateDetails(t *testing.T) {
+	rows := attachQualityGates([]resultRow{
+		{
+			Status:                "failed",
+			ScenarioPassed:        false,
+			FailureGroup:          "draft_length",
+			Error:                 "draft length 2554 below scenario minimum 2800",
+			Score:                 90,
+			MinStyleScore:         82,
+			Runes:                 2554,
+			MinRunes:              2800,
+			VerificationPerformed: true,
+			VerificationPassed:    true,
+			DraftPath:             "tmp/media_matrix/live/terisuke_note_essay/draft.md",
+			ActiveGates: scenarioGates{
+				StructuralGateLabels: []string{"note_long_form", "reader_takeaway"},
+				StructuralSignals:    []string{"# ", "## "},
+			},
+		},
+	})
+
+	gate := rows[0].QualityGate
+	if gate.Passed {
+		t.Fatalf("quality gate passed unexpectedly: %+v", gate)
+	}
+	if gate.FailureGroup != "draft_length" || gate.Outcome != "failed" {
+		t.Fatalf("quality gate failure classification = %+v", gate)
+	}
+	if !gate.StylePassed || gate.LengthPassed || !gate.VerificationPassed || !gate.StructuralGatePassed {
+		t.Fatalf("quality gate booleans = %+v", gate)
+	}
+	if gate.Reason == "" || !contains(gate.StructuralGateLabels, "reader_takeaway") {
+		t.Fatalf("quality gate detail missing: %+v", gate)
+	}
+}
+
 func TestApplyStructuralGatesFailsMissingSignals(t *testing.T) {
 	outputDir := t.TempDir()
 	draftPath := filepath.Join(outputDir, "draft.md")
@@ -124,6 +177,7 @@ func TestRunCaseClearsStaleArtifactsWithoutResume(t *testing.T) {
 func TestApplyFailureArtifactsRestoresRuntimeDiagnostics(t *testing.T) {
 	outputDir := t.TempDir()
 	failure := failureAttemptReport{
+		Attempt: 3,
 		RuntimeMetrics: attemptRuntimeMetrics{
 			ElapsedSeconds: 12.5,
 			FirstChunkMs:   250,
@@ -152,6 +206,9 @@ func TestApplyFailureArtifactsRestoresRuntimeDiagnostics(t *testing.T) {
 	if row.FailurePath == "" {
 		t.Fatalf("failure path was not restored: %+v", row)
 	}
+	if row.Attempt != 3 {
+		t.Fatalf("attempt was not restored from failure artifact: %+v", row)
+	}
 	if row.ElapsedSeconds != 12.5 || row.FirstChunkMS != 250 || row.Chunks != 4 {
 		t.Fatalf("runtime metrics were not restored: %+v", row)
 	}
@@ -160,6 +217,26 @@ func TestApplyFailureArtifactsRestoresRuntimeDiagnostics(t *testing.T) {
 	}
 	if len(row.RawOutputPaths) != 1 || !strings.HasSuffix(row.RawOutputPaths[0], "initial.txt") {
 		t.Fatalf("raw output paths were not restored: %+v", row.RawOutputPaths)
+	}
+}
+
+func TestFailureGroupPrefersStyleScoreOverFinalVerification(t *testing.T) {
+	row := resultRow{
+		VerificationPerformed: true,
+		VerificationPassed:    false,
+		Score:                 57.6,
+		MinStyleScore:         82,
+		Error:                 "style score 57.6 below scenario minimum 82.0",
+	}
+
+	if got := failureGroup(row); got != "style_score" {
+		t.Fatalf("failure group = %q, want style_score", got)
+	}
+
+	row.Score = 0
+	row.MinStyleScore = 0
+	if got := failureGroup(row); got != "style_score" {
+		t.Fatalf("failure group from concrete error = %q, want style_score", got)
 	}
 }
 

@@ -26,7 +26,7 @@ The four phases below match ADR 0002. Each is independently shippable.
 | C | Memory: SQLite + history UI | Persistence rewrite, extends [#14](https://github.com/terisuke/note_maker/issues/14) | [#26](https://github.com/terisuke/note_maker/issues/26), [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28) |
 | D | Quality & coverage | Tests + thresholds | [#29](https://github.com/terisuke/note_maker/issues/29) (rolls up [#11](https://github.com/terisuke/note_maker/issues/11), [#13](https://github.com/terisuke/note_maker/issues/13)) |
 
-Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. The 2026-05-03 implementation cut lands **C1 + D1 + the #57 runner foundation** in parallel. The practical order is now **C2/C3 → one bounded Evo X2 runner validation → full media-matrix Evo X2 evaluation under #40**.
+Original recommended order was **A → C → B → D**. The minimum Phase B work was pulled forward because realistic media-specific evaluation needed source fetchers, format validators, persona seeds, and server-side question templates. The 2026-05-03 implementation cut landed **C1 + D1 + the #57 runner foundation** in parallel, then completed #74's staged Evo X2 validation. The practical order is now **C2/C3 + browser E2E → fallback/runtime P2 → packaging**.
 
 Current status after the 2026-05-03 merges:
 
@@ -38,7 +38,7 @@ Current status after the 2026-05-03 merges:
 - [#25](https://github.com/terisuke/note_maker/issues/25) is implemented: the server composes persona/format question templates, the UI fetches templates, and `cmd/scenario/media_matrix` defines varied cases for note, Cor blog, Zenn, Qiita, and homepage.
 - [#38](https://github.com/terisuke/note_maker/issues/38) Tailnet OpenAI-compatible API is now the Evo X2 primary path. SSH tunnel access is diagnostic-only.
 - [#36](https://github.com/terisuke/note_maker/issues/36) remains open for local llama.cpp fallback quality; it does not block Phase A work.
-- [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization.
+- [#40](https://github.com/terisuke/note_maker/issues/40) tracks primary Tailnet Evo X2 quality and runtime-metric stabilization. The current note/Qiita/Zenn/Cor blog publishing-target scope passed on 2026-05-03 with `5/5` live rows against Evo X2 Tailnet primary.
 - A Tailnet full-workflow run reached the correct Evo X2 endpoint but took `1396.80s` and failed the quality gate (`score=82.0`, `2653` runes, `first_person=49`). This is the practical reason to start with streaming/cancellation rather than more prompt-only tuning.
 
 Near-term implementation cut:
@@ -51,7 +51,7 @@ Near-term implementation cut:
 | 4 | [#19](https://github.com/terisuke/note_maker/issues/19) | Section regeneration is useful only after draft output can stream and be cancelled. | Markdown is editable, preview syncs, and section regeneration replaces only one subtree. |
 | 5A | [#26](https://github.com/terisuke/note_maker/issues/26) | Forked answers, media-matrix briefs, draft versions, and evaluation results need durable storage before expensive Evo X2 runs become product memory. | Implemented in the current cut: SQLite stores sessions, answers, guides, articles, drafts, source snapshots, verification, and section-regeneration versions; web-app opt-in is `WORKFLOW_STORE_DRIVER=sqlite`. |
 | 5B | [#29](https://github.com/terisuke/note_maker/issues/29) | #17-#25 added real handler surface; coverage should catch regressions before C2/C3 add more UI and endpoints. | Implemented in the current cut: `go test ./internal/handlers -cover` reports 80.0% without real LLM/network. |
-| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Implemented in the current cut: planned aggregate mode is offline by default; live mode records endpoint/model/elapsed/score/runes/verification in JSON/Markdown. |
+| 6 | [#57](https://github.com/terisuke/note_maker/issues/57) feeding [#40](https://github.com/terisuke/note_maker/issues/40) | The final target is multi-media Evo X2 output evaluation, but repeated live runs should use the persisted context and media matrix. | Implemented: planned aggregate mode is offline by default; live mode records endpoint/model/elapsed/score/runes/verification in JSON/Markdown. The final #74 full matrix passed `5/5`. |
 
 ## Phase A — Conversation UX
 

@@ -4,6 +4,8 @@ Use this guide only for `qiita_article` output.
 
 ## Required frontmatter
 
+The final article must start with `---` as the first characters. Do not wrap the frontmatter or the full article in ```yaml, ```markdown, or any other code fence.
+
 ```yaml
 ---
 title: "記事タイトル"

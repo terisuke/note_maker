@@ -89,6 +89,42 @@ func timeoutFromEnv() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func streamIdleTimeoutFromEnv() time.Duration {
+	if raw := strings.TrimSpace(firstEnv("LLM_STREAM_IDLE_TIMEOUT_MILLISECONDS", "LLAMACPP_STREAM_IDLE_TIMEOUT_MILLISECONDS")); raw != "" {
+		ms, err := strconv.Atoi(raw)
+		if err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	raw := strings.TrimSpace(firstEnv("LLM_STREAM_IDLE_TIMEOUT_SECONDS", "LLAMACPP_STREAM_IDLE_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func streamFirstByteTimeoutFromEnv() time.Duration {
+	if raw := strings.TrimSpace(firstEnv("LLM_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS", "LLAMACPP_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS")); raw != "" {
+		ms, err := strconv.Atoi(raw)
+		if err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	raw := strings.TrimSpace(firstEnv("LLM_STREAM_FIRST_BYTE_TIMEOUT_SECONDS", "LLAMACPP_STREAM_FIRST_BYTE_TIMEOUT_SECONDS"))
+	if raw == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func modelFromEnv(purpose string) string {
 	purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	if purpose != "" {
@@ -333,15 +369,29 @@ func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func
 	if err != nil {
 		return "", fmt.Errorf("encode llama.cpp request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(encoded))
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(encoded))
 	if err != nil {
 		return "", fmt.Errorf("create llama.cpp stream request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "text/event-stream")
 
+	firstByteTimeout := streamFirstByteTimeoutFromEnv()
+	var firstByteTimer *time.Timer
+	if firstByteTimeout > 0 {
+		firstByteTimer = time.AfterFunc(firstByteTimeout, cancelStream)
+		defer firstByteTimer.Stop()
+	}
 	response, err := c.httpClient.Do(request)
+	if firstByteTimer != nil {
+		firstByteTimer.Stop()
+	}
 	if err != nil {
+		if streamCtx.Err() != nil && ctx.Err() == nil {
+			return "", fmt.Errorf("call llama.cpp stream first byte timeout after %s: %w", firstByteTimeout, err)
+		}
 		return "", fmt.Errorf("call llama.cpp stream: %w", err)
 	}
 	defer response.Body.Close()
@@ -350,48 +400,116 @@ func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func
 	}
 
 	var builder strings.Builder
-	scanner := bufio.NewScanner(response.Body)
+	idleTimeout := streamIdleTimeoutFromEnv()
+	events := make(chan streamEvent, 32)
+	go readStreamEvents(streamCtx, response.Body, events)
+	var idleTimer <-chan time.Time
+	var timer *time.Timer
+	if idleTimeout > 0 {
+		timer = time.NewTimer(idleTimeout)
+		defer timer.Stop()
+		idleTimer = timer.C
+	}
+	resetIdleTimer := func() {
+		if timer == nil {
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(idleTimeout)
+	}
+	for {
+		select {
+		case event := <-events:
+			if event.err != nil {
+				return builder.String(), event.err
+			}
+			if event.done {
+				content := strings.TrimSpace(builder.String())
+				if content == "" {
+					return "", fmt.Errorf("llama.cpp stream response was empty")
+				}
+				return content, nil
+			}
+			if event.content == "" {
+				continue
+			}
+			resetIdleTimer()
+			builder.WriteString(event.content)
+			if onChunk != nil {
+				if err := onChunk(event.content); err != nil {
+					return builder.String(), err
+				}
+			}
+		case <-idleTimer:
+			cancelStream()
+			_ = response.Body.Close()
+			return builder.String(), fmt.Errorf("read llama.cpp stream idle timeout after %s", idleTimeout)
+		case <-ctx.Done():
+			cancelStream()
+			_ = response.Body.Close()
+			return builder.String(), fmt.Errorf("read llama.cpp stream context done: %w", ctx.Err())
+		}
+	}
+}
+
+type streamEvent struct {
+	content string
+	done    bool
+	err     error
+}
+
+func readStreamEvents(ctx context.Context, body httpBody, events chan<- streamEvent) {
+	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
-		if !strings.HasPrefix(line, "data:") {
+		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if payload == "[DONE]" {
-			break
+			sendStreamEvent(ctx, events, streamEvent{done: true})
+			return
 		}
 		var chunk chatCompletionStreamResponse
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			return builder.String(), fmt.Errorf("decode llama.cpp stream chunk: %w", err)
+			sendStreamEvent(ctx, events, streamEvent{err: fmt.Errorf("decode llama.cpp stream chunk: %w", err)})
+			return
 		}
 		for _, choice := range chunk.Choices {
 			content := choice.Delta.Content
 			if content == "" {
 				content = choice.Message.Content
 			}
-			if content == "" {
-				continue
-			}
-			builder.WriteString(content)
-			if onChunk != nil {
-				if err := onChunk(content); err != nil {
-					return builder.String(), err
-				}
+			if content != "" {
+				sendStreamEvent(ctx, events, streamEvent{content: content})
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return builder.String(), fmt.Errorf("read llama.cpp stream: %w", err)
+		if ctx.Err() != nil {
+			return
+		}
+		sendStreamEvent(ctx, events, streamEvent{err: fmt.Errorf("read llama.cpp stream: %w", err)})
+		return
 	}
-	content := strings.TrimSpace(builder.String())
-	if content == "" {
-		return "", fmt.Errorf("llama.cpp stream response was empty")
+	sendStreamEvent(ctx, events, streamEvent{done: true})
+}
+
+type httpBody interface {
+	Read([]byte) (int, error)
+}
+
+func sendStreamEvent(ctx context.Context, events chan<- streamEvent, event streamEvent) {
+	select {
+	case events <- event:
+	case <-ctx.Done():
 	}
-	return content, nil
 }
 
 // ListModels returns model IDs exposed by llama-server.

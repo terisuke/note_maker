@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 )
 
 // TextVerificationModel generates a final consistency review from a compact prompt.
@@ -63,11 +65,14 @@ func BuildFinalVerificationPrompt(req VerificationRequest) string {
 検証観点:
 1. 記事ブリーフの要件を満たしているか
 2. 文体ガイドと一人称が大きく外れていないか
-3. 出力先のMarkdown/記法ルールに違反していないか
+3. 下記の出力先フォーマットルールに違反していないか。Zenn/Qiita/会社ブログの記法を混同せず、選択された出力先で許可された記法は問題扱いしない
 4. 事実として与えられていない内容を断定していないか
 5. 論理の飛躍、矛盾、読者に誤解される表現がないか
 
 出力先:
+%s / %s
+
+出力先フォーマットルール:
 %s
 
 記事ブリーフ:
@@ -89,7 +94,9 @@ func BuildFinalVerificationPrompt(req VerificationRequest) string {
 下書き:
 %s
 `,
+		req.OutputFormat.ID,
 		req.OutputFormat.DisplayName,
+		finalVerificationFormatRules(req.OutputFormat),
 		req.Brief.Theme,
 		req.Brief.Reader,
 		req.Brief.ExpectedReaderAction,
@@ -102,6 +109,19 @@ func BuildFinalVerificationPrompt(req VerificationRequest) string {
 		strings.Join(req.Evaluation.Failures, " / "),
 		req.DraftMarkdown,
 	))
+}
+
+func finalVerificationFormatRules(format outputformat.OutputFormat) string {
+	if guide := formatGuideMarkdown(format.ID); guide != "" {
+		return guide
+	}
+	if fragment := strings.TrimSpace(format.PromptFragment); fragment != "" {
+		return fragment
+	}
+	if strings.TrimSpace(format.ID) != "" || strings.TrimSpace(format.DisplayName) != "" {
+		return strings.TrimSpace(fmt.Sprintf("%s / %s", format.ID, format.DisplayName))
+	}
+	return "出力先固有ルールは未指定です。本文中の一般Markdown違反だけを確認してください。"
 }
 
 // ParseFinalVerificationReport normalizes the lightweight model's Markdown report.

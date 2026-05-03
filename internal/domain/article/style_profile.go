@@ -14,14 +14,35 @@ var sentenceSplitPattern = regexp.MustCompile(`[。！？!?]\s*`)
 var defaultStyleKeywords = []string{
 	"僕",
 	"私",
+	"クラウディア",
+	"うち",
+	"ばい",
+	"とよ",
+	"やけん",
 	"起業",
 	"音楽",
 	"エンジニア",
 	"AI",
+	"Go",
+	"CLI",
+	"Markdown",
+	"Zenn",
+	"Qiita",
+	"frontmatter",
+	"topics",
 	"アウトプット",
+	"コード",
+	"実装",
+	"手順",
+	"検証",
+	"再現",
+	"初心者",
+	"媒体",
+	"プロンプト",
 	"LT",
 	"挑戦",
 	"救い",
+	"つまずき",
 	"違和感",
 	"言語化",
 	"自分",
@@ -102,7 +123,7 @@ func CompareStyle(reference, candidate StyleProfile) StyleComparison {
 	metrics := map[string]int{
 		"paragraph_length":  int(math.Round(100 * ratioScore(reference.AverageParagraphRunes, candidate.AverageParagraphRunes))),
 		"sentence_length":   int(math.Round(100 * ratioScore(reference.AverageSentenceRunes, candidate.AverageSentenceRunes))),
-		"heading_structure": markdownHeadingScore(candidate.HeadingCount),
+		"heading_structure": markdownHeadingScore(reference.HeadingCount, candidate.HeadingCount),
 		"quote_density":     int(math.Round(100 * densityScore(reference.QuoteCount, reference.CharCount, candidate.QuoteCount, candidate.CharCount))),
 		"first_person":      int(math.Round(100 * densityScore(reference.FirstPersonCount, reference.CharCount, candidate.FirstPersonCount, candidate.CharCount))),
 		"keyword_overlap":   int(math.Round(100 * keywordOverlap(reference.KeywordCounts, candidate.KeywordCounts))),
@@ -224,6 +245,15 @@ func densityScore(referenceCount, referenceChars, candidateCount, candidateChars
 	}
 	referenceDensity := float64(referenceCount) / float64(referenceChars)
 	candidateDensity := float64(candidateCount) / float64(candidateChars)
+	if referenceCount == 0 {
+		if candidateDensity <= 0.015 {
+			return 1
+		}
+		return math.Max(0, 1-candidateDensity/0.05)
+	}
+	if candidateDensity > referenceDensity {
+		return math.Max(0, 1-(candidateDensity/referenceDensity-1)/4.5)
+	}
 	return ratioScore(referenceDensity, candidateDensity)
 }
 
@@ -248,13 +278,20 @@ func keywordOverlap(reference, candidate map[string]int) float64 {
 	return float64(matched) / float64(total)
 }
 
-func markdownHeadingScore(headings int) int {
+func markdownHeadingScore(referenceHeadings, candidateHeadings int) int {
+	if referenceHeadings >= 3 && candidateHeadings > 0 {
+		score := int(math.Round(100 * ratioScore(float64(referenceHeadings), float64(candidateHeadings))))
+		if referenceHeadings >= 8 && candidateHeadings >= 3 && candidateHeadings <= referenceHeadings*2 && score < 75 {
+			return 75
+		}
+		return score
+	}
 	switch {
-	case headings >= 3 && headings <= 6:
+	case candidateHeadings >= 3 && candidateHeadings <= 10:
 		return 100
-	case headings == 2 || headings == 7:
+	case candidateHeadings == 2 || candidateHeadings == 11:
 		return 75
-	case headings == 1 || headings == 8:
+	case candidateHeadings == 1 || candidateHeadings == 12:
 		return 50
 	default:
 		return 0

@@ -103,6 +103,30 @@ func TestScenarioStyleAssetsMatchBriefProfile(t *testing.T) {
 	}
 }
 
+func TestQiitaCaseRequiresReferenceSection(t *testing.T) {
+	var qiita matrixCase
+	for _, item := range plannedCases() {
+		if item.ID == "cloudia_qiita_how_to" {
+			qiita = item
+			break
+		}
+	}
+	if qiita.ID == "" {
+		t.Fatal("cloudia_qiita_how_to was not found")
+	}
+
+	gates := activeGatesForCase(qiita)
+	if !contains(gates.StructuralGateLabels, "references") {
+		t.Fatalf("Qiita gates missing references label: %v", gates.StructuralGateLabels)
+	}
+	if !contains(gates.StructuralSignals, "## 参考リンク") {
+		t.Fatalf("Qiita gates missing reference section signal: %v", gates.StructuralSignals)
+	}
+	if !strings.Contains(qiita.MustInclude, "Qiita Markdownガイド") || !strings.Contains(qiita.TargetLengthStructure, "## 参考リンク") {
+		t.Fatalf("Qiita brief does not force reference section: %+v", qiita)
+	}
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {

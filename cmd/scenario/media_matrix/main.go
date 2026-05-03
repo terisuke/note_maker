@@ -568,8 +568,9 @@ func activeGatesForCase(item matrixCase) scenarioGates {
 				"diff_code",
 				"repro_steps",
 				"result",
+				"references",
 			},
-			StructuralSignals: []string{"---", "title:", ":::note", "```diff", "## "},
+			StructuralSignals: []string{"---", "title:", ":::note", "```diff", "## ", "## 参考リンク"},
 		}
 	case "cor_homepage_section":
 		return scenarioGates{
@@ -765,13 +766,13 @@ func plannedCases() []matrixCase {
 			OpeningEpisode:        "Zenn用の:::messageをQiita原稿に混ぜてしまい、レビューで修正が必要になった場面",
 			Reader:                "Qiitaに実装メモを投稿するエンジニア",
 			ExpectedReaderAction:  "Qiita形式のfrontmatter、diff_language、:::noteを使って再現手順を書く",
-			MustInclude:           "環境、手順、diff_go例、:::note warn、確認結果、参考リンク",
+			MustInclude:           "環境、手順、diff_go例、:::note warn、確認結果、最後の `## 参考リンク` セクション。参考リンクにはQiita MarkdownガイドとZenn Markdownガイドを箇条書きで入れる",
 			PersonalContext:       "クラウディアとして、試してすぐ動く実用手順に寄せる",
 			Exclusions:            "Zennの:::details、note風の長い内省、未検証のベストプラクティス断言",
-			TargetLengthStructure: "1400-2000字。環境、手順、コード差分、結果、補足",
+			TargetLengthStructure: "1400-2000字。環境、手順、コード差分、結果、補足、最後に `## 参考リンク`",
 			ToneStance:            "実用重視の明るいハウツー。手順を短く区切る",
 			SourceSelectors:       []string{"qiita:Cloudia_Cor_Inc"},
-			PromptMustContain:     []string{":::note info", "diff_ruby", "Qiita"},
+			PromptMustContain:     []string{":::note info", "diff_ruby", "Qiita", "## 参考リンク"},
 		},
 		{
 			ID:                    "cor_homepage_section",

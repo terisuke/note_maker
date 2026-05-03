@@ -30,8 +30,8 @@ Open and active:
 - Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work.
 - History UI and readable artifacts: [#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28).
 - Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13).
-- Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40).
-- Runtime evaluation sub-issue still blocking #40: [#74](https://github.com/terisuke/note_maker/issues/74), now narrowed to Cloudia/Zenn style calibration plus staged live reruns.
+- Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40), now satisfied for the current note/Qiita/Zenn/Cor blog publishing-target acceptance scope by the 2026-05-03 full Tailnet Evo X2 matrix.
+- Runtime evaluation sub-issue [#74](https://github.com/terisuke/note_maker/issues/74), satisfied by the staged reruns and the final `5/5` full matrix pass.
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
 - Runtime defect fixed by this cut: [#63](https://github.com/terisuke/note_maker/issues/63) makes the plain web-app default match the intended Evo X2 Tailnet primary path and records the 2026-05-03 draft-generation 500 root cause.
 - Documentation and DDD audit: [#64](https://github.com/terisuke/note_maker/issues/64), with details in [Runtime and DDD alignment audit](../validation/runtime-ui-ddd-audit-2026-05-03.md).
@@ -83,14 +83,24 @@ The current cut fixed the evaluation reliability gap before trusting that score:
 - Structural signals are enforced, not only reported.
 - The web response includes `quality_gate` details so failed scores keep the draft visible.
 
-The bounded Cloudia technical proofs now pass:
+The bounded Cloudia technical proofs then passed:
 
 | Case | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification |
 |---|---:|---:|---:|---:|---:|---|
 | `cloudia_zenn_tutorial` | `741.93` | `86456ms` | `2205` | `88.1 / 82.0` | `5040 / 1800` | passed |
 | `cloudia_qiita_how_to` | `598.62` | `111645ms` | `1336` | `83.7 / 82.0` | `3318 / 1400` | passed |
 
-The remaining #74 work is the full publishing-target matrix.
+The full publishing-target matrix now also passes:
+
+| Case | Attempt | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `terisuke_note_essay` | 1 | `107.86` | `67818ms` | `1610` | `90.7 / 82.0` | `2849 / 2800` | passed |
+| `cor_blog_technical_report` | 1 | `152.34` | `67984ms` | `1696` | `81.4 / 80.0` | `3329 / 2200` | passed |
+| `cor_blog_vision_sharing` | 1 | `113.98` | `68986ms` | `1657` | `89.5 / 80.0` | `3156 / 1600` | passed |
+| `cloudia_zenn_tutorial` | 1 | `121.14` | `65568ms` | `2686` | `86.4 / 82.0` | `5641 / 1800` | passed |
+| `cloudia_qiita_how_to` | 2 | `114.75` | `68857ms` | `1898` | `82.2 / 82.0` | `3737 / 1400` | passed |
+
+Aggregate: `5/5` passed, `0` failed, average `122.01s`, average style score `86.0`, average `3742` runes. Artifacts are `tmp/media_matrix/live/aggregate.json` and `tmp/media_matrix/live/aggregate.md`.
 
 ## Parallel implementation plan
 
@@ -98,7 +108,7 @@ Use subagents with disjoint write scopes when implementation resumes:
 
 | Lane | Issue | Subagent role | Write scope | Done when |
 |---|---|---|---|---|
-| A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
+| A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | Complete for current scope: note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
 | D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | `static/*`, read APIs for projects/sessions/drafts once exposed | persona/session picker and human-readable brief/style cards use persisted state |
 | E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | persona/format switching, edit/fork, streaming, regenerate-section, and legacy localStorage migration are covered |
 
@@ -106,10 +116,6 @@ Lane A is the next expensive Evo X2 spend. Lane D/E can continue in parallel whe
 
 ## Recommended order
 
-1. Run the full note/Qiita/Zenn/company-blog matrix under #74 and update #40 with the aggregate JSON/Markdown plus artifact paths.
-2. Close #40 only when every publishing target records endpoint, phase models, elapsed time, runes, style score, structural signals, final verification, `quality_gate`, and artifacts with no runtime, format-validation, final-verification, structural-signal, or strict style-gate failures. Homepage can remain a separate format check and is not part of the #40 closure gate.
-3. Continue #27/#28 and #13 in parallel as product-readiness work. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
-
-## Why not run the full Evo X2 matrix now?
-
-The source, prompt, artifact, repair, and gate layers are ready, but full Evo X2 draft generation is expensive and can take 20+ minutes per run. The Zenn and Qiita bounded proofs now pass, so the next useful spend is the full #40 publishing-target run.
+1. Close #74 and #40 for the current publishing-target acceptance scope after the PR lands and the issue comments link the final aggregate artifacts.
+2. Continue #27/#28 and #13 in parallel as product-readiness work: history picker, readable brief/style cards, and browser E2E coverage are now the highest-value next tasks.
+3. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable. Homepage remains a separate short-format check, not part of the #40 closure gate.

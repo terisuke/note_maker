@@ -21,20 +21,20 @@ Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/00
 | [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
 | [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
 | [#36](https://github.com/terisuke/note_maker/issues/36) | local llama.cpp fallback quality | ADR 0001/0002 runtime validation | Non-blocking for Phase A. Do not promote fallback as production-quality until it passes strict draft thresholds. |
-| [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics epic | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. It owns live runs from `cmd/scenario/media_matrix`, but the 2026-05-03 result showed that template usability, failure artifacts, repair, and format-specific gates must land before claiming the full media-matrix result. |
+| [#40](https://github.com/terisuke/note_maker/issues/40) | Tailnet Evo X2 primary quality and runtime metrics epic | ADR 0001/0002 runtime validation | Primary runtime must record endpoint/model/elapsed/score/runes and distinguish generation variance from transport failures. The current note/Qiita/Zenn/Cor blog publishing-target scope passed on 2026-05-03 with a `5/5` full Tailnet Evo X2 matrix run. |
 | [#57](https://github.com/terisuke/note_maker/issues/57) | Live media-matrix runner and aggregate evaluator | ADR 0001/0002 runtime validation | Child of #40. Offline mode remains default; live mode must require explicit env vars and must refuse accidental workstation-local fallback for primary Evo X2 validation. |
 | [#70](https://github.com/terisuke/note_maker/issues/70) | Interview-template scenario before Evo X2 media runs | ADR 0002 §Testing Strategy | The question-template change must be tested before draft-only live runs. Scenario output must prove small plain-Japanese questions and medium-specific `ArticleBrief` artifacts. |
 | [#71](https://github.com/terisuke/note_maker/issues/71) | Failed draft artifacts and runtime metrics | ADR 0001/0002 runtime validation | Early validation failures must preserve raw output, elapsed time, endpoint, model, and failure JSON. Do not discard unusable drafts before diagnosis. |
 | [#72](https://github.com/terisuke/note_maker/issues/72) | Bounded format-repair retry | ADR 0002 §Format-specific output | Validators remain strict. One repair retry may be attempted for recoverable preamble or cross-format notation failures, with original and repaired attempts preserved. |
 | [#73](https://github.com/terisuke/note_maker/issues/73) | Output-format-specific scenario gates | ADR 0002 §Testing Strategy | Long-form note/Zenn/Qiita/Cor blog gates stay strict, while homepage HTML uses short-form structure and CTA gates instead of long-article length assumptions. |
-| [#74](https://github.com/terisuke/note_maker/issues/74) | Staged Tailnet Evo X2 validation rerun | ADR 0001/0002 runtime validation | Re-run order is template scenario → offline media matrix → one previously failing live case → full note/Qiita/Zenn/Cor blog live comparison. |
+| [#74](https://github.com/terisuke/note_maker/issues/74) | Staged Tailnet Evo X2 validation rerun | ADR 0001/0002 runtime validation | Re-run order is template scenario → offline media matrix → one previously failing live case → full note/Qiita/Zenn/Cor blog live comparison. The final full comparison passed `5/5`; closure requires linking `tmp/media_matrix/live/aggregate.{json,md}` and the validation doc. |
 
 Current cut status:
 
 - [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus `WORKFLOW_STORE_DRIVER=sqlite` web-app opt-in. [#14](https://github.com/terisuke/note_maker/issues/14) remains the broader queryable-history umbrella until the UI/API surface is exposed.
 - [#29](https://github.com/terisuke/note_maker/issues/29) reaches the handler coverage gate: `go test ./internal/handlers -cover` reports 80.0%.
 - [#57](https://github.com/terisuke/note_maker/issues/57) is implemented as `cmd/scenario/live_media_matrix`; it defaults to offline planned aggregate output and requires `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` for Evo X2 calls.
-- [#40](https://github.com/terisuke/note_maker/issues/40) is now an epic with sub-issues [#70](https://github.com/terisuke/note_maker/issues/70)-[#74](https://github.com/terisuke/note_maker/issues/74). Do not close #40 until the staged validation and consecutive-run acceptance criteria are met.
+- [#40](https://github.com/terisuke/note_maker/issues/40) is now an epic with sub-issues [#70](https://github.com/terisuke/note_maker/issues/70)-[#74](https://github.com/terisuke/note_maker/issues/74). The staged validation criteria are met for the current publishing-target scope: the final full matrix passed `5/5` with endpoint, phase models, elapsed time, score, runes, final verification, structural gates, quality gates, and artifacts recorded.
 
 Closed historical issues:
 
@@ -164,8 +164,9 @@ Current live-media evaluation flow:
 
 1. `go run ./cmd/scenario/media_matrix` creates the deterministic cross-media brief/prompt matrix.
 2. `RUN_SOURCE_FETCH_SCENARIO=1 ... go run ./cmd/scenario/source_fetch` validates current live sources.
-3. #57's runner is available; run one bounded live case first and attach the aggregate output to #40.
-4. #40 owns the Evo X2 Tailnet live draft results that fill in elapsed seconds, score, verification, and rune counts for each media-matrix case.
+3. #57's runner emits planned aggregate output by default and live output only with explicit `RUN_LIVE_MEDIA_MATRIX=1`.
+4. #74's staged sequence is complete for note/Qiita/Zenn/Cor blog: bounded Zenn and Qiita proofs passed, then the full publishing-target matrix passed `5/5`.
+5. Future live-media runs must preserve primary/fallback endpoint, per-phase models, elapsed seconds, score/runes/minimums, final verification, structural gate result, `quality_gate`, and draft/evaluation/verification/failure/raw artifact paths.
 
 ## Completion Criteria
 
