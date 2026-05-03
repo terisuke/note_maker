@@ -40,10 +40,16 @@ Implemented in the #13 follow-up contract cut:
 - This is useful pre-Playwright coverage, but it is not equivalent to browser E2E. It does not exercise real DOM events, fetch stubbing, localStorage reload behavior, SSE/cancel, or the section-regeneration workflow in a browser.
 - Validation — [Issue #13 Browser Contract Coverage](../validation/issue-13-browser-contract-coverage-2026-05-03.md).
 
+Implemented in the `codex/issue13-browser-e2e` cut:
+
+- Python `pytest` plus Playwright starts the real Go server on a free localhost port and stubs application APIs through browser route handlers.
+- Browser tests now cover model selector persistence, legacy localStorage migration, persona/format switching, custom question CRUD/reset, interview start payloads, answer SSE submission/cancel recovery, saved history opening/readable cards, edit/fork, draft streaming/cancel recovery, and section regeneration reject/accept.
+- Validation — [Issue #13 Browser E2E Validation](../validation/issue-13-browser-e2e-2026-05-03.md).
+
 Open and active:
 
 - Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work.
-- Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13), still open after the contract-test cut.
+- Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13), closure-ready after the browser E2E cut lands.
 - Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40), now satisfied for the current note/Qiita/Zenn/Cor blog publishing-target acceptance scope by the 2026-05-03 full Tailnet Evo X2 matrix.
 - Runtime evaluation sub-issue [#74](https://github.com/terisuke/note_maker/issues/74), satisfied by the staged reruns and the final `5/5` full matrix pass.
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
@@ -56,7 +62,7 @@ Remaining Phase C gaps after the current #27/#28 cut:
 
 - Add-persona authoring UI is not implemented; the current UI consumes seeded personas and saved artifacts.
 - Broader edit persistence called out in the issue text is not implemented beyond the existing fork-on-edit/session/brief save paths.
-- Project/article/draft artifact browsing from SQLite's normalized #26 schema now has server routes, response-shape contract coverage, frontend selectors, and readable history cards. The remaining gap is real browser E2E over those cards and broader edit/add-persona semantics, so #13/#14/#27/#28 should stay open unless the owner explicitly accepts a narrower first-cut closure.
+- Project/article/draft artifact browsing from SQLite's normalized #26 schema now has server routes, response-shape contract coverage, frontend selectors, readable history cards, and browser E2E over those cards. Broader edit/add-persona semantics remain outside #13 and keep #14/#27/#28 open unless the owner explicitly accepts a narrower first-cut closure.
 
 ## Current Review Findings
 
@@ -72,13 +78,13 @@ node --check static/js/script.js
 git diff --check
 ```
 
-No blocking code-risk finding remains in the targeted suite after the parallel fixes. The remaining closure risk is coverage scope: #13 still lacks real browser E2E, and #27/#28 still contain product scope that is broader than the first cut.
+No blocking code-risk finding remains in the targeted suite after the parallel fixes. The #13 browser E2E closure risk is resolved by the `tests/e2e` suite; #27/#28 still contain product scope that is broader than the first cut.
 
 ## Issue Close/Open Proposal
 
 | Issue | Proposal | Rationale |
 |---|---|---|
-| [#13](https://github.com/terisuke/note_maker/issues/13) | Keep open | Static and route contract coverage was added, but the issue asks for browser E2E. Real browser coverage still needs model config, question customisation, persona/format switching, history open, readable cards, streaming/cancel, edit/fork, regenerate-section, and localStorage migration. |
+| [#13](https://github.com/terisuke/note_maker/issues/13) | Close with the E2E PR | The new Playwright browser suite covers model config, question customisation and migration, persona/format switching, history open, readable cards, streaming/cancel, edit/fork, regenerate-section, and legacy localStorage migration. `python3 -m pytest tests/e2e -q`, `go test ./...`, and `git diff --check` passed. |
 | [#14](https://github.com/terisuke/note_maker/issues/14) | Keep open | #26 gives the SQLite schema and restart-capable storage foundation, but the product still lacks full queryable project/article/draft browsing and versioned edit/history surfaces. |
 | [#27](https://github.com/terisuke/note_maker/issues/27) | Keep open, or close only if the issue owner accepts the first-cut scope | Saved style-guide/session reuse is implemented, but the original issue still includes add-persona authoring UI, project/article navigation, restart semantics, and broader edit persistence. |
 | [#28](https://github.com/terisuke/note_maker/issues/28) | Keep open, or close only if the issue owner accepts the first-cut scope | Readable style-guide and brief cards landed, but editable card persistence/versioning and richer project/article/draft artifacts are still outstanding. |
@@ -155,14 +161,14 @@ Use subagents with disjoint write scopes when implementation resumes:
 |---|---|---|---|---|
 | A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | Complete for current scope: note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
 | D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | done for this cut | style-guide/session history picker and readable brief/style cards use persisted workflow state |
-| E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | contract tests are done; close only after persona/format switching, history open, readable cards, edit/fork, streaming/cancel, regenerate-section, and legacy localStorage migration are covered in a browser |
-| F | Phase C follow-up | Product worker | future history UI/API files | add-persona UI, broader edit persistence, and project/article/draft browsing are split from the #27/#28 first cut |
+| E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | done for this cut | browser tests cover persona/format switching, history open, readable cards, edit/fork, streaming/cancel, regenerate-section, and legacy localStorage migration |
+| F | Phase C follow-up | Product worker | future history UI/API files | add-persona UI, broader edit persistence, and project/article/draft browsing polish are split from the #27/#28 first cut |
 
 Lane A is the next expensive Evo X2 spend. Lane D/E can continue in parallel when they do not need the same frontend files.
 
 ## Recommended order
 
-1. Wire #13 Browser E2E around the new history picker and cards while preserving the existing edit/fork, streaming/cancel, and regenerate-section coverage goals.
-2. Split the remaining Phase C product work into explicit follow-up issues before broadening implementation: add-persona authoring UI, broader edit persistence semantics, project/article/draft artifact browsing polish from the #26 SQLite schema, and real browser E2E over these history paths.
+1. Merge the #13 browser E2E cut and close #13 with the validation document.
+2. Split the remaining Phase C product work into explicit follow-up issues before broadening implementation: add-persona authoring UI, broader edit persistence semantics, and project/article/draft artifact browsing polish from the #26 SQLite schema.
 3. Close #74 and #40 for the current publishing-target acceptance scope after the PR lands and the issue comments link the final aggregate artifacts.
 4. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable. Homepage remains a separate short-format check, not part of the #40 closure gate.

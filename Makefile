@@ -40,7 +40,7 @@ LLAMACPP_HF_REPO ?= ggml-org/gemma-4-31B-it-GGUF
 LLAMACPP_HF_FILE ?= gemma-4-31B-it-Q4_K_M.gguf
 LLAMA_SERVER ?= llama-server
 
-.PHONY: app dev evo-x2 remote evo-x2-preflight evo-x2-models evo-x2-ssh-models scenario-evo-x2 scenario-media-matrix-live server llama check
+.PHONY: app dev evo-x2 remote evo-x2-preflight evo-x2-models evo-x2-ssh-models scenario-evo-x2 scenario-media-matrix-live server llama check e2e
 
 app: dev
 
@@ -82,3 +82,6 @@ llama:
 
 check:
 	go test ./...
+
+e2e:
+	python3 -m pytest tests/e2e

@@ -39,6 +39,11 @@ logs/
 vendor/
 node_modules/
 
+# Python/E2E
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # その他
 *.bak
 *.tmp

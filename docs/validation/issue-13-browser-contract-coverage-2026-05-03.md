@@ -1,7 +1,7 @@
 # Issue #13 Browser Contract Coverage
 
 Date: 2026-05-03
-Branch: `codex/phase-c-history-e2e`
+Branch: `codex/phase-c-history-e2e`; reviewed again from `codex/issue13-browser-e2e`
 
 ## Scope
 
@@ -51,9 +51,37 @@ git diff --check
 
 This browser-contract document is still a validation checkpoint, not a close signal for #13. The next cut should add browser E2E over stubbed API responses once the project has a Playwright or equivalent harness.
 
+## Browser E2E Follow-up
+
+Review date: 2026-05-03 on `codex/issue13-browser-e2e`.
+
+The follow-up cut adds real browser E2E coverage using Python `pytest` plus Playwright. It starts the real Go server on a free localhost port and uses Playwright route handlers to stub `/api/*` and the external `marked` CDN script. This keeps the tests deterministic and avoids Evo X2/local LLM calls while still exercising the browser DOM, production HTML, and production JavaScript.
+
+```sh
+python3 -m pytest tests/e2e -q
+```
+
+Result from the final local review:
+
+```text
+........                                                                 [100%]
+8 passed in 5.80s
+```
+
+Repository validation also passed:
+
+```sh
+go test ./...
+git diff --check
+```
+
+See [Issue #13 Browser E2E Validation](./issue-13-browser-e2e-2026-05-03.md) for the scenario list.
+
+Issue #13 can close with the browser E2E cut. Remaining work is Phase C product scope rather than browser coverage scope.
+
 ## Issue Policy
 
-- #13: keep open. Contract coverage is useful, but the issue asks for browser E2E.
+- #13: close with the browser E2E cut.
 - #14: keep open. SQLite exists, but queryable product memory is not fully exposed.
 - #27: keep open unless the owner explicitly splits and closes the first saved-history picker cut.
 - #28: keep open unless the owner explicitly splits and closes the first readable-card cut.
