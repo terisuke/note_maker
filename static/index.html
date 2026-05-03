@@ -88,6 +88,18 @@
               <select id="history-persona-select"></select>
             </div>
             <div class="field-row">
+              <label for="history-project-select">プロジェクト</label>
+              <select id="history-project-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-article-select">記事</label>
+              <select id="history-article-select"></select>
+            </div>
+            <div class="field-row">
+              <label for="history-draft-select">下書き</label>
+              <select id="history-draft-select"></select>
+            </div>
+            <div class="field-row">
               <label for="history-style-select">保存済み文体ガイド</label>
               <select id="history-style-select"></select>
             </div>
@@ -101,6 +113,14 @@
             <button id="clear-history-selection-btn" class="secondary-btn" type="button">選択を解除</button>
           </div>
           <div id="history-status" class="history-status" aria-live="polite"></div>
+          <div id="history-article-detail" class="history-detail" aria-live="polite">
+            <div id="history-project-card" class="artifact-card empty"></div>
+            <div id="history-article-card" class="artifact-card empty"></div>
+            <div id="history-article-brief-card" class="artifact-card empty"></div>
+            <div id="history-current-draft-card" class="artifact-card empty"></div>
+            <div id="history-draft-versions-card" class="artifact-card empty"></div>
+            <div id="history-source-snapshot-card" class="artifact-card empty"></div>
+          </div>
         </div>
 
         <div class="question-config">

@@ -42,6 +42,25 @@ type workflowStoreBackend interface {
 	GetProfileAndGuide(string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool)
 }
 
+type workflowHistoryReader interface {
+	GetProject(string) (sqliterepo.ProjectRecord, bool)
+	ListProjects() ([]sqliterepo.ProjectRecord, error)
+	GetArticle(string) (sqliterepo.ArticleRecord, bool)
+	ListArticlesByProject(string) ([]sqliterepo.ArticleRecord, error)
+	ListSourceSnapshots(string, string) ([]sqliterepo.SourceSnapshotRecord, error)
+	GetDraft(string) (sqliterepo.DraftRecord, bool)
+	ListDrafts(string) ([]sqliterepo.DraftRecord, error)
+	ListSectionRegenerations(string) ([]sqliterepo.SectionRegenerationRecord, error)
+}
+
+type workflowHistoryWriter interface {
+	workflowHistoryReader
+	SaveProject(sqliterepo.ProjectRecord) error
+	SaveArticle(sqliterepo.ArticleRecord) error
+	SaveDraft(sqliterepo.DraftRecord) error
+	SaveSectionRegeneration(sqliterepo.SectionRegenerationRecord) error
+}
+
 func newWorkflowStore() workflowStoreBackend {
 	config := resolveWorkflowStorageConfig()
 	setActiveWorkflowStorage(config)
@@ -179,6 +198,101 @@ type workflowArtifactsResponse struct {
 	StyleGuides []styleGuideArtifactResponse  `json:"style_guides"`
 	Sessions    []briefSessionSummaryResponse `json:"sessions"`
 	Briefs      []briefArtifactResponse       `json:"briefs"`
+	Projects    []projectHistoryResponse      `json:"projects,omitempty"`
+	Articles    []articleHistoryResponse      `json:"articles,omitempty"`
+	Drafts      []draftHistoryResponse        `json:"drafts,omitempty"`
+}
+
+type projectHistoryListResponse struct {
+	Projects []projectHistoryResponse `json:"projects"`
+}
+
+type projectHistoryDetailResponse struct {
+	Project         projectHistoryResponse          `json:"project"`
+	Articles        []articleHistoryResponse        `json:"articles"`
+	SourceSnapshots []sourceSnapshotHistoryResponse `json:"source_snapshots"`
+}
+
+type articleHistoryDetailResponse struct {
+	Article         articleHistoryResponse          `json:"article"`
+	Drafts          []draftHistoryResponse          `json:"drafts"`
+	SourceSnapshots []sourceSnapshotHistoryResponse `json:"source_snapshots"`
+}
+
+type draftHistoryDetailResponse struct {
+	Draft                draftHistoryResponse                 `json:"draft"`
+	SourceSnapshots      []sourceSnapshotHistoryResponse      `json:"source_snapshots"`
+	SectionRegenerations []sectionRegenerationHistoryResponse `json:"section_regenerations"`
+}
+
+type projectHistoryResponse struct {
+	ID              string                          `json:"id"`
+	Name            string                          `json:"name"`
+	CreatedAt       string                          `json:"created_at,omitempty"`
+	UpdatedAt       string                          `json:"updated_at,omitempty"`
+	Metadata        map[string]any                  `json:"metadata,omitempty"`
+	Articles        []articleHistoryResponse        `json:"articles,omitempty"`
+	SourceSnapshots []sourceSnapshotHistoryResponse `json:"source_snapshots,omitempty"`
+}
+
+type articleHistoryResponse struct {
+	ID              string                          `json:"id"`
+	ProjectID       string                          `json:"project_id,omitempty"`
+	PersonaID       string                          `json:"persona_id"`
+	OutputFormatID  string                          `json:"output_format_id"`
+	BriefSessionID  string                          `json:"brief_session_id,omitempty"`
+	CurrentDraftID  string                          `json:"current_draft_id,omitempty"`
+	Title           string                          `json:"title,omitempty"`
+	CreatedAt       string                          `json:"created_at,omitempty"`
+	UpdatedAt       string                          `json:"updated_at,omitempty"`
+	Metadata        map[string]any                  `json:"metadata,omitempty"`
+	Drafts          []draftHistoryResponse          `json:"drafts,omitempty"`
+	SourceSnapshots []sourceSnapshotHistoryResponse `json:"source_snapshots,omitempty"`
+}
+
+type sourceSnapshotHistoryResponse struct {
+	ID          string `json:"id"`
+	ScopeType   string `json:"scope_type"`
+	ScopeID     string `json:"scope_id"`
+	Selector    any    `json:"selector"`
+	Profile     any    `json:"profile,omitempty"`
+	Article     any    `json:"article,omitempty"`
+	ContentHash string `json:"content_hash,omitempty"`
+	FetchedAt   string `json:"fetched_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+}
+
+type draftHistoryResponse struct {
+	ID                      string                               `json:"id"`
+	ArticleID               string                               `json:"article_id,omitempty"`
+	SessionID               string                               `json:"session_id,omitempty"`
+	StyleProfileID          string                               `json:"style_profile_id,omitempty"`
+	PersonaID               string                               `json:"persona_id,omitempty"`
+	OutputFormatID          string                               `json:"output_format_id,omitempty"`
+	Version                 int                                  `json:"version"`
+	Markdown                string                               `json:"markdown"`
+	ContentHash             string                               `json:"content_hash,omitempty"`
+	Evaluation              draftapp.StyleEvaluation             `json:"evaluation"`
+	Verification            draftapp.FinalVerification           `json:"verification"`
+	QuestionTemplateVersion string                               `json:"question_template_version,omitempty"`
+	CreatedAt               string                               `json:"created_at,omitempty"`
+	SourceSnapshots         []sourceSnapshotHistoryResponse      `json:"source_snapshots,omitempty"`
+	SectionRegenerations    []sectionRegenerationHistoryResponse `json:"section_regenerations,omitempty"`
+}
+
+type sectionRegenerationHistoryResponse struct {
+	ID                   string                     `json:"id"`
+	DraftID              string                     `json:"draft_id"`
+	ArticleID            string                     `json:"article_id,omitempty"`
+	SectionAnchor        string                     `json:"section_anchor"`
+	SectionHeading       string                     `json:"section_heading,omitempty"`
+	BaseVersion          int                        `json:"base_version"`
+	Version              int                        `json:"version"`
+	ReplacementMarkdown  string                     `json:"replacement_markdown"`
+	UpdatedDraftMarkdown string                     `json:"updated_draft_markdown"`
+	UpdatedContentHash   string                     `json:"updated_content_hash,omitempty"`
+	Verification         draftapp.FinalVerification `json:"verification"`
+	CreatedAt            string                     `json:"created_at,omitempty"`
 }
 
 type briefSessionTemplateResponse struct {
@@ -273,6 +387,7 @@ type regenerateDraftSectionResponse struct {
 	Section              draftapp.MarkdownSection `json:"section"`
 	ReplacementMarkdown  string                   `json:"replacement_markdown"`
 	UpdatedDraftMarkdown string                   `json:"updated_draft_markdown"`
+	RegenerationID       string                   `json:"regeneration_id,omitempty"`
 }
 
 func toGenerateDraftResponse(result draftapp.GenerateResult, draftPath string) generateDraftResponse {
@@ -833,10 +948,128 @@ func ListWorkflowArtifactsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	sortAuthorStyles(styles)
 	sortBriefSessions(sessions)
-	respondWithJSON(w, http.StatusOK, workflowArtifactsResponse{
+	response := workflowArtifactsResponse{
 		StyleGuides: toStyleGuideArtifactResponses(styles),
 		Sessions:    toBriefSessionSummaryResponses(sessions, briefs),
 		Briefs:      listBriefArtifactResponses(briefs),
+	}
+	if store, ok := workflowStore.(workflowHistoryReader); ok {
+		if projects, articles, drafts, err := listWorkflowHistoryResponses(store); err != nil {
+			respondWithError(w, "WORKFLOW_HISTORY_LIST_FAILED", "Failed to list project history", err.Error(), http.StatusInternalServerError)
+			return
+		} else {
+			response.Projects = projects
+			response.Articles = articles
+			response.Drafts = drafts
+		}
+	}
+	respondWithJSON(w, http.StatusOK, response)
+}
+
+// ListProjectsHandler returns SQLite-backed project history when available.
+func ListProjectsHandler(w http.ResponseWriter, r *http.Request) {
+	store, ok := workflowStore.(workflowHistoryReader)
+	if !ok {
+		respondWithJSON(w, http.StatusOK, projectHistoryListResponse{Projects: []projectHistoryResponse{}})
+		return
+	}
+	projects, err := store.ListProjects()
+	if err != nil {
+		respondWithError(w, "PROJECT_LIST_FAILED", "Failed to list projects", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, projectHistoryListResponse{Projects: toProjectHistoryResponses(projects)})
+}
+
+// GetProjectHandler returns one project with its article and source history.
+func GetProjectHandler(w http.ResponseWriter, r *http.Request) {
+	store, ok := workflowStore.(workflowHistoryReader)
+	if !ok {
+		respondWithError(w, "PROJECT_NOT_FOUND", "Project was not found", "", http.StatusNotFound)
+		return
+	}
+	projectID := pathValue(r, "id")
+	project, ok := store.GetProject(projectID)
+	if !ok {
+		respondWithError(w, "PROJECT_NOT_FOUND", "Project was not found", projectID, http.StatusNotFound)
+		return
+	}
+	articles, err := store.ListArticlesByProject(projectID)
+	if err != nil {
+		respondWithError(w, "PROJECT_ARTICLES_LIST_FAILED", "Failed to list project articles", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sourceSnapshots, err := store.ListSourceSnapshots("project", projectID)
+	if err != nil {
+		respondWithError(w, "PROJECT_SOURCE_SNAPSHOT_LIST_FAILED", "Failed to list project source snapshots", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	articleResponses := make([]articleHistoryResponse, 0, len(articles))
+	for _, article := range articles {
+		response, _, err := articleHistoryResponseWithDetails(store, article)
+		if err != nil {
+			respondWithError(w, "PROJECT_ARTICLE_HISTORY_FAILED", "Failed to load project article history", err.Error(), http.StatusInternalServerError)
+			return
+		}
+		articleResponses = append(articleResponses, response)
+	}
+	projectResponse := toProjectHistoryResponse(project)
+	projectResponse.Articles = articleResponses
+	projectResponse.SourceSnapshots = toSourceSnapshotHistoryResponses(sourceSnapshots)
+	respondWithJSON(w, http.StatusOK, projectHistoryDetailResponse{
+		Project:         projectResponse,
+		Articles:        articleResponses,
+		SourceSnapshots: projectResponse.SourceSnapshots,
+	})
+}
+
+// GetArticleHandler returns one article with draft versions and source history.
+func GetArticleHandler(w http.ResponseWriter, r *http.Request) {
+	store, ok := workflowStore.(workflowHistoryReader)
+	if !ok {
+		respondWithError(w, "ARTICLE_NOT_FOUND", "Article was not found", "", http.StatusNotFound)
+		return
+	}
+	articleID := pathValue(r, "id")
+	article, ok := store.GetArticle(articleID)
+	if !ok {
+		respondWithError(w, "ARTICLE_NOT_FOUND", "Article was not found", articleID, http.StatusNotFound)
+		return
+	}
+	articleResponse, _, err := articleHistoryResponseWithDetails(store, article)
+	if err != nil {
+		respondWithError(w, "ARTICLE_HISTORY_FAILED", "Failed to load article history", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, articleHistoryDetailResponse{
+		Article:         articleResponse,
+		Drafts:          articleResponse.Drafts,
+		SourceSnapshots: articleResponse.SourceSnapshots,
+	})
+}
+
+// GetDraftHandler returns one draft with regeneration history.
+func GetDraftHandler(w http.ResponseWriter, r *http.Request) {
+	store, ok := workflowStore.(workflowHistoryReader)
+	if !ok {
+		respondWithError(w, "DRAFT_NOT_FOUND", "Draft was not found", "", http.StatusNotFound)
+		return
+	}
+	draftID := pathValue(r, "id")
+	draft, ok := store.GetDraft(draftID)
+	if !ok {
+		respondWithError(w, "DRAFT_NOT_FOUND", "Draft was not found", draftID, http.StatusNotFound)
+		return
+	}
+	draftResponse, err := draftHistoryResponseWithDetails(store, draft)
+	if err != nil {
+		respondWithError(w, "DRAFT_HISTORY_FAILED", "Failed to load draft history", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, draftHistoryDetailResponse{
+		Draft:                draftResponse,
+		SourceSnapshots:      draftResponse.SourceSnapshots,
+		SectionRegenerations: draftResponse.SectionRegenerations,
 	})
 }
 
@@ -1030,7 +1263,8 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "DRAFT_GENERATION_FAILED", "Failed to generate draft", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	respondWithJSON(w, http.StatusOK, toGenerateDraftResponse(result, ""))
+	draftPath := saveGeneratedDraftHistory(req, result, articleBrief, persona, format)
+	respondWithJSON(w, http.StatusOK, toGenerateDraftResponse(result, draftPath))
 }
 
 func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDraftRequest, profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) {
@@ -1086,7 +1320,8 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 		_ = stream.Send("error", streamError{Code: "DRAFT_GENERATION_FAILED", Message: "Failed to generate draft", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 		return
 	}
-	_ = stream.Send("result", toGenerateDraftResponse(result, ""))
+	draftPath := saveGeneratedDraftHistory(req, result, articleBrief, persona, format)
+	_ = stream.Send("result", toGenerateDraftResponse(result, draftPath))
 	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
 }
 
@@ -1097,8 +1332,27 @@ func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
+	pathID := pathValue(r, "id")
+	baseDraft, hasBaseDraft := historyDraftFromPath(pathID)
+	if hasBaseDraft {
+		if strings.TrimSpace(req.SessionID) == "" {
+			req.SessionID = baseDraft.SessionID
+		}
+		if strings.TrimSpace(req.StyleProfileID) == "" {
+			req.StyleProfileID = baseDraft.StyleProfileID
+		}
+		if strings.TrimSpace(req.PersonaID) == "" {
+			req.PersonaID = baseDraft.PersonaID
+		}
+		if strings.TrimSpace(req.OutputFormatID) == "" {
+			req.OutputFormatID = baseDraft.OutputFormatID
+		}
+		if strings.TrimSpace(req.DraftMarkdown) == "" {
+			req.DraftMarkdown = baseDraft.Markdown
+		}
+	}
 	if strings.TrimSpace(req.SessionID) == "" {
-		req.SessionID = pathValue(r, "id")
+		req.SessionID = pathID
 	}
 	profile, guide, articleBrief, persona, format, ok := draftContextFromRequest(req.StyleProfileID, req.SessionID, req.PersonaID, req.OutputFormatID)
 	if !ok {
@@ -1126,10 +1380,12 @@ func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "DRAFT_SECTION_REGENERATE_FAILED", "Failed to regenerate draft section", err.Error(), http.StatusBadRequest)
 		return
 	}
+	regenerationID := saveSectionRegenerationHistory(baseDraft, hasBaseDraft, req, result)
 	respondWithJSON(w, http.StatusOK, regenerateDraftSectionResponse{
 		Section:              result.Section,
 		ReplacementMarkdown:  result.ReplacementMarkdown,
 		UpdatedDraftMarkdown: result.UpdatedDraftMarkdown,
+		RegenerationID:       regenerationID,
 	})
 }
 
@@ -1172,6 +1428,153 @@ func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID stri
 	articleBrief.PersonaID = persona.ID
 	articleBrief.OutputFormatID = format.ID
 	return profile, guide, articleBrief, persona, format, true
+}
+
+func historyDraftFromPath(pathID string) (sqliterepo.DraftRecord, bool) {
+	if strings.TrimSpace(pathID) == "" {
+		return sqliterepo.DraftRecord{}, false
+	}
+	store, ok := workflowStore.(workflowHistoryReader)
+	if !ok {
+		return sqliterepo.DraftRecord{}, false
+	}
+	return store.GetDraft(pathID)
+}
+
+func saveGeneratedDraftHistory(req generateDraftRequest, result draftapp.GenerateResult, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) string {
+	store, ok := workflowStore.(workflowHistoryWriter)
+	if !ok {
+		return ""
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		return ""
+	}
+	now := time.Now().UTC()
+	projectID := historyRecordID("project", sessionID)
+	articleID := historyRecordID("article", sessionID)
+	title := briefTitle(sessionID, articleBrief)
+	projectName := firstNonEmpty(title, sessionID)
+
+	project := sqliterepo.ProjectRecord{
+		ID:        projectID,
+		Name:      projectName,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  map[string]any{"session_id": sessionID},
+	}
+	if existing, ok := store.GetProject(projectID); ok {
+		project.CreatedAt = existing.CreatedAt
+		if strings.TrimSpace(existing.Name) != "" {
+			project.Name = existing.Name
+		}
+		project.Metadata = mergeHistoryMetadata(existing.Metadata, project.Metadata)
+	}
+	if err := store.SaveProject(project); err != nil {
+		return ""
+	}
+
+	drafts, err := store.ListDrafts(articleID)
+	if err != nil {
+		return ""
+	}
+	draftID := newID("draft")
+	version := len(drafts) + 1
+	article := sqliterepo.ArticleRecord{
+		ID:             articleID,
+		ProjectID:      projectID,
+		PersonaID:      persona.ID,
+		OutputFormatID: format.ID,
+		BriefSessionID: sessionID,
+		CurrentDraftID: draftID,
+		Title:          title,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Metadata:       map[string]any{"session_id": sessionID},
+	}
+	if existing, ok := store.GetArticle(articleID); ok {
+		article.CreatedAt = existing.CreatedAt
+		article.Metadata = mergeHistoryMetadata(existing.Metadata, article.Metadata)
+	}
+	if err := store.SaveArticle(article); err != nil {
+		return ""
+	}
+	draft := sqliterepo.DraftRecord{
+		ID:             draftID,
+		ArticleID:      articleID,
+		SessionID:      sessionID,
+		StyleProfileID: firstNonEmpty(req.StyleProfileID, articleBrief.StyleProfileID),
+		PersonaID:      persona.ID,
+		OutputFormatID: format.ID,
+		Version:        version,
+		Markdown:       result.Draft.Markdown(),
+		Evaluation:     result.Evaluation,
+		Verification:   result.Verification,
+		CreatedAt:      now,
+	}
+	if err := store.SaveDraft(draft); err != nil {
+		return ""
+	}
+	return draftID
+}
+
+func saveSectionRegenerationHistory(baseDraft sqliterepo.DraftRecord, hasBaseDraft bool, req regenerateDraftSectionRequest, result draftapp.RegenerateSectionResult) string {
+	if !hasBaseDraft {
+		return ""
+	}
+	store, ok := workflowStore.(workflowHistoryWriter)
+	if !ok {
+		return ""
+	}
+	regenerations, err := store.ListSectionRegenerations(baseDraft.ID)
+	if err != nil {
+		return ""
+	}
+	now := time.Now().UTC()
+	record := sqliterepo.SectionRegenerationRecord{
+		ID:                   newID("regen"),
+		DraftID:              baseDraft.ID,
+		ArticleID:            baseDraft.ArticleID,
+		SectionAnchor:        firstNonEmpty(req.SectionAnchor, result.Section.Anchor),
+		SectionHeading:       result.Section.Heading,
+		BaseVersion:          baseDraft.Version,
+		Version:              len(regenerations) + baseDraft.Version + 1,
+		ReplacementMarkdown:  result.ReplacementMarkdown,
+		UpdatedDraftMarkdown: result.UpdatedDraftMarkdown,
+		CreatedAt:            now,
+	}
+	if record.BaseVersion <= 0 {
+		record.BaseVersion = 1
+	}
+	if record.Version <= record.BaseVersion {
+		record.Version = record.BaseVersion + 1
+	}
+	if err := store.SaveSectionRegeneration(record); err != nil {
+		return ""
+	}
+	return record.ID
+}
+
+func historyRecordID(prefix, seed string) string {
+	seed = strings.TrimSpace(seed)
+	if seed == "" {
+		return newID(prefix)
+	}
+	return prefix + "_" + hex.EncodeToString([]byte(seed))
+}
+
+func mergeHistoryMetadata(existing, next map[string]any) map[string]any {
+	if len(existing) == 0 {
+		return next
+	}
+	merged := make(map[string]any, len(existing)+len(next))
+	for key, value := range existing {
+		merged[key] = value
+	}
+	for key, value := range next {
+		merged[key] = value
+	}
+	return merged
 }
 
 func newDraftServiceWithVerifier(generator draftapp.TextGenerator, model string) (*draftapp.Service, error) {
@@ -1425,6 +1828,184 @@ func sortBriefSessions(sessions []briefdomain.ArticleBriefSession) {
 		}
 		return sessions[i].ID < sessions[j].ID
 	})
+}
+
+func toProjectHistoryResponses(projects []sqliterepo.ProjectRecord) []projectHistoryResponse {
+	items := make([]projectHistoryResponse, 0, len(projects))
+	for _, project := range projects {
+		items = append(items, toProjectHistoryResponse(project))
+	}
+	return items
+}
+
+func toProjectHistoryResponse(project sqliterepo.ProjectRecord) projectHistoryResponse {
+	return projectHistoryResponse{
+		ID:        project.ID,
+		Name:      project.Name,
+		CreatedAt: formatOptionalTime(project.CreatedAt),
+		UpdatedAt: formatOptionalTime(project.UpdatedAt),
+		Metadata:  project.Metadata,
+	}
+}
+
+func listWorkflowHistoryResponses(store workflowHistoryReader) ([]projectHistoryResponse, []articleHistoryResponse, []draftHistoryResponse, error) {
+	projects, err := store.ListProjects()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	projectResponses := make([]projectHistoryResponse, 0, len(projects))
+	articleResponses := []articleHistoryResponse{}
+	draftResponses := []draftHistoryResponse{}
+	for _, project := range projects {
+		projectResponse := toProjectHistoryResponse(project)
+		snapshots, err := store.ListSourceSnapshots("project", project.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		projectResponse.SourceSnapshots = toSourceSnapshotHistoryResponses(snapshots)
+		articles, err := store.ListArticlesByProject(project.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		projectResponse.Articles = make([]articleHistoryResponse, 0, len(articles))
+		for _, article := range articles {
+			articleResponse, drafts, err := articleHistoryResponseWithDetails(store, article)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			projectResponse.Articles = append(projectResponse.Articles, articleResponse)
+			articleResponses = append(articleResponses, articleResponse)
+			draftResponses = append(draftResponses, drafts...)
+		}
+		projectResponses = append(projectResponses, projectResponse)
+	}
+	return projectResponses, articleResponses, draftResponses, nil
+}
+
+func articleHistoryResponseWithDetails(store workflowHistoryReader, article sqliterepo.ArticleRecord) (articleHistoryResponse, []draftHistoryResponse, error) {
+	articleResponse := toArticleHistoryResponse(article)
+	snapshots, err := store.ListSourceSnapshots("article", article.ID)
+	if err != nil {
+		return articleHistoryResponse{}, nil, err
+	}
+	articleResponse.SourceSnapshots = toSourceSnapshotHistoryResponses(snapshots)
+	drafts, err := store.ListDrafts(article.ID)
+	if err != nil {
+		return articleHistoryResponse{}, nil, err
+	}
+	draftResponses := make([]draftHistoryResponse, 0, len(drafts))
+	for _, draft := range drafts {
+		draftResponse, err := draftHistoryResponseWithDetails(store, draft)
+		if err != nil {
+			return articleHistoryResponse{}, nil, err
+		}
+		draftResponses = append(draftResponses, draftResponse)
+	}
+	articleResponse.Drafts = draftResponses
+	return articleResponse, draftResponses, nil
+}
+
+func draftHistoryResponseWithDetails(store workflowHistoryReader, draft sqliterepo.DraftRecord) (draftHistoryResponse, error) {
+	draftResponse := toDraftHistoryResponse(draft)
+	snapshots, err := store.ListSourceSnapshots("draft", draft.ID)
+	if err != nil {
+		return draftHistoryResponse{}, err
+	}
+	draftResponse.SourceSnapshots = toSourceSnapshotHistoryResponses(snapshots)
+	regenerations, err := store.ListSectionRegenerations(draft.ID)
+	if err != nil {
+		return draftHistoryResponse{}, err
+	}
+	draftResponse.SectionRegenerations = toSectionRegenerationHistoryResponses(regenerations)
+	return draftResponse, nil
+}
+
+func toArticleHistoryResponse(article sqliterepo.ArticleRecord) articleHistoryResponse {
+	return articleHistoryResponse{
+		ID:             article.ID,
+		ProjectID:      article.ProjectID,
+		PersonaID:      article.PersonaID,
+		OutputFormatID: article.OutputFormatID,
+		BriefSessionID: article.BriefSessionID,
+		CurrentDraftID: article.CurrentDraftID,
+		Title:          article.Title,
+		CreatedAt:      formatOptionalTime(article.CreatedAt),
+		UpdatedAt:      formatOptionalTime(article.UpdatedAt),
+		Metadata:       article.Metadata,
+	}
+}
+
+func toSourceSnapshotHistoryResponses(snapshots []sqliterepo.SourceSnapshotRecord) []sourceSnapshotHistoryResponse {
+	items := make([]sourceSnapshotHistoryResponse, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		items = append(items, toSourceSnapshotHistoryResponse(snapshot))
+	}
+	return items
+}
+
+func toSourceSnapshotHistoryResponse(snapshot sqliterepo.SourceSnapshotRecord) sourceSnapshotHistoryResponse {
+	return sourceSnapshotHistoryResponse{
+		ID:          snapshot.ID,
+		ScopeType:   snapshot.ScopeType,
+		ScopeID:     snapshot.ScopeID,
+		Selector:    snapshot.Selector,
+		Profile:     snapshot.Profile,
+		Article:     snapshot.Article,
+		ContentHash: snapshot.ContentHash,
+		FetchedAt:   formatOptionalTime(snapshot.FetchedAt),
+		CreatedAt:   formatOptionalTime(snapshot.CreatedAt),
+	}
+}
+
+func toDraftHistoryResponses(drafts []sqliterepo.DraftRecord) []draftHistoryResponse {
+	items := make([]draftHistoryResponse, 0, len(drafts))
+	for _, draft := range drafts {
+		items = append(items, toDraftHistoryResponse(draft))
+	}
+	return items
+}
+
+func toDraftHistoryResponse(draft sqliterepo.DraftRecord) draftHistoryResponse {
+	return draftHistoryResponse{
+		ID:                      draft.ID,
+		ArticleID:               draft.ArticleID,
+		SessionID:               draft.SessionID,
+		StyleProfileID:          draft.StyleProfileID,
+		PersonaID:               draft.PersonaID,
+		OutputFormatID:          draft.OutputFormatID,
+		Version:                 draft.Version,
+		Markdown:                draft.Markdown,
+		ContentHash:             draft.ContentHash,
+		Evaluation:              draft.Evaluation,
+		Verification:            draft.Verification,
+		QuestionTemplateVersion: draft.QuestionTemplateVersion,
+		CreatedAt:               formatOptionalTime(draft.CreatedAt),
+	}
+}
+
+func toSectionRegenerationHistoryResponses(regenerations []sqliterepo.SectionRegenerationRecord) []sectionRegenerationHistoryResponse {
+	items := make([]sectionRegenerationHistoryResponse, 0, len(regenerations))
+	for _, regeneration := range regenerations {
+		items = append(items, toSectionRegenerationHistoryResponse(regeneration))
+	}
+	return items
+}
+
+func toSectionRegenerationHistoryResponse(regeneration sqliterepo.SectionRegenerationRecord) sectionRegenerationHistoryResponse {
+	return sectionRegenerationHistoryResponse{
+		ID:                   regeneration.ID,
+		DraftID:              regeneration.DraftID,
+		ArticleID:            regeneration.ArticleID,
+		SectionAnchor:        regeneration.SectionAnchor,
+		SectionHeading:       regeneration.SectionHeading,
+		BaseVersion:          regeneration.BaseVersion,
+		Version:              regeneration.Version,
+		ReplacementMarkdown:  regeneration.ReplacementMarkdown,
+		UpdatedDraftMarkdown: regeneration.UpdatedDraftMarkdown,
+		UpdatedContentHash:   regeneration.UpdatedContentHash,
+		Verification:         regeneration.Verification,
+		CreatedAt:            formatOptionalTime(regeneration.CreatedAt),
+	}
 }
 
 func listBriefArtifactResponses(briefs map[string]briefdomain.ArticleBrief) []briefArtifactResponse {

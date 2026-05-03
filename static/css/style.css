@@ -193,7 +193,7 @@ body {
 
 .history-picker-grid {
     display: grid;
-    grid-template-columns: minmax(160px, 0.65fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
 }
 
@@ -219,6 +219,18 @@ body {
     border-color: #fde68a;
     color: var(--warning);
     background: var(--warning-bg);
+}
+
+.history-detail {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.history-detail .artifact-card {
+    margin: 0;
+    min-width: 0;
 }
 
 .section-heading {
@@ -704,6 +716,7 @@ pre {
 
     .config-grid,
     .history-picker-grid,
+    .history-detail,
     .result-grid {
         grid-template-columns: 1fr;
     }

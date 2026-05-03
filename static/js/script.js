@@ -51,11 +51,17 @@ document.addEventListener('DOMContentLoaded', () => {
     templateRequestId: 0,
     historyStyles: [],
     historySessions: [],
+    historyProjects: [],
+    historyArticles: [],
+    historyDrafts: [],
     historyLoading: false,
     historyError: '',
     historyRequestId: 0,
     selectedHistoryStyle: null,
     selectedHistorySession: null,
+    selectedHistoryProject: null,
+    selectedHistoryArticle: null,
+    selectedHistoryDraft: null,
     storageConfig: null,
     questionTextById: {},
     lastSubmittedAnswer: '',
@@ -78,12 +84,22 @@ document.addEventListener('DOMContentLoaded', () => {
     saveStorage: document.getElementById('save-storage-btn'),
     storageSummary: document.getElementById('storage-summary'),
     historyPersonaSelect: document.getElementById('history-persona-select'),
+    historyProjectSelect: document.getElementById('history-project-select'),
+    historyArticleSelect: document.getElementById('history-article-select'),
+    historyDraftSelect: document.getElementById('history-draft-select'),
     historyStyleSelect: document.getElementById('history-style-select'),
     historySessionSelect: document.getElementById('history-session-select'),
     refreshHistory: document.getElementById('refresh-history-btn'),
     openHistory: document.getElementById('open-history-btn'),
     clearHistorySelection: document.getElementById('clear-history-selection-btn'),
     historyStatus: document.getElementById('history-status'),
+    historyArticleDetail: document.getElementById('history-article-detail'),
+    historyProjectCard: document.getElementById('history-project-card'),
+    historyArticleCard: document.getElementById('history-article-card'),
+    historyArticleBriefCard: document.getElementById('history-article-brief-card'),
+    historyCurrentDraftCard: document.getElementById('history-current-draft-card'),
+    historyDraftVersionsCard: document.getElementById('history-draft-versions-card'),
+    historySourceSnapshotCard: document.getElementById('history-source-snapshot-card'),
     questionConfigList: document.getElementById('question-config-list'),
     addQuestion: document.getElementById('add-question-btn'),
     resetQuestions: document.getElementById('reset-questions-btn'),
@@ -129,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   renderQuestionConfig();
+  renderHistoryArticleDetail();
   initializeModeControls();
   checkModels();
   loadStorageConfig();
@@ -142,6 +159,9 @@ document.addEventListener('DOMContentLoaded', () => {
   el.storageDriver.addEventListener('change', onStorageDriverChange);
   el.saveStorage.addEventListener('click', saveStorageConfig);
   el.historyPersonaSelect.addEventListener('change', loadWorkflowHistory);
+  el.historyProjectSelect.addEventListener('change', selectHistoryProject);
+  el.historyArticleSelect.addEventListener('change', selectHistoryArticle);
+  el.historyDraftSelect.addEventListener('change', selectHistoryDraft);
   el.historyStyleSelect.addEventListener('change', selectHistoryStyle);
   el.historySessionSelect.addEventListener('change', selectHistorySession);
   el.refreshHistory.addEventListener('click', loadWorkflowHistory);
@@ -818,7 +838,11 @@ document.addEventListener('DOMContentLoaded', () => {
     state.historyError = '';
     state.selectedHistoryStyle = null;
     state.selectedHistorySession = null;
+    state.selectedHistoryProject = null;
+    state.selectedHistoryArticle = null;
+    state.selectedHistoryDraft = null;
     renderHistoryPicker();
+    renderHistoryArticleDetail();
 
     try {
       const data = await fetchWorkflowHistoryIndex({ personaId, formatId });
@@ -828,17 +852,24 @@ document.addEventListener('DOMContentLoaded', () => {
       const normalized = normalizeWorkflowHistory(data, personaId, formatId);
       state.historyStyles = normalized.styles;
       state.historySessions = normalized.sessions;
+      state.historyProjects = normalized.projects;
+      state.historyArticles = normalized.articles;
+      state.historyDrafts = normalized.drafts;
     } catch (error) {
       if (requestId !== state.historyRequestId) {
         return;
       }
       state.historyStyles = [];
       state.historySessions = [];
+      state.historyProjects = [];
+      state.historyArticles = [];
+      state.historyDrafts = [];
       state.historyError = historyErrorMessage(error);
     } finally {
       if (requestId === state.historyRequestId) {
         state.historyLoading = false;
         renderHistoryPicker();
+        renderHistoryArticleDetail();
       }
     }
   }
@@ -855,16 +886,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderHistoryPicker() {
+    const articles = filteredHistoryArticles();
+    const drafts = filteredHistoryDrafts();
+    renderHistoryOptions(el.historyProjectSelect, state.historyProjects, 'プロジェクトを選択');
+    renderHistoryOptions(el.historyArticleSelect, articles, '記事を選択');
+    renderHistoryOptions(el.historyDraftSelect, drafts, '下書きを選択');
     renderHistoryOptions(el.historyStyleSelect, state.historyStyles, '文体ガイドを選択');
     renderHistoryOptions(el.historySessionSelect, state.historySessions, '取材セッションを選択');
 
+    el.historyProjectSelect.disabled = state.historyLoading || !state.historyProjects.length;
+    el.historyArticleSelect.disabled = state.historyLoading || !articles.length;
+    el.historyDraftSelect.disabled = state.historyLoading || !drafts.length;
     el.historyStyleSelect.disabled = state.historyLoading || !state.historyStyles.length;
     el.historySessionSelect.disabled = state.historyLoading || !state.historySessions.length;
     el.openHistory.disabled = state.historyLoading || !historySelectionReady();
 
     if (state.historyLoading) {
       el.historyStatus.className = 'history-status loading';
-      el.historyStatus.textContent = '保存済みの文体ガイドと取材セッションを読み込んでいます...';
+      el.historyStatus.textContent = '保存済みのプロジェクト、記事、下書き、文体ガイド、取材セッションを読み込んでいます...';
       return;
     }
     if (state.historyError) {
@@ -872,15 +911,18 @@ document.addEventListener('DOMContentLoaded', () => {
       el.historyStatus.textContent = state.historyError;
       return;
     }
-    if (!state.historyStyles.length && !state.historySessions.length) {
+    if (!state.historyProjects.length && !state.historyArticles.length && !state.historyDrafts.length && !state.historyStyles.length && !state.historySessions.length) {
       el.historyStatus.className = 'history-status empty';
       el.historyStatus.textContent = 'この書き手と出力先の保存済み履歴はまだありません。';
       return;
     }
+    const projectCount = `${state.historyProjects.length}件のプロジェクト`;
+    const articleCount = `${state.historyArticles.length}件の記事`;
+    const draftCount = `${state.historyDrafts.length}件の下書き`;
     const styleCount = `${state.historyStyles.length}件の文体ガイド`;
     const sessionCount = `${state.historySessions.length}件の取材セッション`;
     el.historyStatus.className = 'history-status';
-    el.historyStatus.textContent = `${styleCount} / ${sessionCount} を選択できます。`;
+    el.historyStatus.textContent = `${projectCount} / ${articleCount} / ${draftCount} / ${styleCount} / ${sessionCount} を選択できます。`;
   }
 
   function renderHistoryOptions(select, items, placeholder) {
@@ -909,7 +951,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function historySelectionReady() {
-    return Boolean(el.historyStyleSelect.value || el.historySessionSelect.value);
+    return Boolean(
+      el.historyProjectSelect.value
+      || el.historyArticleSelect.value
+      || el.historyDraftSelect.value
+      || el.historyStyleSelect.value
+      || el.historySessionSelect.value,
+    );
   }
 
   function historyErrorMessage(error) {
@@ -964,6 +1012,84 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function selectHistoryProject() {
+    state.selectedHistoryProject = findHistoryProject(el.historyProjectSelect.value);
+    state.selectedHistoryArticle = null;
+    state.selectedHistoryDraft = null;
+    el.historyArticleSelect.value = '';
+    el.historyDraftSelect.value = '';
+    renderHistoryPicker();
+    renderHistoryArticleDetail();
+    if (!state.selectedHistoryProject) {
+      return;
+    }
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = 'プロジェクト履歴を確認しています...';
+    try {
+      state.selectedHistoryProject = await loadHistoryProjectDetail(state.selectedHistoryProject);
+      mergeProjectDetailIntoHistory(state.selectedHistoryProject);
+      renderHistoryPicker();
+      renderHistoryArticleDetail();
+    } catch (error) {
+      renderHistoryArticleDetail({ warning: `プロジェクト詳細APIは未接続です: ${error.message}` });
+      renderHistoryPicker();
+    }
+  }
+
+  async function selectHistoryArticle() {
+    state.selectedHistoryArticle = findHistoryArticle(el.historyArticleSelect.value);
+    state.selectedHistoryDraft = null;
+    el.historyDraftSelect.value = '';
+    renderHistoryPicker();
+    renderHistoryArticleDetail();
+    if (!state.selectedHistoryArticle) {
+      return;
+    }
+    if (state.selectedHistoryArticle.projectId && !state.selectedHistoryProject) {
+      state.selectedHistoryProject = findHistoryProject(state.selectedHistoryArticle.projectId);
+      if (state.selectedHistoryProject) {
+        el.historyProjectSelect.value = state.selectedHistoryProject.id;
+      }
+    }
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = '記事履歴を確認しています...';
+    try {
+      state.selectedHistoryArticle = await loadHistoryArticleDetail(state.selectedHistoryArticle);
+      mergeArticleDetailIntoHistory(state.selectedHistoryArticle);
+      renderHistoryPicker();
+      renderHistoryArticleDetail();
+    } catch (error) {
+      renderHistoryArticleDetail({ warning: `記事詳細APIは未接続です: ${error.message}` });
+      renderHistoryPicker();
+    }
+  }
+
+  async function selectHistoryDraft() {
+    state.selectedHistoryDraft = findHistoryDraft(el.historyDraftSelect.value);
+    if (!state.selectedHistoryDraft) {
+      renderHistoryArticleDetail();
+      el.openHistory.disabled = !historySelectionReady();
+      return;
+    }
+    if (state.selectedHistoryDraft.articleId && !state.selectedHistoryArticle) {
+      state.selectedHistoryArticle = findHistoryArticle(state.selectedHistoryDraft.articleId);
+      if (state.selectedHistoryArticle) {
+        el.historyArticleSelect.value = state.selectedHistoryArticle.id;
+      }
+    }
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = '下書き履歴を確認しています...';
+    try {
+      state.selectedHistoryDraft = await loadHistoryDraftDetail(state.selectedHistoryDraft);
+      mergeDraftDetailIntoHistory(state.selectedHistoryDraft);
+      renderHistoryPicker();
+      renderHistoryArticleDetail();
+    } catch (error) {
+      renderHistoryArticleDetail({ warning: `下書き詳細APIは未接続です: ${error.message}` });
+      renderHistoryPicker();
+    }
+  }
+
   async function openSelectedHistory() {
     clearError();
     el.historyStatus.className = 'history-status loading';
@@ -975,6 +1101,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const session = el.historySessionSelect.value
         ? await loadHistorySessionDetail(state.selectedHistorySession || findHistorySession(el.historySessionSelect.value))
         : null;
+      const article = el.historyArticleSelect.value
+        ? await loadHistoryArticleDetail(state.selectedHistoryArticle || findHistoryArticle(el.historyArticleSelect.value))
+        : null;
+      const draft = el.historyDraftSelect.value
+        ? await loadHistoryDraftDetail(state.selectedHistoryDraft || findHistoryDraft(el.historyDraftSelect.value))
+        : null;
       const styleForSession = !style && session?.styleProfileId
         ? await loadHistoryStyleDetail({ id: session.styleProfileId })
         : style;
@@ -985,7 +1117,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (session) {
         await applyHistorySession(session);
       }
-      if (!styleForSession && !session) {
+      if (article) {
+        await applyHistoryArticle(article);
+      }
+      if (draft) {
+        applyHistoryDraft(draft);
+      }
+      if (!styleForSession && !session && !article && !draft && !el.historyProjectSelect.value) {
         showError('開く履歴を選択してください');
         return;
       }
@@ -998,11 +1136,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function clearHistorySelection() {
+    el.historyProjectSelect.value = '';
+    el.historyArticleSelect.value = '';
+    el.historyDraftSelect.value = '';
     el.historyStyleSelect.value = '';
     el.historySessionSelect.value = '';
+    state.selectedHistoryProject = null;
+    state.selectedHistoryArticle = null;
+    state.selectedHistoryDraft = null;
     state.selectedHistoryStyle = null;
     state.selectedHistorySession = null;
     renderHistoryPicker();
+    renderHistoryArticleDetail();
   }
 
   async function loadHistoryStyleDetail(item) {
@@ -1025,6 +1170,81 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const data = await requestJSON(`/api/brief-sessions/${encodeURIComponent(item.id)}`);
     return normalizeHistorySession({ ...item, ...data });
+  }
+
+  async function loadHistoryProjectDetail(item) {
+    if (!item) {
+      return null;
+    }
+    const normalized = normalizeHistoryProject(item);
+    if (normalized.articles.length) {
+      return normalized;
+    }
+    const data = await requestFirstJSON([
+      `/api/projects/${encodeURIComponent(normalized.id)}`,
+      `/api/history/projects/${encodeURIComponent(normalized.id)}`,
+    ]);
+    return normalizeHistoryProject({ ...item, ...data });
+  }
+
+  async function loadHistoryArticleDetail(item) {
+    if (!item) {
+      return null;
+    }
+    const normalized = normalizeHistoryArticle(item);
+    if (hasArticleDetail(normalized)) {
+      return normalized;
+    }
+    const urls = [`/api/articles/${encodeURIComponent(normalized.id)}`];
+    if (normalized.projectId) {
+      urls.push(`/api/projects/${encodeURIComponent(normalized.projectId)}/articles/${encodeURIComponent(normalized.id)}`);
+    }
+    if (normalized.briefId) {
+      urls.push(`/api/briefs/${encodeURIComponent(normalized.briefId)}`);
+    }
+    urls.push(`/api/history/articles/${encodeURIComponent(normalized.id)}`);
+    const data = await requestFirstJSON(urls);
+    const detail = data && !data.article && !data.Article && (data.brief || data.Brief || data.theme || data.Theme)
+      ? { brief: data }
+      : data;
+    return normalizeHistoryArticle({ ...item, ...detail });
+  }
+
+  async function loadHistoryDraftDetail(item) {
+    if (!item) {
+      return null;
+    }
+    const normalized = normalizeHistoryDraft(item);
+    if (normalized.markdown || normalized.summary) {
+      return normalized;
+    }
+    const data = await requestFirstJSON([
+      `/api/drafts/${encodeURIComponent(normalized.id)}`,
+      `/api/history/drafts/${encodeURIComponent(normalized.id)}`,
+    ]);
+    return normalizeHistoryDraft({ ...item, ...data });
+  }
+
+  async function requestFirstJSON(urls) {
+    let lastError = null;
+    for (const url of urls.filter(Boolean)) {
+      try {
+        return await requestJSON(url);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('履歴詳細APIが見つかりません');
+  }
+
+  function hasArticleDetail(article) {
+    return Boolean(
+      article.brief
+      || article.currentDraft?.markdown
+      || article.currentDraft?.summary
+      || article.draftVersions.length
+      || article.sourceSnapshot,
+    );
   }
 
   function applyHistoryStyle(item) {
@@ -1082,18 +1302,112 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSectionControls();
   }
 
+  async function applyHistoryArticle(item) {
+    const data = normalizeHistoryArticle(item);
+    state.selectedHistoryArticle = data;
+    state.profileId = data.styleProfileId || state.profileId;
+    state.sessionId = data.sessionId || state.sessionId;
+    if (data.personaId && state.personas.some((persona) => persona.id === data.personaId)) {
+      el.personaSelect.value = data.personaId;
+      config.mode.persona = data.personaId;
+    }
+    if (data.outputFormatId && state.formats.some((format) => format.id === data.outputFormatId)) {
+      el.formatSelect.value = data.outputFormatId;
+      config.mode.format = data.outputFormatId;
+    }
+    saveConfig();
+    renderModeSummary();
+    await loadQuestionTemplate();
+    if (data.brief) {
+      state.completedBrief = data.brief;
+      renderBriefCard(data.brief);
+      el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
+      el.briefResult.classList.remove('hidden');
+      el.generateDraft.disabled = !state.profileId;
+    }
+    const draft = state.selectedHistoryDraft || data.currentDraft;
+    if (draft) {
+      applyHistoryDraft(draft);
+    }
+    renderHistoryArticleDetail();
+  }
+
+  function applyHistoryDraft(item) {
+    const data = normalizeHistoryDraft(item);
+    state.selectedHistoryDraft = data;
+    state.sessionId = data.sessionId || state.sessionId;
+    state.profileId = data.styleProfileId || state.profileId;
+    const draftText = data.markdown || data.summary || '';
+    if (draftText) {
+      el.markdownOutput.value = draftText;
+      syncDraftEditor();
+      el.draftResult.classList.remove('hidden');
+      setActiveTab('preview');
+    }
+    el.draftStatus.textContent = historyDraftResumeText(data);
+    el.generateDraft.disabled = !state.profileId || !state.sessionId;
+    renderHistoryArticleDetail();
+  }
+
   function normalizeWorkflowHistory(data, personaId, formatId) {
     const source = data || {};
     const styleValues = arrayFrom(source.style_guides || source.styleGuides || source.styles || source.author_styles || source.authorStyles || source.profiles);
+    const briefValues = arrayFrom(source.briefs || source.Briefs);
     const sessionValues = [
       ...arrayFrom(source.sessions || source.brief_sessions || source.briefSessions || source.items || (Array.isArray(source) ? source : [])),
-      ...arrayFrom(source.briefs || source.Briefs),
+      ...briefValues,
+    ];
+    const projectValues = arrayFrom(source.projects || source.Projects);
+    const projectArticleValues = projectValues.flatMap((project) => arrayFrom(project.articles || project.Articles)
+      .map((article) => ({ project_id: project.id || project.ID || project.project_id || project.projectId, ...article })));
+    const sourceSnapshotValues = arrayFrom(source.source_snapshots || source.sourceSnapshots || source.SourceSnapshots);
+    const briefArticleValues = briefValues.map((brief) => ({
+      article_id: brief.article_id || brief.articleId || brief.session_id || brief.sessionId || brief.id || brief.ID,
+      persona_id: brief.persona_id || brief.personaId,
+      output_format_id: brief.output_format_id || brief.outputFormatId,
+      brief,
+    }));
+    const snapshotArticleValues = sourceSnapshotValues.map((snapshot) => ({
+      article_id: snapshot.article_id || snapshot.articleId || snapshot.id || snapshot.ID,
+      persona_id: snapshot.persona_id || snapshot.personaId,
+      output_format_id: snapshot.output_format_id || snapshot.outputFormatId,
+      source_snapshot: snapshot,
+    }));
+    const articleValues = [
+      ...arrayFrom(source.articles || source.Articles),
+      ...arrayFrom(source.article_history || source.articleHistory),
+      ...projectArticleValues,
+      ...briefArticleValues,
+      ...snapshotArticleValues,
+    ];
+    const articleDraftValues = articleValues.flatMap((article) => [
+      ...arrayFrom(article.drafts || article.Drafts || article.draft_versions || article.draftVersions),
+      ...[article.current_draft || article.currentDraft || article.draft || article.Draft].filter(Boolean),
+    ].map((draft) => ({
+      article_id: article.id || article.ID || article.article_id || article.articleId,
+      persona_id: article.persona_id || article.personaId,
+      output_format_id: article.output_format_id || article.outputFormatId,
+      ...draft,
+    })));
+    const draftValues = [
+      ...arrayFrom(source.drafts || source.Drafts),
+      ...arrayFrom(source.draft_versions || source.draftVersions),
+      ...articleDraftValues,
     ];
     return {
       styles: styleValues.map(normalizeHistoryStyle)
         .filter((item) => item.id)
         .filter((item) => historyItemMatches(item, personaId, formatId)),
       sessions: uniqueHistoryItems(sessionValues.map(normalizeHistorySession)
+        .filter((item) => item.id)
+        .filter((item) => historyItemMatches(item, personaId, formatId))),
+      projects: uniqueHistoryItems(projectValues.map(normalizeHistoryProject)
+        .filter((item) => item.id)
+        .filter((item) => historyItemMatches(item, personaId, formatId))),
+      articles: uniqueHistoryItems(articleValues.map(normalizeHistoryArticle)
+        .filter((item) => item.id)
+        .filter((item) => historyItemMatches(item, personaId, formatId))),
+      drafts: uniqueHistoryItems(draftValues.map(normalizeHistoryDraft)
         .filter((item) => item.id)
         .filter((item) => historyItemMatches(item, personaId, formatId))),
     };
@@ -1144,6 +1458,89 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  function normalizeHistoryProject(item = {}) {
+    const project = item.project || item.Project || {};
+    const id = String(item.project_id || item.projectId || project.id || project.ID || item.id || item.ID || '').trim();
+    return {
+      ...item,
+      id,
+      title: item.title || item.name || item.label || item.display_name || item.displayName || project.title || project.Title || project.name || project.Name || id,
+      personaId: item.persona_id || item.personaId || project.persona_id || project.PersonaID || '',
+      outputFormatId: item.output_format_id || item.outputFormatId || project.output_format_id || project.OutputFormatID || '',
+      status: item.status || item.Status || project.status || project.Status || '',
+      articleCount: item.article_count ?? item.articleCount ?? project.article_count ?? project.ArticleCount,
+      articles: arrayFrom(item.articles || item.Articles || project.articles || project.Articles).map((article) => normalizeHistoryArticle({ project_id: id, ...article })),
+      updatedAt: item.updated_at || item.updatedAt || item.created_at || item.createdAt || project.updated_at || project.UpdatedAt || '',
+      createdAt: item.created_at || item.createdAt || project.created_at || project.CreatedAt || '',
+    };
+  }
+
+  function normalizeHistoryArticle(item = {}) {
+    const article = item.article || item.Article || {};
+    const brief = item.brief || item.Brief || item.article_brief || item.articleBrief || article.brief || article.Brief || null;
+    const currentDraft = normalizeMaybeDraft(item.current_draft || item.currentDraft || item.draft || item.Draft || article.current_draft || article.CurrentDraft || null);
+    const draftVersions = arrayFrom(item.draft_versions || item.draftVersions || item.drafts || item.Drafts || article.draft_versions || article.DraftVersions || article.drafts || article.Drafts)
+      .map((draft) => normalizeHistoryDraft({ article_id: item.article_id || item.articleId || article.id || article.ID || item.id || item.ID, ...draft }))
+      .filter((draft) => draft.id || draft.markdown || draft.summary);
+    const id = String(item.article_id || item.articleId || article.id || article.ID || item.id || item.ID || '').trim();
+    const title = item.title || item.name || article.title || article.Title || briefField(brief, 'theme', 'Theme') || currentDraft?.title || id;
+    return {
+      ...item,
+      id,
+      projectId: item.project_id || item.projectId || article.project_id || article.ProjectID || '',
+      title,
+      theme: briefField(brief, 'theme', 'Theme'),
+      personaId: item.persona_id || item.personaId || article.persona_id || article.PersonaID || briefField(brief, 'persona_id', 'PersonaID') || '',
+      outputFormatId: item.output_format_id || item.outputFormatId || article.output_format_id || article.OutputFormatID || briefField(brief, 'output_format_id', 'OutputFormatID') || '',
+      styleProfileId: item.style_profile_id || item.styleProfileId || article.style_profile_id || article.StyleProfileID || briefField(brief, 'style_profile_id', 'StyleProfileID') || '',
+      sessionId: item.session_id || item.sessionId || item.brief_session_id || item.briefSessionId || article.session_id || article.SessionID || '',
+      briefId: item.brief_id || item.briefId || article.brief_id || article.BriefID || '',
+      status: item.status || item.Status || item.phase || item.Phase || article.status || article.Status || '',
+      brief,
+      currentDraft,
+      draftVersions,
+      sourceSnapshot: item.source_snapshot || item.sourceSnapshot || article.source_snapshot || article.SourceSnapshot || null,
+      updatedAt: item.updated_at || item.updatedAt || item.created_at || item.createdAt || article.updated_at || article.UpdatedAt || '',
+      createdAt: item.created_at || item.createdAt || article.created_at || article.CreatedAt || '',
+    };
+  }
+
+  function normalizeMaybeDraft(draft) {
+    if (!draft) {
+      return null;
+    }
+    const normalized = normalizeHistoryDraft(draft);
+    return normalized.id || normalized.markdown || normalized.summary ? normalized : null;
+  }
+
+  function normalizeHistoryDraft(item = {}) {
+    const draft = item.draft || item.Draft || {};
+    const markdown = item.markdown || item.Markdown || item.draft_markdown || item.draftMarkdown || item.text || item.Text || item.body || item.Body || item.content || item.Content || draft.markdown || draft.Markdown || draft.text || draft.Text || '';
+    const id = String(item.draft_id || item.draftId || draft.id || draft.ID || item.id || item.ID || '').trim();
+    return {
+      ...item,
+      id,
+      articleId: item.article_id || item.articleId || draft.article_id || draft.ArticleID || '',
+      personaId: item.persona_id || item.personaId || draft.persona_id || draft.PersonaID || '',
+      outputFormatId: item.output_format_id || item.outputFormatId || draft.output_format_id || draft.OutputFormatID || '',
+      sessionId: item.session_id || item.sessionId || item.brief_session_id || item.briefSessionId || draft.session_id || draft.SessionID || '',
+      styleProfileId: item.style_profile_id || item.styleProfileId || draft.style_profile_id || draft.StyleProfileID || '',
+      title: item.title || item.name || draft.title || draft.Title || markdownTitle(markdown) || id,
+      version: item.version ?? item.Version ?? item.attempt ?? item.Attempt ?? item.revision ?? item.Revision ?? '',
+      kind: item.kind || item.Kind || '',
+      status: item.status || item.Status || '',
+      markdown,
+      summary: item.summary || item.Summary || draft.summary || draft.Summary || '',
+      score: item.score ?? item.Score ?? item.quality_gate?.score ?? item.qualityGate?.score ?? draft.score ?? draft.Score,
+      passed: item.passed ?? item.Passed ?? item.evaluation?.passed ?? item.Evaluation?.Passed,
+      runes: item.runes ?? item.Runes ?? item.quality_gate?.runes ?? item.qualityGate?.runes,
+      validationError: item.validation_error || item.validationError || item.ValidationError || '',
+      verification: item.verification || item.Verification || null,
+      updatedAt: item.updated_at || item.updatedAt || item.created_at || item.createdAt || draft.updated_at || draft.UpdatedAt || '',
+      createdAt: item.created_at || item.createdAt || draft.created_at || draft.CreatedAt || '',
+    };
+  }
+
   function normalizeHistoryQuestion(question) {
     if (!question) {
       return null;
@@ -1172,6 +1569,37 @@ document.addEventListener('DOMContentLoaded', () => {
     return state.historySessions.find((item) => item.id === id) || null;
   }
 
+  function findHistoryProject(id) {
+    return state.historyProjects.find((item) => item.id === id) || null;
+  }
+
+  function findHistoryArticle(id) {
+    return state.historyArticles.find((item) => item.id === id) || null;
+  }
+
+  function findHistoryDraft(id) {
+    return state.historyDrafts.find((item) => item.id === id) || null;
+  }
+
+  function filteredHistoryArticles() {
+    const projectId = el.historyProjectSelect.value;
+    if (!projectId) {
+      return state.historyArticles;
+    }
+    return state.historyArticles.filter((article) => !article.projectId || article.projectId === projectId);
+  }
+
+  function filteredHistoryDrafts() {
+    const articleId = el.historyArticleSelect.value;
+    if (!articleId) {
+      return state.historyDrafts;
+    }
+    const article = state.selectedHistoryArticle || findHistoryArticle(articleId);
+    const articleDrafts = article?.draftVersions || [];
+    const globalDrafts = state.historyDrafts.filter((draft) => !draft.articleId || draft.articleId === articleId);
+    return uniqueHistoryItems([...articleDrafts, ...globalDrafts]);
+  }
+
   function uniqueHistoryItems(items) {
     const byId = new Map();
     items.forEach((item) => {
@@ -1181,6 +1609,248 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     return [...byId.values()];
+  }
+
+  function mergeProjectDetailIntoHistory(project) {
+    if (!project) {
+      return;
+    }
+    state.historyProjects = uniqueHistoryItems([project, ...state.historyProjects]);
+    if (project.articles.length) {
+      state.historyArticles = uniqueHistoryItems([...project.articles, ...state.historyArticles]);
+    }
+  }
+
+  function mergeArticleDetailIntoHistory(article) {
+    if (!article) {
+      return;
+    }
+    state.historyArticles = uniqueHistoryItems([article, ...state.historyArticles]);
+    if (article.draftVersions.length) {
+      state.historyDrafts = uniqueHistoryItems([...article.draftVersions, ...state.historyDrafts]);
+    }
+    if (article.currentDraft) {
+      state.historyDrafts = uniqueHistoryItems([article.currentDraft, ...state.historyDrafts]);
+    }
+  }
+
+  function mergeDraftDetailIntoHistory(draft) {
+    if (!draft) {
+      return;
+    }
+    state.historyDrafts = uniqueHistoryItems([draft, ...state.historyDrafts]);
+  }
+
+  function renderHistoryArticleDetail(options = {}) {
+    renderHistoryProjectCard(state.selectedHistoryProject, options.warning);
+    renderHistoryArticleCard(state.selectedHistoryArticle, options.warning);
+    const article = state.selectedHistoryArticle;
+    const selectedDraft = state.selectedHistoryDraft;
+    renderHistoryBriefCard(article?.brief || null);
+    renderHistoryCurrentDraftCard(selectedDraft || article?.currentDraft || null);
+    renderHistoryDraftVersionsCard(article?.draftVersions || filteredHistoryDrafts());
+    renderHistorySourceSnapshotCard(article?.sourceSnapshot || null);
+  }
+
+  function renderHistoryProjectCard(project, warning) {
+    if (!project) {
+      fillArtifactCard(el.historyProjectCard, null, [], [], 'プロジェクトを選択すると、記事一覧と更新状況をここに表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historyProjectCard,
+      project.title || 'プロジェクト',
+      [
+        ['Project', project.id],
+        ['Persona', project.personaId],
+        ['Format', project.outputFormatId],
+        ['Status', project.status],
+        ['Updated', formatDateTime(project.updatedAt)],
+      ],
+      [
+        ['記事', [`${project.articleCount ?? project.articles.length ?? 0}件`]],
+        warning ? ['注意', [warning]] : null,
+      ].filter(Boolean),
+    );
+  }
+
+  function renderHistoryArticleCard(article, warning) {
+    if (!article) {
+      fillArtifactCard(el.historyArticleCard, null, [], warning ? [['注意', [warning]]] : [], '記事を選択すると、ブリーフ、下書き、参照ソースの要約をここに表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historyArticleCard,
+      article.title || '記事',
+      [
+        ['Article', article.id],
+        ['Project', article.projectId],
+        ['Persona', article.personaId],
+        ['Format', article.outputFormatId],
+        ['Status', article.status],
+        ['Updated', formatDateTime(article.updatedAt)],
+      ],
+      [
+        ['ブリーフ', [article.brief ? briefField(article.brief, 'theme', 'Theme') || '保存済み' : '未接続または未作成']],
+        ['下書き', [`${article.draftVersions.length}件のバージョン${article.currentDraft ? ' / 現在版あり' : ''}`]],
+        warning ? ['注意', [warning]] : null,
+      ].filter(Boolean),
+    );
+  }
+
+  function renderHistoryBriefCard(brief) {
+    if (!brief) {
+      fillArtifactCard(el.historyArticleBriefCard, null, [], [], '記事ブリーフはまだありません。詳細API接続後、テーマ、読者、含める内容を要約表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historyArticleBriefCard,
+      briefField(brief, 'theme', 'Theme') || '記事ブリーフ',
+      [
+        ['Persona', briefField(brief, 'persona_id', 'PersonaID')],
+        ['Format', briefField(brief, 'output_format_id', 'OutputFormatID')],
+        ['Style', briefField(brief, 'style_profile_id', 'StyleProfileID')],
+      ],
+      [
+        ['読者', [briefField(brief, 'reader', 'Reader')]],
+        ['冒頭の具体例', [briefField(brief, 'opening_episode', 'OpeningEpisode')]],
+        ['必ず含めること', [briefField(brief, 'must_include', 'MustInclude')]],
+        ['読後アクション', [briefField(brief, 'expected_reader_action', 'ExpectedReaderAction')]],
+      ],
+    );
+  }
+
+  function renderHistoryCurrentDraftCard(draft) {
+    if (!draft) {
+      fillArtifactCard(el.historyCurrentDraftCard, null, [], [], '現在の下書きはまだありません。下書き詳細API接続後、本文の冒頭と評価を表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historyCurrentDraftCard,
+      draft.title || '現在の下書き',
+      [
+        ['Draft', draft.id],
+        ['Version', draft.version],
+        ['Score', draft.score === undefined ? '' : Number(draft.score).toFixed(1)],
+        ['Status', draft.status || draft.kind],
+        ['Updated', formatDateTime(draft.updatedAt)],
+      ],
+      [
+        ['本文要約', summarizeDraftLines(draft, 5)],
+        draft.validationError ? ['検証メモ', [draft.validationError]] : null,
+      ].filter(Boolean),
+    );
+  }
+
+  function renderHistoryDraftVersionsCard(drafts) {
+    const versions = arrayFrom(drafts).filter((draft) => draft.id || draft.markdown || draft.summary);
+    if (!versions.length) {
+      fillArtifactCard(el.historyDraftVersionsCard, null, [], [], '下書きバージョンはまだありません。保存済みバージョンがあると番号、評価、更新日時を一覧表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historyDraftVersionsCard,
+      '下書きバージョン',
+      [['Versions', versions.length]],
+      [['一覧', versions.slice(0, 8).map(historyDraftVersionLine)]],
+    );
+  }
+
+  function renderHistorySourceSnapshotCard(snapshot) {
+    const normalized = normalizeSourceSnapshot(snapshot);
+    if (!normalized) {
+      fillArtifactCard(el.historySourceSnapshotCard, null, [], [], 'ソーススナップショットはまだありません。接続後、参照記事や取得日時を表示します。');
+      return;
+    }
+    fillArtifactCard(
+      el.historySourceSnapshotCard,
+      normalized.title || 'ソーススナップショット',
+      [
+        ['Fetched', formatDateTime(normalized.fetchedAt)],
+        ['Articles', normalized.articles.length],
+      ],
+      [
+        ['参照ソース', normalized.articles.length ? normalized.articles.slice(0, 6).map(sourceArticleLine) : [normalized.summary]],
+      ],
+    );
+  }
+
+  function fillArtifactCard(card, title, metaItems, sections, emptyText) {
+    card.innerHTML = '';
+    if (!title && !arrayFrom(sections).length) {
+      card.className = 'artifact-card empty';
+      card.textContent = emptyText;
+      return;
+    }
+    card.className = 'artifact-card';
+    if (title) {
+      card.appendChild(createArtifactHeader(title, metaItems));
+    }
+    arrayFrom(sections).forEach(([sectionTitle, values]) => {
+      const visibleValues = arrayFrom(values).filter((value) => String(value || '').trim());
+      if (visibleValues.length) {
+        card.appendChild(createArtifactSection(sectionTitle, visibleValues));
+      }
+    });
+  }
+
+  function normalizeSourceSnapshot(snapshot) {
+    if (!snapshot) {
+      return null;
+    }
+    if (Array.isArray(snapshot)) {
+      return {
+        title: 'ソーススナップショット',
+        fetchedAt: '',
+        summary: '',
+        articles: snapshot,
+      };
+    }
+    if (typeof snapshot === 'string') {
+      return {
+        title: 'ソーススナップショット',
+        fetchedAt: '',
+        summary: snapshot,
+        articles: [],
+      };
+    }
+    const articles = arrayFrom(snapshot.articles || snapshot.Articles || snapshot.sources || snapshot.Sources);
+    return {
+      title: snapshot.title || snapshot.Title || snapshot.source_selector || snapshot.sourceSelector || '',
+      fetchedAt: snapshot.fetched_at || snapshot.fetchedAt || snapshot.created_at || snapshot.createdAt || '',
+      summary: snapshot.summary || snapshot.Summary || snapshot.url || snapshot.URL || '',
+      articles,
+    };
+  }
+
+  function sourceArticleLine(article) {
+    const title = article.title || article.Title || article.id || article.ID || '参照記事';
+    const url = article.url || article.URL || '';
+    const fetchedAt = formatDateTime(article.fetched_at || article.fetchedAt || article.at || article.At);
+    return [title, url, fetchedAt].filter(Boolean).join(' / ');
+  }
+
+  function summarizeDraftLines(draft, limit) {
+    return compactTextLines(draft.markdown || draft.summary || '', limit).map((line) => line.replace(/^#{1,6}\s+/, ''));
+  }
+
+  function historyDraftVersionLine(draft) {
+    const title = draft.title || draft.id || '下書き';
+    const version = draft.version ? `v${draft.version}` : draft.kind || '';
+    const score = draft.score === undefined ? '' : `score ${Number(draft.score).toFixed(1)}`;
+    const updatedAt = formatDateTime(draft.updatedAt || draft.createdAt);
+    return [version, title, score, updatedAt].filter(Boolean).join(' / ');
+  }
+
+  function historyDraftResumeText(draft) {
+    const score = draft.score === undefined ? '' : ` / style score ${Number(draft.score).toFixed(1)}`;
+    const version = draft.version ? ` v${draft.version}` : '';
+    return `保存済み下書き${version}をMarkdownエディタに反映しました${score}。`;
+  }
+
+  function markdownTitle(markdown) {
+    const heading = String(markdown || '').split('\n').find((line) => line.trim().startsWith('# '));
+    return heading ? heading.replace(/^#\s+/, '').trim() : '';
   }
 
 

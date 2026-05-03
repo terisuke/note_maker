@@ -61,7 +61,11 @@ func registerRoutes(r *mux.Router) {
 	r.HandleFunc("/api/brief-sessions/{id}/answers", handlers.AnswerBriefSessionHandler).Methods("POST")
 	r.HandleFunc("/api/brief-sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
 	r.HandleFunc("/api/sessions/{id}/answers/{answer_id}/edit", handlers.EditBriefAnswerHandler).Methods("POST")
+	r.HandleFunc("/api/projects", handlers.ListProjectsHandler).Methods("GET")
+	r.HandleFunc("/api/projects/{id}", handlers.GetProjectHandler).Methods("GET")
+	r.HandleFunc("/api/articles/{id}", handlers.GetArticleHandler).Methods("GET")
 	r.HandleFunc("/api/drafts", handlers.GenerateDraftHandler).Methods("POST")
+	r.HandleFunc("/api/drafts/{id}", handlers.GetDraftHandler).Methods("GET")
 	r.HandleFunc("/api/drafts/{id}/regenerate-section", handlers.RegenerateDraftSectionHandler).Methods("POST")
 
 	// ルートパスへのアクセスはindex.htmlにリダイレクト

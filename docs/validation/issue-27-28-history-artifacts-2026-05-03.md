@@ -1,7 +1,7 @@
 # Issue 27/28 history and artifact UI/API validation
 
 Date: 2026-05-03
-Branch: `codex/issue27-28-history-artifacts`
+Branch: `codex/issue27-28-history-artifacts`; reviewed again from `codex/phase-c-history-e2e`
 
 ## Scope
 
@@ -61,6 +61,27 @@ ok  	github.com/teradakousuke/note_maker/internal/handlers	(cached)
 ok  	github.com/teradakousuke/note_maker/static	(cached)
 ```
 
+Follow-up review on `codex/phase-c-history-e2e`:
+
+```sh
+go test ./...
+node --check static/js/script.js
+git diff --check
+```
+
+These passed after the project/article/draft history follow-up was integrated. The follow-up adds SQLite-backed read routes and UI contract coverage, but it is still browser-contract coverage rather than a real browser E2E close signal for #13.
+
+Final follow-up validation after the fixture alignment:
+
+```sh
+go test ./...
+go test ./cmd/server ./internal/handlers ./static
+node --check static/js/script.js
+git diff --check
+```
+
+All passed. Project/article/draft history can continue as implementation work, but #13 still needs real browser E2E before it closes.
+
 ## Acceptance Status
 
 - Saved style guides can be listed for picker UIs: done.
@@ -75,5 +96,5 @@ ok  	github.com/teradakousuke/note_maker/static	(cached)
 
 - Add-persona authoring UI is still unimplemented.
 - Broader edit persistence beyond the existing fork-on-edit/session save flow is still unimplemented.
-- Project/article/draft history browsing from SQLite remains unimplemented in the UI.
-- Browser E2E coverage for the new history picker and cards remains under [#13](https://github.com/terisuke/note_maker/issues/13).
+- Project/article/draft history browsing from SQLite has a follow-up implementation through read APIs and history cards. Treat it as a separate #83 product-readiness cut from the original #27/#28 first-cut validation.
+- Browser E2E coverage for the new history picker and cards remains under [#13](https://github.com/terisuke/note_maker/issues/13). Static contract tests alone are not enough to close #13.
