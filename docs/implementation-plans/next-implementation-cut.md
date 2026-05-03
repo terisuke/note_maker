@@ -83,13 +83,14 @@ The current cut fixed the evaluation reliability gap before trusting that score:
 - Structural signals are enforced, not only reported.
 - The web response includes `quality_gate` details so failed scores keep the draft visible.
 
-The bounded Zenn proof now passes:
+The bounded Cloudia technical proofs now pass:
 
 | Case | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification |
 |---|---:|---:|---:|---:|---:|---|
 | `cloudia_zenn_tutorial` | `741.93` | `86456ms` | `2205` | `88.1 / 82.0` | `5040 / 1800` | passed |
+| `cloudia_qiita_how_to` | `598.62` | `111645ms` | `1336` | `83.7 / 82.0` | `3318 / 1400` | passed |
 
-The remaining #74 work is not another Zenn-only calibration pass. It is the adjacent `cloudia_qiita_how_to` proof and then the full publishing-target matrix.
+The remaining #74 work is the full publishing-target matrix.
 
 ## Parallel implementation plan
 
@@ -97,20 +98,18 @@ Use subagents with disjoint write scopes when implementation resumes:
 
 | Lane | Issue | Subagent role | Write scope | Done when |
 |---|---|---|---|---|
-| A | [#74](https://github.com/terisuke/note_maker/issues/74) | Adjacent Cloudia/Qiita proof worker | `cmd/scenario/*`, validation docs, no evaluator weakening | `cloudia_qiita_how_to` passes without Zenn notation leakage |
-| B | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
+| A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
 | D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | `static/*`, read APIs for projects/sessions/drafts once exposed | persona/session picker and human-readable brief/style cards use persisted state |
 | E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | browser tests and fixtures | persona/format switching, edit/fork, streaming, regenerate-section, and legacy localStorage migration are covered |
 
-Lane A should land before Lane B spends full live Evo X2 time. Lane D/E can continue in parallel when they do not need the same frontend files.
+Lane A is the next expensive Evo X2 spend. Lane D/E can continue in parallel when they do not need the same frontend files.
 
 ## Recommended order
 
-1. Run `cloudia_qiita_how_to` as the adjacent Cloudia technical proof. It should keep the improved Cloudia voice while preserving Qiita-specific notation.
-2. Run the full note/Qiita/Zenn/company-blog matrix under #74 and update #40 with the aggregate JSON/Markdown plus artifact paths.
-3. Close #40 only when every publishing target records endpoint, phase models, elapsed time, runes, style score, structural signals, final verification, `quality_gate`, and artifacts with no runtime, format-validation, final-verification, structural-signal, or strict style-gate failures. Homepage can remain a separate format check and is not part of the #40 closure gate.
-4. Continue #27/#28 and #13 in parallel as product-readiness work. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
+1. Run the full note/Qiita/Zenn/company-blog matrix under #74 and update #40 with the aggregate JSON/Markdown plus artifact paths.
+2. Close #40 only when every publishing target records endpoint, phase models, elapsed time, runes, style score, structural signals, final verification, `quality_gate`, and artifacts with no runtime, format-validation, final-verification, structural-signal, or strict style-gate failures. Homepage can remain a separate format check and is not part of the #40 closure gate.
+3. Continue #27/#28 and #13 in parallel as product-readiness work. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable.
 
 ## Why not run the full Evo X2 matrix now?
 
-The source, prompt, artifact, repair, and gate layers are ready, but full Evo X2 draft generation is expensive and can take 20+ minutes per run. The Zenn proof now passes, so the next useful spend is the adjacent Qiita case to catch cross-format notation regression before the full #40 run.
+The source, prompt, artifact, repair, and gate layers are ready, but full Evo X2 draft generation is expensive and can take 20+ minutes per run. The Zenn and Qiita bounded proofs now pass, so the next useful spend is the full #40 publishing-target run.
