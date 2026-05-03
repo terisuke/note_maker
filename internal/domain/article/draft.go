@@ -51,6 +51,7 @@ func normalizeDraft(raw string) string {
 	text := strings.TrimSpace(raw)
 	text = thinkingBlockPattern.ReplaceAllString(text, "")
 	text = strings.TrimSpace(text)
+	text = unwrapFencedFrontmatter(text)
 	if strings.HasPrefix(text, "```") && !strings.HasPrefix(text, "```markdown") && !strings.HasPrefix(text, "```md") {
 		return text
 	}
@@ -58,6 +59,13 @@ func normalizeDraft(raw string) string {
 		text = strings.TrimSpace(match[1])
 	}
 	droppedPreambleWithFence := false
+	if idx := frontmatterStartIndex(text); idx > 0 {
+		preamble := strings.TrimSpace(text[:idx])
+		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
+			droppedPreambleWithFence = strings.Contains(preamble, "```")
+			text = strings.TrimSpace(text[idx:])
+		}
+	}
 	if idx := strings.Index(text, "# "); idx > 0 && !strings.HasPrefix(text, "---\n") {
 		preamble := strings.TrimSpace(text[:idx])
 		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
@@ -86,6 +94,46 @@ func normalizeDraft(raw string) string {
 		cleaned = append(cleaned, line)
 	}
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
+}
+
+func unwrapFencedFrontmatter(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) < 4 {
+		return text
+	}
+	opener := strings.ToLower(strings.TrimSpace(lines[0]))
+	if opener != "```yaml" && opener != "```yml" {
+		return text
+	}
+	closing := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "```" {
+			closing = i
+			break
+		}
+	}
+	if closing < 0 {
+		return text
+	}
+	frontmatter := strings.TrimSpace(strings.Join(lines[1:closing], "\n"))
+	if !strings.HasPrefix(frontmatter, "---\n") {
+		return text
+	}
+	rest := strings.TrimSpace(strings.Join(lines[closing+1:], "\n"))
+	if rest == "" {
+		return frontmatter
+	}
+	return frontmatter + "\n\n" + rest
+}
+
+func frontmatterStartIndex(text string) int {
+	if strings.HasPrefix(text, "---\n") {
+		return 0
+	}
+	if idx := strings.Index(text, "\n---\n"); idx >= 0 {
+		return idx + 1
+	}
+	return -1
 }
 
 func canDropPreamble(text string) bool {

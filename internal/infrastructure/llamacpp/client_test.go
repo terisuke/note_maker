@@ -106,6 +106,77 @@ func TestGenerateStreamCallsChatCompletionsAndAssemblesChunks(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamFallsBackAfterIdlePrimaryStream(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer primaryServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# Fallback\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "primary")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback")
+	t.Setenv("LLM_STREAM_IDLE_TIMEOUT_MILLISECONDS", "20")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	var chunks []string
+	draft, err := client.GenerateStream(context.Background(), "write", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate stream with fallback: %v", err)
+	}
+	if draft != "# Fallback" || strings.Join(chunks, "") != "# Fallback" {
+		t.Fatalf("unexpected fallback stream: draft=%q chunks=%q", draft, strings.Join(chunks, ""))
+	}
+}
+
+func TestGenerateStreamFallsBackWhenPrimaryStreamNeverStarts(t *testing.T) {
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer primaryServer.Close()
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# First Byte Fallback\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer fallbackServer.Close()
+
+	t.Setenv("LLM_BASE_URL", primaryServer.URL+"/v1")
+	t.Setenv("LLM_MODEL", "primary")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", fallbackServer.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "fallback")
+	t.Setenv("LLM_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS", "20")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.GenerateStream(context.Background(), "write", nil)
+	if err != nil {
+		t.Fatalf("generate stream with first-byte fallback: %v", err)
+	}
+	if draft != "# First Byte Fallback" {
+		t.Fatalf("unexpected fallback stream: %q", draft)
+	}
+}
+
 func TestGenerateWithSystemUsesCallerPrompt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request chatCompletionRequest

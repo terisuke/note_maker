@@ -109,6 +109,7 @@ type resultRow struct {
 	ActiveGates           scenarioGates `json:"active_gates"`
 	FailureGroup          string        `json:"failure_group,omitempty"`
 	ElapsedSeconds        float64       `json:"elapsed_seconds,omitempty"`
+	Attempt               int           `json:"attempt,omitempty"`
 	FirstChunkMS          int           `json:"first_chunk_ms,omitempty"`
 	Chunks                int           `json:"chunks,omitempty"`
 	Score                 float64       `json:"score,omitempty"`
@@ -130,6 +131,7 @@ type resultRow struct {
 	VerificationPath      string        `json:"verification_path,omitempty"`
 	FailurePath           string        `json:"failure_path,omitempty"`
 	RawOutputPaths        []string      `json:"raw_output_paths,omitempty"`
+	QualityGate           qualityGate   `json:"quality_gate"`
 	Error                 string        `json:"error,omitempty"`
 }
 
@@ -138,6 +140,25 @@ type scenarioGates struct {
 	MinStyleScore        float64  `json:"min_style_score"`
 	StructuralGateLabels []string `json:"structural_gate_labels"`
 	StructuralSignals    []string `json:"structural_signals"`
+}
+
+type qualityGate struct {
+	Passed                bool     `json:"passed"`
+	Outcome               string   `json:"outcome"`
+	Reason                string   `json:"reason,omitempty"`
+	FailureGroup          string   `json:"failure_group,omitempty"`
+	StylePassed           bool     `json:"style_passed"`
+	Score                 float64  `json:"score,omitempty"`
+	MinStyleScore         float64  `json:"min_style_score,omitempty"`
+	LengthPassed          bool     `json:"length_passed"`
+	Runes                 int      `json:"runes,omitempty"`
+	MinRunes              int      `json:"min_runes,omitempty"`
+	VerificationPerformed bool     `json:"verification_performed"`
+	VerificationPassed    bool     `json:"verification_passed"`
+	StructuralGateChecked bool     `json:"structural_gate_checked"`
+	StructuralGatePassed  bool     `json:"structural_gate_passed"`
+	StructuralGateLabels  []string `json:"structural_gate_labels,omitempty"`
+	ScenarioPassed        bool     `json:"scenario_passed"`
 }
 
 func main() {
@@ -171,6 +192,7 @@ func main() {
 	}
 
 	selectedIDs := caseIDs(cases)
+	rows = attachQualityGates(rows)
 	report := aggregateReport{
 		GeneratedBy:     "cmd/scenario/live_media_matrix",
 		Live:            live,
@@ -286,7 +308,7 @@ func runCaseForRun(item matrixCase, outputDir string, runOrdinal int) resultRow 
 			row.Error = err.Error()
 		}
 		applyFailureArtifacts(&row, outputDir)
-		if row.FailureGroup == "" {
+		if row.FailureGroup == "" || row.FailureGroup == "final_verification" {
 			row.FailureGroup = failureGroup(row)
 		}
 		return row
@@ -377,6 +399,7 @@ func applyRunMetrics(row *resultRow, values map[string]string, gates scenarioGat
 		return
 	}
 	row.ElapsedSeconds = floatValue(values["elapsed_seconds"])
+	row.Attempt = intValue(values["attempt"])
 	row.FirstChunkMS = intValue(values["first_chunk_ms"])
 	row.Chunks = intValue(values["chunks"])
 	row.Score = floatValue(values["score"])
@@ -457,12 +480,12 @@ func failureGroup(row resultRow) string {
 	switch {
 	case strings.TrimSpace(row.FailurePath) != "":
 		return "generation_or_validation"
-	case row.VerificationPerformed && !row.VerificationPassed:
-		return "final_verification"
-	case row.Score > 0 && row.MinStyleScore > 0 && row.Score < row.MinStyleScore:
+	case styleScoreFailure(row):
 		return "style_score"
 	case row.Runes > 0 && row.MinRunes > 0 && row.Runes < row.MinRunes:
 		return "draft_length"
+	case row.VerificationPerformed && !row.VerificationPassed:
+		return "final_verification"
 	case strings.TrimSpace(row.Error) != "":
 		return "runtime_or_runner"
 	default:
@@ -470,7 +493,54 @@ func failureGroup(row resultRow) string {
 	}
 }
 
+func styleScoreFailure(row resultRow) bool {
+	if row.Score > 0 && row.MinStyleScore > 0 && row.Score < row.MinStyleScore {
+		return true
+	}
+	errorText := strings.ToLower(strings.TrimSpace(row.Error))
+	return strings.Contains(errorText, "style score") && strings.Contains(errorText, "below scenario minimum")
+}
+
+func attachQualityGates(rows []resultRow) []resultRow {
+	out := append([]resultRow(nil), rows...)
+	for i := range out {
+		out[i].QualityGate = qualityGateForRow(out[i])
+	}
+	return out
+}
+
+func qualityGateForRow(row resultRow) qualityGate {
+	outcome := rowOutcome(row)
+	gate := qualityGate{
+		Passed:                outcome == "passed",
+		Outcome:               outcome,
+		Reason:                failureReason(row),
+		FailureGroup:          row.FailureGroup,
+		Score:                 row.Score,
+		MinStyleScore:         row.MinStyleScore,
+		Runes:                 row.Runes,
+		MinRunes:              row.MinRunes,
+		VerificationPerformed: row.VerificationPerformed,
+		VerificationPassed:    row.VerificationPassed,
+		StructuralGateLabels:  append([]string(nil), row.ActiveGates.StructuralGateLabels...),
+		ScenarioPassed:        row.ScenarioPassed,
+	}
+	if row.MinStyleScore > 0 {
+		gate.StylePassed = row.Score >= row.MinStyleScore
+	}
+	if row.MinRunes > 0 {
+		gate.LengthPassed = row.Runes >= row.MinRunes
+	}
+	gate.StructuralGateChecked = strings.TrimSpace(row.DraftPath) != "" && len(row.ActiveGates.StructuralSignals) > 0
+	gate.StructuralGatePassed = !gate.StructuralGateChecked || row.FailureGroup != "structural_gate"
+	if gate.Passed {
+		gate.Reason = ""
+	}
+	return gate
+}
+
 type failureAttemptReport struct {
+	Attempt        int                   `json:"attempt"`
 	RuntimeMetrics attemptRuntimeMetrics `json:"runtime_metrics"`
 	Context        failureContext        `json:"context"`
 	RawOutputs     []rawAttemptArtifact  `json:"raw_outputs"`
@@ -507,6 +577,9 @@ func applyFailureArtifacts(row *resultRow, outputDir string) {
 		return
 	}
 	row.FailurePath = path
+	if report.Attempt > 0 {
+		row.Attempt = report.Attempt
+	}
 	if row.ElapsedSeconds == 0 {
 		row.ElapsedSeconds = report.RuntimeMetrics.ElapsedSeconds
 	}
@@ -598,10 +671,10 @@ func markdownReport(report aggregateReport) string {
 	}
 
 	builder.WriteString("## Case Results\n\n")
-	builder.WriteString("| Run | Case | Medium | Style | Outcome | Status | Gates | Seconds | Score | Runes | Verification | Output |\n")
-	builder.WriteString("|---:|---|---|---|---|---|---|---:|---:|---:|---|---|\n")
+	builder.WriteString("| Run | Case | Medium | Style | Outcome | Status | Gates | Attempt | Seconds | Score | Runes | Verification | Output |\n")
+	builder.WriteString("|---:|---|---|---|---|---|---|---:|---:|---:|---:|---|---|\n")
 	for _, row := range report.Rows {
-		builder.WriteString(fmt.Sprintf("| %d | `%s` | %s | %s | %s | %s | %s | %.2f | %.1f / %.1f | %d / %d | %v | `%s` |\n",
+		builder.WriteString(fmt.Sprintf("| %d | `%s` | %s | %s | %s | %s | %s | %d | %.2f | %.1f / %.1f | %d / %d | %v | `%s` |\n",
 			row.RunOrdinal,
 			row.CaseID,
 			escapePipes(row.Medium),
@@ -609,6 +682,7 @@ func markdownReport(report aggregateReport) string {
 			rowOutcome(row),
 			row.Status,
 			escapePipes(gateSummary(row.ActiveGates)),
+			row.Attempt,
 			row.ElapsedSeconds,
 			row.Score,
 			row.MinStyleScore,

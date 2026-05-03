@@ -174,3 +174,47 @@ Final result:
 | `cloudia_zenn_tutorial` | failed | `702.17` | `73.6 / 82.0` | `3905 / 1800` | passed | strict style score |
 
 This is not a #40 acceptance pass yet, but it confirms the pipeline now progresses beyond the prior format-validation failure. The remaining failure is style calibration for Cloudia/Zenn, not Tailnet transport or Zenn syntax.
+
+## 2026-05-03 final publishing-target live matrix
+
+After the staged Zenn/Qiita slices passed, the full publishing-target matrix was rerun against Evo X2 Tailnet primary.
+
+Command:
+
+```sh
+RUN_LIVE_MEDIA_MATRIX=1 \
+SCENARIO_STREAM_DRAFT=1 \
+SCENARIO_OUTPUT_DIR=tmp/media_matrix \
+LIVE_MEDIA_MATRIX_OUTPUT_DIR=tmp/media_matrix/live \
+LIVE_MEDIA_MATRIX_CASES=terisuke_note_essay,cor_blog_technical_report,cor_blog_vision_sharing,cloudia_zenn_tutorial,cloudia_qiita_how_to \
+LLM_BASE_URL=http://evo-x2.tailb30e58.ts.net/v1 \
+DRAFT_LLM_MODEL=gemma4:31b \
+VERIFY_LLM_MODEL=gemma4:latest \
+go run ./cmd/scenario/live_media_matrix
+```
+
+Final result:
+
+| Case | Medium | Status | Attempt | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification | Quality gate |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
+| `terisuke_note_essay` | note | passed | 1 | `107.86` | `67818ms` | `1610` | `90.7 / 82.0` | `2849 / 2800` | passed | passed |
+| `cor_blog_technical_report` | Cor.inc blog | passed | 1 | `152.34` | `67984ms` | `1696` | `81.4 / 80.0` | `3329 / 2200` | passed | passed |
+| `cor_blog_vision_sharing` | Cor.inc blog | passed | 1 | `113.98` | `68986ms` | `1657` | `89.5 / 80.0` | `3156 / 1600` | passed | passed |
+| `cloudia_zenn_tutorial` | Zenn | passed | 1 | `121.14` | `65568ms` | `2686` | `86.4 / 82.0` | `5641 / 1800` | passed | passed |
+| `cloudia_qiita_how_to` | Qiita | passed | 2 | `114.75` | `68857ms` | `1898` | `82.2 / 82.0` | `3737 / 1400` | passed | passed |
+
+Aggregate:
+
+- `5/5` publishing-target rows passed.
+- Average seconds: `122.01`.
+- Average score: `86.0`.
+- Average runes: `3742`.
+- Runtime: `http://evo-x2.tailb30e58.ts.net/v1 / gemma4:31b`.
+- Artifacts: `tmp/media_matrix/live/aggregate.json`, `tmp/media_matrix/live/aggregate.md`.
+
+Acceptance interpretation:
+
+- Offline matrix and live draft phases now agree on case-specific profile/guide/brief artifacts.
+- Each live row records endpoint/model, elapsed seconds, first chunk, chunks, style score, runes, final verification, structural gates, and `quality_gate`.
+- Note, Cor blog, Zenn, and Qiita all pass their strict long-form gates.
+- Homepage remains a separate short HTML section check and is not part of this #40 closure gate.

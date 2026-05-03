@@ -69,16 +69,16 @@ func main() {
 	service := draftapp.NewServiceWithVerifier(client, draftapp.NewLightweightVerifier(verifyClient))
 
 	var result draftapp.GenerateResult
-	var finalElapsed time.Duration
-	var finalFirstChunk time.Duration
-	var finalChunks int
-	finalAttempt := 0
+	var bestAttempt scenarioAttemptResult
+	var currentAttempt int
+	retryFeedback := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		started := time.Now()
+		attemptBrief := briefWithScenarioRetryFeedback(brief, retryFeedback)
 		request := draftapp.GenerateRequest{
 			StyleGuide:    guide,
-			Brief:         brief,
+			Brief:         attemptBrief,
 			AuthorProfile: profile,
 		}
 		chunkCount := 0
@@ -111,28 +111,44 @@ func main() {
 			failurePath := writeFailureAttempt(outputDir, attempt, err, metrics, failureContext, artifacts)
 			fatalf("generate draft attempt %d: %v (failure=%s)", attempt, err, failurePath)
 		}
-		finalElapsed = elapsed
-		finalFirstChunk = firstChunk
-		finalChunks = chunkCount
-		finalAttempt = attempt
+		currentAttempt = attempt
 		writeRawAttemptArtifacts(outputDir, attempt, result.Attempts)
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("verification_attempt_%d.json", attempt)), result.Verification)
-		if result.Evaluation.Comparison.Score >= minStyleScore && len([]rune(result.Draft.Markdown())) >= minDraftRunes && verificationGatePassed(result.Verification) {
+		runes := len([]rune(result.Draft.Markdown()))
+		candidate := scenarioAttemptResult{
+			Attempt:         attempt,
+			Result:          result,
+			Runes:           runes,
+			Elapsed:         elapsed,
+			FirstChunk:      firstChunk,
+			StreamingChunks: chunkCount,
+		}
+		if betterScenarioAttempt(candidate, bestAttempt, minDraftRunes, minStyleScore) {
+			bestAttempt = candidate
+		}
+		if scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore) {
 			break
 		}
+		retryFeedback = scenarioRetryFeedback(result, runes, minDraftRunes, minStyleScore)
+	}
+	if bestAttempt.Attempt == 0 {
+		fatalf("no draft generation attempts completed")
 	}
 
+	result = bestAttempt.Result
 	writeFile(filepath.Join(outputDir, "draft.md"), result.Draft.Markdown()+"\n")
 	writeJSON(filepath.Join(outputDir, "evaluation.json"), result.Evaluation)
 	writeJSON(filepath.Join(outputDir, "verification.json"), result.Verification)
 
-	runes := len([]rune(result.Draft.Markdown()))
-	passesScenario := result.Evaluation.Comparison.Score >= minStyleScore && runes >= minDraftRunes && verificationGatePassed(result.Verification)
+	runes := bestAttempt.Runes
+	passesScenario := scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore)
 	fmt.Printf("draft generation scenario completed\n")
 	fmt.Printf("scenario_passed=%v\n", passesScenario)
-	fmt.Printf("attempt=%d\n", finalAttempt)
+	fmt.Printf("attempt=%d\n", bestAttempt.Attempt)
+	fmt.Printf("selected_attempt=%d\n", bestAttempt.Attempt)
+	fmt.Printf("current_attempt=%d\n", currentAttempt)
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
 	fmt.Printf("min_style_score=%.1f\n", minStyleScore)
@@ -141,11 +157,11 @@ func main() {
 	fmt.Printf("verification_performed=%v\n", result.Verification.Performed)
 	fmt.Printf("verification_passed=%v\n", result.Verification.Passed)
 	fmt.Printf("verification_summary=%s\n", result.Verification.Summary)
-	fmt.Printf("elapsed_seconds=%.2f\n", finalElapsed.Seconds())
+	fmt.Printf("elapsed_seconds=%.2f\n", bestAttempt.Elapsed.Seconds())
 	fmt.Printf("streaming=%v\n", streamDraft)
 	if streamDraft {
-		fmt.Printf("first_chunk_ms=%d\n", finalFirstChunk.Milliseconds())
-		fmt.Printf("chunks=%d\n", finalChunks)
+		fmt.Printf("first_chunk_ms=%d\n", bestAttempt.FirstChunk.Milliseconds())
+		fmt.Printf("chunks=%d\n", bestAttempt.StreamingChunks)
 	}
 	fmt.Printf("llm_base_url=%s\n", baseURL)
 	fmt.Printf("llm_model=%s\n", model)
@@ -194,6 +210,15 @@ type failureAttemptReport struct {
 	RuntimeMetrics  attemptRuntimeMetrics `json:"runtime_metrics"`
 	Context         failureAttemptContext `json:"context"`
 	RawOutputs      []rawAttemptArtifact  `json:"raw_outputs"`
+}
+
+type scenarioAttemptResult struct {
+	Attempt         int
+	Result          draftapp.GenerateResult
+	Runes           int
+	Elapsed         time.Duration
+	FirstChunk      time.Duration
+	StreamingChunks int
 }
 
 func generationAttemptsFromError(err error) []draftapp.GenerationAttempt {
@@ -254,6 +279,99 @@ func validationErrorFromGenerateError(err error) string {
 
 func verificationGatePassed(verification draftapp.FinalVerification) bool {
 	return !verification.Performed || verification.Passed
+}
+
+func scenarioAttemptPassed(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) bool {
+	return result.Evaluation.Comparison.Score >= minStyleScore && runes >= minRunes && verificationGatePassed(result.Verification)
+}
+
+func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes int, minStyleScore float64) bool {
+	if candidate.Attempt == 0 {
+		return false
+	}
+	if current.Attempt == 0 {
+		return true
+	}
+
+	candidatePassed := scenarioAttemptPassed(candidate.Result, candidate.Runes, minRunes, minStyleScore)
+	currentPassed := scenarioAttemptPassed(current.Result, current.Runes, minRunes, minStyleScore)
+	if candidatePassed != currentPassed {
+		return candidatePassed
+	}
+
+	candidateGateScore := scenarioAttemptGateScore(candidate.Result, candidate.Runes, minRunes, minStyleScore)
+	currentGateScore := scenarioAttemptGateScore(current.Result, current.Runes, minRunes, minStyleScore)
+	if candidateGateScore != currentGateScore {
+		return candidateGateScore > currentGateScore
+	}
+
+	candidateStyleScore := candidate.Result.Evaluation.Comparison.Score
+	currentStyleScore := current.Result.Evaluation.Comparison.Score
+	if candidateStyleScore != currentStyleScore {
+		return candidateStyleScore > currentStyleScore
+	}
+	if candidate.Runes != current.Runes {
+		return candidate.Runes > current.Runes
+	}
+	return candidate.Attempt > current.Attempt
+}
+
+func scenarioAttemptGateScore(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) int {
+	score := 0
+	if result.Evaluation.Comparison.Score >= minStyleScore {
+		score++
+	}
+	if runes >= minRunes {
+		score++
+	}
+	if verificationGatePassed(result.Verification) {
+		score++
+	}
+	return score
+}
+
+func briefWithScenarioRetryFeedback(brief briefdomain.ArticleBrief, feedback string) briefdomain.ArticleBrief {
+	feedback = strings.TrimSpace(feedback)
+	if feedback == "" {
+		return brief
+	}
+	updated := brief
+	updated.TargetLengthStructure = appendSentence(updated.TargetLengthStructure, feedback)
+	updated.MustInclude = appendSentence(updated.MustInclude, feedback)
+	return updated
+}
+
+func scenarioRetryFeedback(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) string {
+	var feedback []string
+	if runes < minRunes {
+		feedback = append(feedback, fmt.Sprintf("前回の下書きは%d字で、最低%d字に届かなかった。次は各見出しを具体例・判断理由・読者の次の行動で厚くし、必ず%d字以上にする", runes, minRunes, minRunes))
+	}
+	if result.Evaluation.Comparison.Score < minStyleScore {
+		feedback = append(feedback, fmt.Sprintf("前回の文体スコアは%.1fで、最低%.1fに届かなかった。文体ガイドの一人称、頻出テーマ、段落リズムを優先して全文を書き直す", result.Evaluation.Comparison.Score, minStyleScore))
+	}
+	if result.Verification.Performed && !result.Verification.Passed {
+		summary := strings.TrimSpace(result.Verification.Summary)
+		if summary == "" {
+			summary = "軽量検証が不合格だった"
+		}
+		feedback = append(feedback, "前回の最終検証は不合格だった: "+summary+"。事実関係、論理のつながり、媒体の目的を見直す")
+	}
+	if len(feedback) == 0 {
+		return ""
+	}
+	return "再生成条件: " + strings.Join(feedback, "。") + "。"
+}
+
+func appendSentence(base, addition string) string {
+	base = strings.TrimSpace(base)
+	addition = strings.TrimSpace(addition)
+	if base == "" {
+		return addition
+	}
+	if addition == "" || strings.Contains(base, addition) {
+		return base
+	}
+	return base + "\n" + addition
 }
 
 func validateScenarioInputs(profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, brief briefdomain.ArticleBrief) error {

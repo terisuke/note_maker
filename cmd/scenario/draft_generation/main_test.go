@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
+	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 )
@@ -118,5 +120,125 @@ func TestVerificationGateFailsPerformedFailedVerification(t *testing.T) {
 	}
 	if verificationGatePassed(draftapp.FinalVerification{Performed: true, Passed: false}) {
 		t.Fatal("performed failed verification should block scenario")
+	}
+}
+
+func TestScenarioRetryFeedbackCapturesLengthStyleAndVerificationFailures(t *testing.T) {
+	result := draftapp.GenerateResult{
+		Evaluation: draftapp.StyleEvaluation{
+			Comparison: articledomain.StyleComparison{Score: 73.5},
+		},
+		Verification: draftapp.FinalVerification{
+			Performed: true,
+			Passed:    false,
+			Summary:   "根拠が不足している",
+		},
+	}
+
+	feedback := scenarioRetryFeedback(result, 2554, 2800, 82)
+
+	for _, want := range []string{"最低2800字", "文体スコアは73.5", "根拠が不足している"} {
+		if !strings.Contains(feedback, want) {
+			t.Fatalf("feedback missing %q: %s", want, feedback)
+		}
+	}
+
+	brief := briefWithScenarioRetryFeedback(briefdomain.ArticleBrief{
+		MustInclude:           "体験を含める",
+		TargetLengthStructure: "3000字前後",
+	}, feedback)
+	if !strings.Contains(brief.MustInclude, "再生成条件") || !strings.Contains(brief.TargetLengthStructure, "最低2800字") {
+		t.Fatalf("brief retry feedback not applied: %+v", brief)
+	}
+}
+
+func TestBetterScenarioAttemptKeepsBestWhenRetryRegresses(t *testing.T) {
+	const (
+		minRunes      = 2400
+		minStyleScore = 80
+	)
+	selected := scenarioAttemptResult{
+		Attempt: 1,
+		Result: scenarioSelectionResult(87, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    false,
+			Summary:   "根拠が不足している",
+		}),
+		Runes: 3100,
+	}
+	regressedRetry := scenarioAttemptResult{
+		Attempt: 2,
+		Result: scenarioSelectionResult(58, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    true,
+		}),
+		Runes: 2600,
+	}
+
+	if betterScenarioAttempt(regressedRetry, selected, minRunes, minStyleScore) {
+		t.Fatalf("regressed retry replaced selected attempt; gate scores retry=%d selected=%d", scenarioAttemptGateScore(regressedRetry.Result, regressedRetry.Runes, minRunes, minStyleScore), scenarioAttemptGateScore(selected.Result, selected.Runes, minRunes, minStyleScore))
+	}
+}
+
+func TestBetterScenarioAttemptPrefersFullPassOverHigherFailingScore(t *testing.T) {
+	const (
+		minRunes      = 2400
+		minStyleScore = 80
+	)
+	selected := scenarioAttemptResult{
+		Attempt: 1,
+		Result: scenarioSelectionResult(96, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    false,
+		}),
+		Runes: 3600,
+	}
+	fullPass := scenarioAttemptResult{
+		Attempt: 2,
+		Result: scenarioSelectionResult(82, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    true,
+		}),
+		Runes: 2400,
+	}
+
+	if !betterScenarioAttempt(fullPass, selected, minRunes, minStyleScore) {
+		t.Fatal("full pass should replace higher-scoring failed verification attempt")
+	}
+}
+
+func TestBetterScenarioAttemptUsesLaterAttemptOnlyAsTieBreaker(t *testing.T) {
+	const (
+		minRunes      = 2400
+		minStyleScore = 80
+	)
+	selected := scenarioAttemptResult{
+		Attempt: 1,
+		Result: scenarioSelectionResult(79, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    true,
+		}),
+		Runes: 2400,
+	}
+	equalQualityRetry := scenarioAttemptResult{
+		Attempt: 2,
+		Result: scenarioSelectionResult(79, draftapp.FinalVerification{
+			Performed: true,
+			Passed:    true,
+		}),
+		Runes: 2400,
+	}
+
+	if !betterScenarioAttempt(equalQualityRetry, selected, minRunes, minStyleScore) {
+		t.Fatal("later attempt should win only when pass state, gate score, style score, and length all tie")
+	}
+}
+
+func scenarioSelectionResult(score float64, verification draftapp.FinalVerification) draftapp.GenerateResult {
+	return draftapp.GenerateResult{
+		Evaluation: draftapp.StyleEvaluation{
+			Comparison: articledomain.StyleComparison{Score: score},
+		},
+		Verification: verification,
 	}
 }

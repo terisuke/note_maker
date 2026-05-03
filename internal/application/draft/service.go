@@ -3,7 +3,10 @@ package draft
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
@@ -82,15 +85,15 @@ func NewServiceWithVerifier(generator TextGenerator, verifier DraftVerifier) *Se
 // Generate builds a prompt from the style guide and brief, validates the generated Markdown,
 // and returns the draft with strict style evaluation.
 func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
-	return s.generate(ctx, req, StreamEvents{})
+	return s.generate(ctx, req, StreamEvents{}, false)
 }
 
 // GenerateStream generates a draft while streaming model deltas through events.
 func (s *Service) GenerateStream(ctx context.Context, req GenerateRequest, events StreamEvents) (GenerateResult, error) {
-	return s.generate(ctx, req, events)
+	return s.generate(ctx, req, events, true)
 }
 
-func (s *Service) generate(ctx context.Context, req GenerateRequest, events StreamEvents) (GenerateResult, error) {
+func (s *Service) generate(ctx context.Context, req GenerateRequest, events StreamEvents, streamFollowUpSteps bool) (GenerateResult, error) {
 	if s.generator == nil {
 		return GenerateResult{}, fmt.Errorf("text generator is required")
 	}
@@ -132,7 +135,7 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		if err := emitStatus(events, "draft_format_repair_started"); err != nil {
 			return GenerateResult{}, err
 		}
-		repairedRaw, repairErr := s.generator.Generate(ctx, BuildFormatRepairPrompt(format, rawDraft, err))
+		repairedRaw, repairErr := s.generateRawBounded(ctx, BuildFormatRepairPrompt(format, rawDraft, err), optionalDiscardChunk(streamFollowUpSteps), boundedGenerationTimeout("DRAFT_FORMAT_REPAIR_TIMEOUT_SECONDS", 90*time.Second))
 		if repairErr != nil {
 			return GenerateResult{}, &UnusableDraftError{
 				FormatID: format.ID,
@@ -151,7 +154,7 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		if err := emitStatus(events, "style_revision_started"); err != nil {
 			return GenerateResult{}, err
 		}
-		revisedDraft, revisedEvaluation, revisionAttempt, ok := s.reviseOnce(ctx, prompt, articleDraft, evaluation, format.ID, req)
+		revisedDraft, revisedEvaluation, revisionAttempt, ok := s.reviseOnce(ctx, prompt, articleDraft, evaluation, format.ID, req, streamFollowUpSteps)
 		if revisionAttempt.RawOutput != "" || revisionAttempt.ValidationError != "" {
 			revisionAttempt.Index = len(attempts) + 1
 			attempts = append(attempts, revisionAttempt)
@@ -186,8 +189,18 @@ func (s *Service) verifyFinalDraft(ctx context.Context, req VerificationRequest,
 	if err := emitStatus(events, "draft_lightweight_verification_started"); err != nil {
 		return FinalVerification{Performed: true, Passed: false, Summary: "final verification was interrupted", Report: err.Error(), Failures: []string{err.Error()}}
 	}
-	verification, err := s.verifier.VerifyDraft(ctx, req)
+	verification, err := s.verifyFinalDraftBounded(ctx, req, boundedGenerationTimeout("DRAFT_FINAL_VERIFICATION_TIMEOUT_SECONDS", 90*time.Second))
 	if err != nil {
+		if timeoutErr, ok := err.(finalVerificationTimeoutError); ok {
+			summary := fmt.Sprintf("final verification timed out after %s", timeoutErr.timeout)
+			return FinalVerification{
+				Performed: true,
+				Passed:    false,
+				Summary:   summary,
+				Report:    summary,
+				Failures:  []string{summary},
+			}
+		}
 		return FinalVerification{
 			Performed: true,
 			Passed:    false,
@@ -200,6 +213,45 @@ func (s *Service) verifyFinalDraft(ctx context.Context, req VerificationRequest,
 	return verification
 }
 
+type finalVerificationTimeoutError struct {
+	timeout time.Duration
+}
+
+func (e finalVerificationTimeoutError) Error() string {
+	return fmt.Sprintf("final verification timed out after %s", e.timeout)
+}
+
+func (s *Service) verifyFinalDraftBounded(ctx context.Context, req VerificationRequest, timeout time.Duration) (FinalVerification, error) {
+	if timeout <= 0 {
+		return s.verifier.VerifyDraft(ctx, req)
+	}
+	verifyCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		verification FinalVerification
+		err          error
+	}
+	done := make(chan result, 1)
+	go func() {
+		verification, err := s.verifier.VerifyDraft(verifyCtx, req)
+		select {
+		case done <- result{verification: verification, err: err}:
+		case <-verifyCtx.Done():
+		}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		return result.verification, result.err
+	case <-ctx.Done():
+		return FinalVerification{}, ctx.Err()
+	case <-timer.C:
+		cancel()
+		return FinalVerification{}, finalVerificationTimeoutError{timeout: timeout}
+	}
+}
+
 func (s *Service) generateRaw(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
 	if onChunk != nil {
 		if streamingGenerator, ok := s.generator.(StreamingTextGenerator); ok {
@@ -209,9 +261,9 @@ func (s *Service) generateRaw(ctx context.Context, prompt string, onChunk func(s
 	return s.generator.Generate(ctx, prompt)
 }
 
-func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, articleDraft articledomain.Draft, evaluation StyleEvaluation, formatID string, req GenerateRequest) (articledomain.Draft, StyleEvaluation, GenerationAttempt, bool) {
+func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, articleDraft articledomain.Draft, evaluation StyleEvaluation, formatID string, req GenerateRequest, streamFollowUpSteps bool) (articledomain.Draft, StyleEvaluation, GenerationAttempt, bool) {
 	revisionPrompt := BuildStyleRevisionPrompt(originalPrompt, articleDraft.Markdown(), evaluation)
-	rawDraft, err := s.generator.Generate(ctx, revisionPrompt)
+	rawDraft, err := s.generateRawBounded(ctx, revisionPrompt, optionalDiscardChunk(streamFollowUpSteps), boundedGenerationTimeout("DRAFT_STYLE_REVISION_TIMEOUT_SECONDS", 90*time.Second))
 	if err != nil {
 		return articledomain.Draft{}, StyleEvaluation{}, GenerationAttempt{}, false
 	}
@@ -225,6 +277,60 @@ func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, article
 		return revisedDraft, revisedEvaluation, attempt, true
 	}
 	return articledomain.Draft{}, StyleEvaluation{}, attempt, false
+}
+
+func discardChunk(string) error {
+	return nil
+}
+
+func optionalDiscardChunk(enabled bool) func(string) error {
+	if !enabled {
+		return nil
+	}
+	return discardChunk
+}
+
+func boundedGenerationTimeout(envKey string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(envKey))
+	if raw == "" {
+		return fallback
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return fallback
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (s *Service) generateRawBounded(ctx context.Context, prompt string, onChunk func(string) error, timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		return s.generateRaw(ctx, prompt, onChunk)
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		raw string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		raw, err := s.generateRaw(stepCtx, prompt, onChunk)
+		select {
+		case done <- result{raw: raw, err: err}:
+		case <-stepCtx.Done():
+		}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		return result.raw, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-timer.C:
+		cancel()
+		return "", fmt.Errorf("local llm generation step timed out after %s", timeout)
+	}
 }
 
 func emitStatus(events StreamEvents, status string) error {
@@ -272,10 +378,17 @@ func isRecoverableFormatValidationError(formatID string, err error) bool {
 		return true
 	}
 	switch formatID {
+	case outputformat.IDMarkdownBlog:
+		return strings.Contains(message, "company blog article requires YAML frontmatter") ||
+			strings.Contains(message, "company blog frontmatter missing ")
 	case outputformat.IDZennArticle:
-		return strings.Contains(message, "Qiita :::note")
+		return strings.Contains(message, "zenn article requires YAML frontmatter") ||
+			strings.Contains(message, "zenn frontmatter missing ") ||
+			strings.Contains(message, "Qiita :::note")
 	case outputformat.IDQiitaArticle:
-		return strings.Contains(message, "Zenn-specific notation")
+		return strings.Contains(message, "qiita article requires YAML frontmatter") ||
+			strings.Contains(message, "qiita frontmatter missing ") ||
+			strings.Contains(message, "Zenn-specific notation")
 	default:
 		return false
 	}

@@ -51,7 +51,7 @@ This is a useful staged failure:
 - Lightweight final verification passed.
 - The remaining failure is strict style score: `73.6`, below the Zenn gate `82.0`.
 
-Issue #74 should remain open. The blocker is now specifically **Cloudia/Zenn style calibration**, not runtime, format, artifact capture, repair, length, or final verification.
+At this stage, Issue #74 remained open. The blocker was specifically **Cloudia/Zenn style calibration**, not runtime, format, artifact capture, repair, length, or final verification.
 
 The next implementation work should use the preserved draft and evaluation artifacts to tune Cloudia/Zenn style guidance or scoring calibration before spending a full Evo X2 matrix run. The calibration must keep the Zenn validator strict: no assistant preamble, valid Zenn frontmatter, Zenn-only notation where applicable, and no Qiita notation leakage.
 
@@ -104,9 +104,64 @@ Interpretation:
 - Lightweight final verification passed.
 - The strict style gate now passes: `88.1`, above the Zenn gate `82.0`.
 
-## Next proof sequence
+## Full publishing-target matrix rerun
 
-1. Run the full live publishing-target matrix for note, Qiita, Zenn, and Cor blog.
+After the bounded Cloudia/Zenn and Cloudia/Qiita proofs passed, the full publishing-target matrix was rerun against the same Evo X2 Tailnet OpenAI-compatible API.
+
+Command:
+
+```sh
+RUN_LIVE_MEDIA_MATRIX=1 \
+SCENARIO_STREAM_DRAFT=1 \
+SCENARIO_OUTPUT_DIR=tmp/media_matrix \
+LIVE_MEDIA_MATRIX_OUTPUT_DIR=tmp/media_matrix/live \
+LIVE_MEDIA_MATRIX_CASES=terisuke_note_essay,cor_blog_technical_report,cor_blog_vision_sharing,cloudia_zenn_tutorial,cloudia_qiita_how_to \
+LLM_BASE_URL=http://evo-x2.tailb30e58.ts.net/v1 \
+DRAFT_LLM_MODEL=gemma4:31b \
+VERIFY_LLM_MODEL=gemma4:latest \
+LLM_FALLBACK_BASE_URLS=http://evo-x2.tailb30e58.ts.net/llama/v1 \
+go run ./cmd/scenario/live_media_matrix
+```
+
+Runtime:
+
+- Endpoint: `http://evo-x2.tailb30e58.ts.net/v1`
+- Draft model: `gemma4:31b`
+- Verify model: `gemma4:latest`
+- Fallback chain configured: Evo X2 llama.cpp `/llama/v1`, then workstation-local fallback when configured
+- Transport: Tailscale VPN / OpenAI-compatible API
+
+Result:
+
+| Case | Status | Attempt | Seconds | First chunk | Chunks | Score / min | Runes / min | Verification |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `terisuke_note_essay` | passed | 1 | `107.86` | `67818ms` | `1610` | `90.7 / 82.0` | `2849 / 2800` | passed |
+| `cor_blog_technical_report` | passed | 1 | `152.34` | `67984ms` | `1696` | `81.4 / 80.0` | `3329 / 2200` | passed |
+| `cor_blog_vision_sharing` | passed | 1 | `113.98` | `68986ms` | `1657` | `89.5 / 80.0` | `3156 / 1600` | passed |
+| `cloudia_zenn_tutorial` | passed | 1 | `121.14` | `65568ms` | `2686` | `86.4 / 82.0` | `5641 / 1800` | passed |
+| `cloudia_qiita_how_to` | passed | 2 | `114.75` | `68857ms` | `1898` | `82.2 / 82.0` | `3737 / 1400` | passed |
+
+Aggregate:
+
+- Cases: 5
+- Passed: 5
+- Failed: 0
+- Average seconds: `122.01`
+- Average score: `86.0`
+- Average runes: `3742`
+- Aggregate: `tmp/media_matrix/live/aggregate.json`
+- Report: `tmp/media_matrix/live/aggregate.md`
+
+Interpretation:
+
+- The Tailnet Evo X2 primary path is usable for all current publishing targets.
+- The fallback chain is configured but was not needed for this passing aggregate.
+- All long-form structural gates passed.
+- All format validators accepted the generated output.
+- All lightweight final verification checks passed.
+- The Qiita case required a second attempt; the retry succeeded after the scenario made `## 参考リンク` an explicit required structure.
+
+Issue #74 can close based on this run. Issue #40 can also close for the current note/Qiita/Zenn/Cor blog publishing-target acceptance scope. The homepage section remains a separate short-format check and is intentionally outside this closure gate.
 
 ## Adjacent Qiita proof
 
@@ -159,11 +214,11 @@ Interpretation:
 - Lightweight final verification passed.
 - The strict style gate passed: `83.7`, above the Qiita gate `82.0`.
 
-The two bounded Cloudia technical proofs now both pass. The next useful Evo X2 spend is the full publishing-target matrix.
+The two bounded Cloudia technical proofs both passed. The next Evo X2 spend was the full publishing-target matrix, recorded above as a `5/5` pass.
 
 ## #40 closure condition
 
-Issue #40 can close only after the full live matrix records endpoint, per-phase models, elapsed seconds, generated runes, style score, final verification result, and artifact paths for every publishing target, with:
+Issue #40 can close because the full live matrix now records endpoint, per-phase models, elapsed seconds, generated runes, style score, final verification result, and artifact paths for every publishing target, with:
 
 - no runtime endpoint failure,
 - no output-format validation failure,

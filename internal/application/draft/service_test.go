@@ -194,6 +194,91 @@ func TestGenerateRunsLightweightVerification(t *testing.T) {
 	}
 }
 
+func TestGenerateReturnsPromptlyWhenFinalVerificationBlocks(t *testing.T) {
+	t.Setenv("DRAFT_FINAL_VERIFICATION_TIMEOUT_SECONDS", "1")
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	verifier := &blockingVerifier{started: make(chan struct{})}
+
+	start := time.Now()
+	result, err := NewServiceWithVerifier(&fakeGenerator{draft: matchingDraft()}, verifier).Generate(context.Background(), GenerateRequest{
+		StyleGuide:    styleGuide,
+		Brief:         ArticleBrief{StyleProfileID: profile.ID, Theme: "検証タイムアウト"},
+		AuthorProfile: profile,
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("generate with blocking verification: %v", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("generate took %s, want bounded final verification", elapsed)
+	}
+	select {
+	case <-verifier.started:
+	default:
+		t.Fatal("expected final verifier to be called")
+	}
+	if !result.Verification.Performed || result.Verification.Passed {
+		t.Fatalf("expected performed failed timeout verification: %#v", result.Verification)
+	}
+	for _, want := range []string{"timed out", "1s"} {
+		if !strings.Contains(result.Verification.Summary, want) {
+			t.Fatalf("timeout summary missing %q: %#v", want, result.Verification)
+		}
+	}
+	if len(result.Verification.Failures) == 0 || !strings.Contains(result.Verification.Failures[0], "timed out") {
+		t.Fatalf("timeout failure not recorded: %#v", result.Verification)
+	}
+}
+
+func TestGenerateStreamReturnsPromptlyWhenFinalVerificationBlocks(t *testing.T) {
+	t.Setenv("DRAFT_FINAL_VERIFICATION_TIMEOUT_SECONDS", "1")
+	profile, styleGuide := profileAndGuideFromDraft(t, matchingDraft())
+	generator := &streamingFakeGenerator{chunks: []string{matchingDraft()}}
+	verifier := &blockingVerifier{started: make(chan struct{})}
+	var statuses []string
+	var streamed strings.Builder
+
+	start := time.Now()
+	result, err := NewServiceWithVerifier(generator, verifier).GenerateStream(context.Background(), GenerateRequest{
+		StyleGuide:    styleGuide,
+		Brief:         ArticleBrief{StyleProfileID: profile.ID, Theme: "ストリーミング検証タイムアウト"},
+		AuthorProfile: profile,
+	}, StreamEvents{
+		OnStatus: func(status string) error {
+			statuses = append(statuses, status)
+			return nil
+		},
+		OnChunk: func(chunk string) error {
+			streamed.WriteString(chunk)
+			return nil
+		},
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("generate stream with blocking verification: %v", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("generate stream took %s, want bounded final verification", elapsed)
+	}
+	if !generator.streamed {
+		t.Fatal("expected streaming generator to be used")
+	}
+	select {
+	case <-verifier.started:
+	default:
+		t.Fatal("expected final verifier to be called")
+	}
+	if strings.TrimSpace(streamed.String()) != result.Draft.Markdown() {
+		t.Fatalf("streamed chunks differ from final draft")
+	}
+	if !result.Verification.Performed || result.Verification.Passed || !strings.Contains(result.Verification.Summary, "timed out after 1s") {
+		t.Fatalf("expected performed failed timeout verification: %#v", result.Verification)
+	}
+	if strings.Join(statuses, ",") != "draft_generation_started,draft_validation_started,draft_lightweight_verification_started" {
+		t.Fatalf("unexpected statuses: %#v", statuses)
+	}
+}
+
 func TestGenerateUsesPersonaAndOutputFormat(t *testing.T) {
 	zennDraft := "---\ntitle: \"Goで検証する\"\nemoji: \"🧪\"\ntype: \"tech\"\ntopics: [\"go\", \"test\"]\npublished: false\n---\n\n## 実装\n\n```go\nfmt.Println(\"ok\")\n```"
 	generator := &fakeGenerator{draft: zennDraft}
@@ -238,7 +323,7 @@ func TestGenerateRunsOneFormatRepairRetry(t *testing.T) {
 		":::note info\nQiitaの補足です\n:::\n"
 	repairedZenn := strings.ReplaceAll(invalidZenn, ":::note info", ":::message")
 	generator := &sequenceGenerator{drafts: []string{invalidZenn, repairedZenn}}
-	profile, styleGuide := profileAndGuideFromDraft(t, repairedZenn)
+	profile, styleGuide := profileAndGuideFromDraft(t, styleEvaluationMarkdown(repairedZenn, outputformat.IDZennArticle))
 	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDCloudia)
 	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDZennArticle)
 
@@ -284,6 +369,60 @@ func TestGenerateRunsOneFormatRepairRetry(t *testing.T) {
 	}
 }
 
+func TestGenerateRepairsQiitaDraftMissingFrontmatter(t *testing.T) {
+	invalidQiita := matchingDraft()
+	repairedQiita := "---\n" +
+		"title: \"AIと違和感を小さく言語化する\"\n" +
+		"tags: [\"AI\", \"Go\"]\n" +
+		"---\n\n" +
+		invalidQiita
+	generator := &sequenceGenerator{drafts: []string{invalidQiita, repairedQiita}}
+	profile, styleGuide := profileAndGuideFromDraft(t, styleEvaluationMarkdown(repairedQiita, outputformat.IDQiitaArticle))
+	persona, _ := personadomain.DefaultRegistry().Get(personadomain.IDTerisuke)
+	format, _ := outputformat.DefaultRegistry().Get(outputformat.IDQiitaArticle)
+
+	result, err := NewService(generator).Generate(context.Background(), GenerateRequest{
+		StyleGuide: styleGuide,
+		Brief: ArticleBrief{
+			StyleProfileID: profile.ID,
+			PersonaID:      persona.ID,
+			OutputFormatID: format.ID,
+			Theme:          "AIと違和感を小さく言語化する",
+		},
+		AuthorProfile: profile,
+		Persona:       persona,
+		OutputFormat:  format,
+	})
+	if err != nil {
+		t.Fatalf("generate with qiita frontmatter repair: %v", err)
+	}
+	if generator.calls != 2 {
+		t.Fatalf("calls = %d, want 2", generator.calls)
+	}
+	if result.Draft.Markdown() != strings.TrimSpace(repairedQiita) {
+		t.Fatalf("unexpected repaired draft:\n%s", result.Draft.Markdown())
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts = %#v, want 2 attempts", result.Attempts)
+	}
+	if result.Attempts[0].Kind != "initial" || result.Attempts[0].RawOutput != invalidQiita || !strings.Contains(result.Attempts[0].ValidationError, "qiita article requires YAML frontmatter") {
+		t.Fatalf("initial attempt did not preserve missing frontmatter failure: %#v", result.Attempts[0])
+	}
+	if result.Attempts[1].Kind != "format_repair" || result.Attempts[1].RawOutput != repairedQiita || result.Attempts[1].ValidationError != "" {
+		t.Fatalf("repair attempt not preserved correctly: %#v", result.Attempts[1])
+	}
+	for _, want := range []string{
+		invalidQiita,
+		"qiita article requires YAML frontmatter",
+		"Use this guide only for `qiita_article` output.",
+		"修正版の記事本文だけ",
+	} {
+		if !strings.Contains(generator.prompts[1], want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, generator.prompts[1])
+		}
+	}
+}
+
 func TestRecoverableFormatValidationErrorsAreBoundedToKnownCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -298,9 +437,45 @@ func TestRecoverableFormatValidationErrorsAreBoundedToKnownCases(t *testing.T) {
 			want:     true,
 		},
 		{
+			name:     "markdown blog missing frontmatter",
+			formatID: outputformat.IDMarkdownBlog,
+			err:      errors.New("company blog article requires YAML frontmatter"),
+			want:     true,
+		},
+		{
+			name:     "markdown blog missing frontmatter key",
+			formatID: outputformat.IDMarkdownBlog,
+			err:      errors.New("company blog frontmatter missing title"),
+			want:     true,
+		},
+		{
+			name:     "zenn missing frontmatter",
+			formatID: outputformat.IDZennArticle,
+			err:      errors.New("zenn article requires YAML frontmatter"),
+			want:     true,
+		},
+		{
+			name:     "zenn missing frontmatter key",
+			formatID: outputformat.IDZennArticle,
+			err:      errors.New("zenn frontmatter missing emoji"),
+			want:     true,
+		},
+		{
 			name:     "zenn qiita note",
 			formatID: outputformat.IDZennArticle,
 			err:      errors.New("zenn article must use :::message, not Qiita :::note"),
+			want:     true,
+		},
+		{
+			name:     "qiita missing frontmatter",
+			formatID: outputformat.IDQiitaArticle,
+			err:      errors.New("qiita article requires YAML frontmatter"),
+			want:     true,
+		},
+		{
+			name:     "qiita missing frontmatter key",
+			formatID: outputformat.IDQiitaArticle,
+			err:      errors.New("qiita frontmatter missing tags"),
 			want:     true,
 		},
 		{
@@ -613,6 +788,15 @@ func (g *streamingFakeGenerator) GenerateStream(ctx context.Context, prompt stri
 		}
 	}
 	return strings.Join(g.chunks, ""), nil
+}
+
+type blockingVerifier struct {
+	started chan struct{}
+}
+
+func (v *blockingVerifier) VerifyDraft(ctx context.Context, req VerificationRequest) (FinalVerification, error) {
+	close(v.started)
+	select {}
 }
 
 func profileAndGuideFromDraft(t *testing.T, text string) (AuthorStyleProfile, WritingStyleGuide) {

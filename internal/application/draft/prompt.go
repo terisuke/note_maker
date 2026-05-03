@@ -513,7 +513,7 @@ func preferredFirstPerson(guide WritingStyleGuide, brief ArticleBrief) string {
 }
 
 func explicitFirstPersonOverride(brief ArticleBrief) string {
-	text := strings.Join([]string{brief.ToneStance, brief.MustInclude, brief.Exclusions}, "\n")
+	text := strings.Join([]string{brief.ToneStance, brief.MustInclude}, "\n")
 	if !strings.Contains(text, "一人称") {
 		return ""
 	}

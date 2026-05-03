@@ -12,10 +12,7 @@ import (
 // EvaluateStyle compares a validated draft against the author's style profile.
 func EvaluateStyle(profile AuthorStyleProfile, brief ArticleBrief, articleDraft articledomain.Draft) StyleEvaluation {
 	cloudiaStyle := isCloudiaStyleEvaluation(profile, brief)
-	styleMarkdown := articleDraft.Markdown()
-	if cloudiaStyle {
-		styleMarkdown = styleEvaluationMarkdown(styleMarkdown, brief.OutputFormatID)
-	}
+	styleMarkdown := styleEvaluationMarkdown(articleDraft.Markdown(), brief.OutputFormatID)
 	candidate := articledomain.AnalyzeStyle(styleMarkdown)
 	comparison := articledomain.CompareStyle(profile.Metrics, candidate)
 
