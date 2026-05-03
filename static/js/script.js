@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const configStorageKey = 'note-maker-config-v1';
+  const historyEndpoint = '/api/workflow/artifacts';
   const legacyTemplateQuestionIds = new Set([
     'theme',
     'opening_episode',
@@ -48,6 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
     templateLoading: false,
     templateError: '',
     templateRequestId: 0,
+    historyStyles: [],
+    historySessions: [],
+    historyLoading: false,
+    historyError: '',
+    historyRequestId: 0,
+    selectedHistoryStyle: null,
+    selectedHistorySession: null,
     storageConfig: null,
     questionTextById: {},
     lastSubmittedAnswer: '',
@@ -69,6 +77,13 @@ document.addEventListener('DOMContentLoaded', () => {
     storagePath: document.getElementById('storage-path'),
     saveStorage: document.getElementById('save-storage-btn'),
     storageSummary: document.getElementById('storage-summary'),
+    historyPersonaSelect: document.getElementById('history-persona-select'),
+    historyStyleSelect: document.getElementById('history-style-select'),
+    historySessionSelect: document.getElementById('history-session-select'),
+    refreshHistory: document.getElementById('refresh-history-btn'),
+    openHistory: document.getElementById('open-history-btn'),
+    clearHistorySelection: document.getElementById('clear-history-selection-btn'),
+    historyStatus: document.getElementById('history-status'),
     questionConfigList: document.getElementById('question-config-list'),
     addQuestion: document.getElementById('add-question-btn'),
     resetQuestions: document.getElementById('reset-questions-btn'),
@@ -80,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     profileId: document.getElementById('profile-id'),
     guideId: document.getElementById('guide-id'),
     articleCount: document.getElementById('article-count'),
+    styleGuideCard: document.getElementById('style-guide-card'),
     guidePreview: document.getElementById('guide-preview'),
     startInterview: document.getElementById('start-interview-btn'),
     interviewArea: document.getElementById('interview-area'),
@@ -89,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cancelAnswer: document.getElementById('cancel-answer-btn'),
     skipDeepDive: document.getElementById('skip-deep-dive-btn'),
     briefResult: document.getElementById('brief-result'),
+    briefCard: document.getElementById('brief-card'),
     briefPreview: document.getElementById('brief-preview'),
     generateDraft: document.getElementById('generate-draft-btn'),
     cancelDraft: document.getElementById('cancel-draft-btn'),
@@ -124,6 +141,12 @@ document.addEventListener('DOMContentLoaded', () => {
   el.verifyModel.addEventListener('change', saveModelConfig);
   el.storageDriver.addEventListener('change', onStorageDriverChange);
   el.saveStorage.addEventListener('click', saveStorageConfig);
+  el.historyPersonaSelect.addEventListener('change', loadWorkflowHistory);
+  el.historyStyleSelect.addEventListener('change', selectHistoryStyle);
+  el.historySessionSelect.addEventListener('change', selectHistorySession);
+  el.refreshHistory.addEventListener('click', loadWorkflowHistory);
+  el.openHistory.addEventListener('click', openSelectedHistory);
+  el.clearHistorySelection.addEventListener('click', clearHistorySelection);
   el.addQuestion.addEventListener('click', addQuestion);
   el.resetQuestions.addEventListener('click', resetQuestions);
   el.analyzeStyle.addEventListener('click', analyzeStyle);
@@ -159,9 +182,11 @@ document.addEventListener('DOMContentLoaded', () => {
       state.formats = formats;
       populatePersonaSelect();
       populateFormatSelect();
+      populateHistoryPersonaSelect();
       applyPersonaDefaults(false);
       renderModeSummary();
       loadQuestionTemplate();
+      loadWorkflowHistory();
     } catch (error) {
       showError(`書き分け設定の取得に失敗しました: ${error.message}`);
     }
@@ -235,6 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.guideId.textContent = data.guide_id;
     el.articleCount.textContent = String(data.article_count);
     el.guidePreview.textContent = data.guide_markdown;
+    renderStyleGuideCard(data);
     el.styleResult.classList.remove('hidden');
     el.startInterview.disabled = false;
   }
@@ -266,6 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
       rememberQuestion(data.next_question);
       el.interviewArea.classList.remove('hidden');
       el.briefResult.classList.add('hidden');
+      renderBriefCard(null);
       el.generateDraft.disabled = true;
       renderTranscript(data);
     } catch (error) {
@@ -361,6 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.completedBrief = data.brief;
       state.nextQuestion = null;
       el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
+      renderBriefCard(data.brief);
       el.briefResult.classList.remove('hidden');
       el.generateDraft.disabled = false;
       el.skipDeepDive.classList.add('hidden');
@@ -369,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.completedBrief = null;
     state.nextQuestion = data.next_question;
     el.briefResult.classList.add('hidden');
+    renderBriefCard(null);
     el.generateDraft.disabled = true;
     el.skipDeepDive.classList.toggle('hidden', data.next_question?.flow_type !== 'deep_dive_follow_up');
   }
@@ -740,6 +769,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function populateHistoryPersonaSelect() {
+    el.historyPersonaSelect.innerHTML = '';
+    state.personas.forEach((persona) => {
+      const option = document.createElement('option');
+      option.value = persona.id;
+      option.textContent = persona.display_name;
+      option.selected = persona.id === currentPersonaId();
+      el.historyPersonaSelect.appendChild(option);
+    });
+    if (!el.historyPersonaSelect.value && state.personas[0]) {
+      el.historyPersonaSelect.value = state.personas[0].id;
+    }
+  }
+
   function onPersonaChange() {
     config.mode.persona = currentPersonaId();
     applyPersonaDefaults(true);
@@ -747,6 +790,8 @@ document.addEventListener('DOMContentLoaded', () => {
     saveConfig();
     renderModeSummary();
     loadQuestionTemplate();
+    syncHistoryPersonaToCurrentMode();
+    loadWorkflowHistory();
   }
 
   function onFormatChange() {
@@ -755,7 +800,389 @@ document.addEventListener('DOMContentLoaded', () => {
     saveConfig();
     renderModeSummary();
     loadQuestionTemplate();
+    loadWorkflowHistory();
   }
+
+  function syncHistoryPersonaToCurrentMode() {
+    if (el.historyPersonaSelect.value !== currentPersonaId()) {
+      el.historyPersonaSelect.value = currentPersonaId();
+    }
+  }
+
+  async function loadWorkflowHistory() {
+    const personaId = el.historyPersonaSelect.value || currentPersonaId();
+    const formatId = currentFormatId();
+    const requestId = state.historyRequestId + 1;
+    state.historyRequestId = requestId;
+    state.historyLoading = true;
+    state.historyError = '';
+    state.selectedHistoryStyle = null;
+    state.selectedHistorySession = null;
+    renderHistoryPicker();
+
+    try {
+      const data = await fetchWorkflowHistoryIndex({ personaId, formatId });
+      if (requestId !== state.historyRequestId) {
+        return;
+      }
+      const normalized = normalizeWorkflowHistory(data, personaId, formatId);
+      state.historyStyles = normalized.styles;
+      state.historySessions = normalized.sessions;
+    } catch (error) {
+      if (requestId !== state.historyRequestId) {
+        return;
+      }
+      state.historyStyles = [];
+      state.historySessions = [];
+      state.historyError = historyErrorMessage(error);
+    } finally {
+      if (requestId === state.historyRequestId) {
+        state.historyLoading = false;
+        renderHistoryPicker();
+      }
+    }
+  }
+
+  async function fetchWorkflowHistoryIndex({ personaId, formatId }) {
+    const params = new URLSearchParams();
+    if (personaId) {
+      params.set('persona_id', personaId);
+    }
+    if (formatId) {
+      params.set('format_id', formatId);
+    }
+    return requestJSON(`${historyEndpoint}?${params.toString()}`);
+  }
+
+  function renderHistoryPicker() {
+    renderHistoryOptions(el.historyStyleSelect, state.historyStyles, '文体ガイドを選択');
+    renderHistoryOptions(el.historySessionSelect, state.historySessions, '取材セッションを選択');
+
+    el.historyStyleSelect.disabled = state.historyLoading || !state.historyStyles.length;
+    el.historySessionSelect.disabled = state.historyLoading || !state.historySessions.length;
+    el.openHistory.disabled = state.historyLoading || !historySelectionReady();
+
+    if (state.historyLoading) {
+      el.historyStatus.className = 'history-status loading';
+      el.historyStatus.textContent = '保存済みの文体ガイドと取材セッションを読み込んでいます...';
+      return;
+    }
+    if (state.historyError) {
+      el.historyStatus.className = 'history-status warning';
+      el.historyStatus.textContent = state.historyError;
+      return;
+    }
+    if (!state.historyStyles.length && !state.historySessions.length) {
+      el.historyStatus.className = 'history-status empty';
+      el.historyStatus.textContent = 'この書き手と出力先の保存済み履歴はまだありません。';
+      return;
+    }
+    const styleCount = `${state.historyStyles.length}件の文体ガイド`;
+    const sessionCount = `${state.historySessions.length}件の取材セッション`;
+    el.historyStatus.className = 'history-status';
+    el.historyStatus.textContent = `${styleCount} / ${sessionCount} を選択できます。`;
+  }
+
+  function renderHistoryOptions(select, items, placeholder) {
+    const selected = select.value;
+    select.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = placeholder;
+    select.appendChild(empty);
+    items.forEach((item) => {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = historyOptionLabel(item);
+      select.appendChild(option);
+    });
+    if (items.some((item) => item.id === selected)) {
+      select.value = selected;
+    }
+  }
+
+  function historyOptionLabel(item) {
+    const title = item.title || item.theme || item.label || item.id;
+    const status = item.completed === true ? '完了' : item.phase || '';
+    const updatedAt = formatDateTime(item.updatedAt || item.createdAt);
+    return [title, status, updatedAt].filter(Boolean).join(' / ');
+  }
+
+  function historySelectionReady() {
+    return Boolean(el.historyStyleSelect.value || el.historySessionSelect.value);
+  }
+
+  function historyErrorMessage(error) {
+    const message = error.message || '';
+    if (message.includes('HTTP 404')) {
+      return '履歴APIはまだ接続されていません。バックエンド実装後にここへ保存済み履歴が表示されます。';
+    }
+    return `履歴の取得に失敗しました: ${message}`;
+  }
+
+  async function selectHistoryStyle() {
+    state.selectedHistoryStyle = findHistoryStyle(el.historyStyleSelect.value);
+    el.openHistory.disabled = !historySelectionReady();
+    if (!state.selectedHistoryStyle) {
+      return;
+    }
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = '保存済み文体ガイドを確認しています...';
+    try {
+      const detail = await loadHistoryStyleDetail(state.selectedHistoryStyle);
+      state.selectedHistoryStyle = detail;
+      renderStyleGuideCard(detail);
+      el.guidePreview.textContent = styleGuideMarkdown(detail);
+      el.styleResult.classList.remove('hidden');
+      renderHistoryPicker();
+    } catch (error) {
+      el.historyStatus.className = 'history-status warning';
+      el.historyStatus.textContent = `文体ガイドを開けませんでした: ${error.message}`;
+    }
+  }
+
+  async function selectHistorySession() {
+    state.selectedHistorySession = findHistorySession(el.historySessionSelect.value);
+    el.openHistory.disabled = !historySelectionReady();
+    if (!state.selectedHistorySession) {
+      return;
+    }
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = '保存済み取材セッションを確認しています...';
+    try {
+      const detail = await loadHistorySessionDetail(state.selectedHistorySession);
+      state.selectedHistorySession = detail;
+      if (detail.brief) {
+        renderBriefCard(detail.brief);
+        el.briefPreview.textContent = JSON.stringify(detail.brief, null, 2);
+        el.briefResult.classList.remove('hidden');
+      }
+      renderHistoryPicker();
+    } catch (error) {
+      el.historyStatus.className = 'history-status warning';
+      el.historyStatus.textContent = `取材セッションを開けませんでした: ${error.message}`;
+    }
+  }
+
+  async function openSelectedHistory() {
+    clearError();
+    el.historyStatus.className = 'history-status loading';
+    el.historyStatus.textContent = '選択した履歴を開いています...';
+    try {
+      const style = el.historyStyleSelect.value
+        ? await loadHistoryStyleDetail(state.selectedHistoryStyle || findHistoryStyle(el.historyStyleSelect.value))
+        : null;
+      const session = el.historySessionSelect.value
+        ? await loadHistorySessionDetail(state.selectedHistorySession || findHistorySession(el.historySessionSelect.value))
+        : null;
+      const styleForSession = !style && session?.styleProfileId
+        ? await loadHistoryStyleDetail({ id: session.styleProfileId })
+        : style;
+
+      if (styleForSession) {
+        applyHistoryStyle(styleForSession);
+      }
+      if (session) {
+        await applyHistorySession(session);
+      }
+      if (!styleForSession && !session) {
+        showError('開く履歴を選択してください');
+        return;
+      }
+      el.historyStatus.className = 'history-status';
+      el.historyStatus.textContent = '選択した履歴を現在の作業状態に反映しました。';
+    } catch (error) {
+      el.historyStatus.className = 'history-status warning';
+      el.historyStatus.textContent = `履歴を開けませんでした: ${error.message}`;
+    }
+  }
+
+  function clearHistorySelection() {
+    el.historyStyleSelect.value = '';
+    el.historySessionSelect.value = '';
+    state.selectedHistoryStyle = null;
+    state.selectedHistorySession = null;
+    renderHistoryPicker();
+  }
+
+  async function loadHistoryStyleDetail(item) {
+    if (!item) {
+      return null;
+    }
+    if (styleGuideMarkdown(item)) {
+      return item;
+    }
+    const data = await requestJSON(`/api/author-style/${encodeURIComponent(item.id)}`);
+    return normalizeHistoryStyle({ ...item, ...data });
+  }
+
+  async function loadHistorySessionDetail(item) {
+    if (!item) {
+      return null;
+    }
+    if (item.answers?.length || item.brief || item.nextQuestion) {
+      return item;
+    }
+    const data = await requestJSON(`/api/brief-sessions/${encodeURIComponent(item.id)}`);
+    return normalizeHistorySession({ ...item, ...data });
+  }
+
+  function applyHistoryStyle(item) {
+    const data = normalizeHistoryStyle(item);
+    state.profileId = data.profileId || data.id;
+    el.profileId.textContent = state.profileId;
+    el.guideId.textContent = data.guideId || '';
+    el.articleCount.textContent = data.articleCount === undefined ? '' : String(data.articleCount);
+    el.guidePreview.textContent = styleGuideMarkdown(data);
+    renderStyleGuideCard(data);
+    el.styleResult.classList.remove('hidden');
+    el.startInterview.disabled = !state.profileId;
+  }
+
+  async function applyHistorySession(item) {
+    const data = normalizeHistorySession(item);
+    if (data.personaId && state.personas.some((persona) => persona.id === data.personaId)) {
+      el.personaSelect.value = data.personaId;
+      config.mode.persona = data.personaId;
+    }
+    if (data.outputFormatId && state.formats.some((format) => format.id === data.outputFormatId)) {
+      el.formatSelect.value = data.outputFormatId;
+      config.mode.format = data.outputFormatId;
+    }
+    saveConfig();
+    renderModeSummary();
+    applyStyleSourceDefault(true);
+    await loadQuestionTemplate();
+    state.sessionId = data.id;
+    state.parentSessionId = data.parentSessionId || '';
+    state.profileId = data.styleProfileId || state.profileId;
+    state.answers = data.answers || [];
+    state.nextQuestion = data.nextQuestion || null;
+    state.completedBrief = data.completed ? data.brief : null;
+    rememberQuestions(data.questions || state.templateQuestions);
+    rememberQuestion(data.nextQuestion);
+    el.interviewArea.classList.remove('hidden');
+    renderTranscript({
+      answers: state.answers,
+      next_question: state.nextQuestion,
+      completed: data.completed,
+    });
+    if (data.completed && data.brief) {
+      el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
+      renderBriefCard(data.brief);
+      el.briefResult.classList.remove('hidden');
+      el.generateDraft.disabled = !state.profileId;
+      el.skipDeepDive.classList.add('hidden');
+    } else {
+      renderBriefCard(null);
+      el.briefResult.classList.add('hidden');
+      el.generateDraft.disabled = true;
+      el.skipDeepDive.classList.toggle('hidden', data.nextQuestion?.flow_type !== 'deep_dive_follow_up');
+    }
+    updateSectionControls();
+  }
+
+  function normalizeWorkflowHistory(data, personaId, formatId) {
+    const source = data || {};
+    const styleValues = arrayFrom(source.style_guides || source.styleGuides || source.styles || source.author_styles || source.authorStyles || source.profiles);
+    const sessionValues = [
+      ...arrayFrom(source.sessions || source.brief_sessions || source.briefSessions || source.items || (Array.isArray(source) ? source : [])),
+      ...arrayFrom(source.briefs || source.Briefs),
+    ];
+    return {
+      styles: styleValues.map(normalizeHistoryStyle)
+        .filter((item) => item.id)
+        .filter((item) => historyItemMatches(item, personaId, formatId)),
+      sessions: uniqueHistoryItems(sessionValues.map(normalizeHistorySession)
+        .filter((item) => item.id)
+        .filter((item) => historyItemMatches(item, personaId, formatId))),
+    };
+  }
+
+  function normalizeHistoryStyle(item = {}) {
+    const profile = item.profile || item.Profile || {};
+    const guide = item.guide || item.Guide || {};
+    return {
+      ...item,
+      id: String(item.profile_id || item.profileId || item.style_profile_id || item.styleProfileId || profile.id || profile.ID || item.id || item.ID || '').trim(),
+      resultId: item.id || item.ID || '',
+      profileId: item.profile_id || item.profileId || item.style_profile_id || item.styleProfileId || profile.id || profile.ID || '',
+      guideId: item.guide_id || item.guideId || guide.id || guide.ID || '',
+      title: item.title || item.name || item.label || item.display_name || item.displayName || profile.name || profile.Name || '',
+      personaId: item.persona_id || item.personaId || profile.persona_id || profile.PersonaID || '',
+      outputFormatId: item.output_format_id || item.outputFormatId || profile.output_format_id || profile.OutputFormatID || '',
+      articleCount: item.article_count ?? item.articleCount ?? item.source?.article_count ?? item.Source?.ArticleCount,
+      guideMarkdown: item.guide_markdown || item.guideMarkdown || item.markdown || item.Markdown || guide.markdown || guide.Markdown || '',
+      updatedAt: item.updated_at || item.updatedAt || item.created_at || item.createdAt || '',
+      createdAt: item.created_at || item.createdAt || '',
+      source: item.source || item.Source || {},
+      profile,
+      guide,
+    };
+  }
+
+  function normalizeHistorySession(item = {}) {
+    const brief = item.brief || item.Brief || null;
+    const title = item.title || item.name || briefField(brief, 'theme', 'Theme') || '';
+    return {
+      ...item,
+      id: String(item.session_id || item.sessionId || item.id || item.ID || '').trim(),
+      title,
+      theme: briefField(brief, 'theme', 'Theme'),
+      styleProfileId: item.style_profile_id || item.styleProfileId || item.profile_id || item.profileId || briefField(brief, 'styleProfileId', 'StyleProfileID') || '',
+      personaId: item.persona_id || item.personaId || briefField(brief, 'personaId', 'PersonaID') || '',
+      outputFormatId: item.output_format_id || item.outputFormatId || briefField(brief, 'outputFormatId', 'OutputFormatID') || '',
+      parentSessionId: item.parent_session_id || item.parentSessionId || '',
+      phase: item.phase || item.Phase || '',
+      completed: item.completed ?? item.Completed ?? Boolean(brief),
+      brief,
+      answers: item.answers || item.Answers || [],
+      questions: normalizeQuestionList(item.questions || item.Questions || []),
+      nextQuestion: normalizeHistoryQuestion(item.next_question || item.nextQuestion || item.NextQuestion || null),
+      updatedAt: item.updated_at || item.updatedAt || item.created_at || item.createdAt || '',
+      createdAt: item.created_at || item.createdAt || '',
+    };
+  }
+
+  function normalizeHistoryQuestion(question) {
+    if (!question) {
+      return null;
+    }
+    return {
+      id: question.id || question.ID || '',
+      text: question.text || question.Text || '',
+      flow_type: question.flow_type || question.flowType || question.FlowType || 'main',
+      target_field: question.target_field || question.targetField || question.TargetField || '',
+      target_question_id: question.target_question_id || question.targetQuestionId || question.TargetQuestionID || '',
+      follow_up_index: question.follow_up_index || question.followUpIndex || question.FollowUpIndex || 0,
+      required: question.required ?? question.Required,
+    };
+  }
+
+  function historyItemMatches(item, personaId, formatId) {
+    return (!item.personaId || !personaId || item.personaId === personaId)
+      && (!item.outputFormatId || !formatId || item.outputFormatId === formatId);
+  }
+
+  function findHistoryStyle(id) {
+    return state.historyStyles.find((item) => item.id === id) || null;
+  }
+
+  function findHistorySession(id) {
+    return state.historySessions.find((item) => item.id === id) || null;
+  }
+
+  function uniqueHistoryItems(items) {
+    const byId = new Map();
+    items.forEach((item) => {
+      const existing = byId.get(item.id);
+      if (!existing || (!existing.brief && item.brief)) {
+        byId.set(item.id, item);
+      }
+    });
+    return [...byId.values()];
+  }
+
 
   function applyPersonaDefaults(forceFormat) {
     const persona = currentPersona();
@@ -1146,6 +1573,180 @@ document.addEventListener('DOMContentLoaded', () => {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  function renderStyleGuideCard(data) {
+    el.styleGuideCard.innerHTML = '';
+    const markdown = styleGuideMarkdown(data);
+    if (!data || !markdown) {
+      el.styleGuideCard.className = 'artifact-card empty';
+      el.styleGuideCard.textContent = '文体ガイドはまだありません。文体分析または保存済み履歴から選択してください。';
+      return;
+    }
+    const normalized = normalizeHistoryStyle(data);
+    el.styleGuideCard.className = 'artifact-card';
+    el.styleGuideCard.appendChild(createArtifactHeader(
+      normalized.title || '文体ガイド',
+      [
+        ['Profile', normalized.profileId || normalized.id],
+        ['Guide', normalized.guideId],
+        ['Articles', normalized.articleCount === undefined ? '' : String(normalized.articleCount)],
+      ],
+    ));
+    const sections = markdownSectionsForCard(markdown);
+    if (sections.length) {
+      sections.slice(0, 5).forEach((section) => {
+        el.styleGuideCard.appendChild(createArtifactSection(section.title, section.items));
+      });
+    } else {
+      el.styleGuideCard.appendChild(createArtifactSection('要点', compactTextLines(markdown, 6)));
+    }
+  }
+
+  function renderBriefCard(brief) {
+    el.briefCard.innerHTML = '';
+    if (!brief) {
+      el.briefCard.className = 'artifact-card empty';
+      el.briefCard.textContent = '記事ブリーフはまだありません。取材完了後、または保存済みセッション選択後に表示します。';
+      return;
+    }
+    el.briefCard.className = 'artifact-card';
+    const theme = briefField(brief, 'theme', 'Theme') || '記事ブリーフ';
+    el.briefCard.appendChild(createArtifactHeader(
+      theme,
+      [
+        ['Persona', briefField(brief, 'persona_id', 'PersonaID')],
+        ['Format', briefField(brief, 'output_format_id', 'OutputFormatID')],
+        ['Style', briefField(brief, 'style_profile_id', 'StyleProfileID')],
+      ],
+    ));
+    [
+      ['読者', briefField(brief, 'reader', 'Reader')],
+      ['冒頭の具体例', briefField(brief, 'opening_episode', 'OpeningEpisode')],
+      ['読後アクション', briefField(brief, 'expected_reader_action', 'ExpectedReaderAction')],
+      ['必ず含めること', briefField(brief, 'must_include', 'MustInclude')],
+      ['本人文脈', briefField(brief, 'personal_context', 'PersonalContext')],
+      ['含めないこと', briefField(brief, 'exclusions', 'Exclusions')],
+      ['構成と長さ', briefField(brief, 'target_length_structure', 'TargetLengthStructure')],
+      ['トーンと立場', briefField(brief, 'tone_stance', 'ToneStance')],
+    ].filter(([, value]) => String(value || '').trim()).forEach(([label, value]) => {
+      el.briefCard.appendChild(createArtifactSection(label, [value]));
+    });
+    const customAnswers = brief.CustomAnswers || brief.custom_answers || brief.customAnswers || [];
+    const deepDives = brief.DeepDives || brief.deep_dives || brief.deepDives || [];
+    if (customAnswers.length) {
+      el.briefCard.appendChild(createAnswerSection('追加回答', customAnswers));
+    }
+    if (deepDives.length) {
+      el.briefCard.appendChild(createAnswerSection('深掘りメモ', deepDives));
+    }
+  }
+
+  function createArtifactHeader(title, metaItems) {
+    const header = document.createElement('div');
+    header.className = 'artifact-card-header';
+    const titleElement = document.createElement('strong');
+    titleElement.textContent = title;
+    const meta = document.createElement('div');
+    meta.className = 'artifact-meta';
+    metaItems.filter(([, value]) => value !== undefined && value !== null && String(value).trim()).forEach(([label, value]) => {
+      const item = document.createElement('span');
+      item.textContent = `${label}: ${value}`;
+      meta.appendChild(item);
+    });
+    header.append(titleElement, meta);
+    return header;
+  }
+
+  function createArtifactSection(title, values) {
+    const section = document.createElement('section');
+    section.className = 'artifact-section';
+    const heading = document.createElement('h4');
+    heading.textContent = title;
+    section.appendChild(heading);
+    const list = document.createElement('ul');
+    values.filter((value) => String(value || '').trim()).forEach((value) => {
+      const item = document.createElement('li');
+      item.textContent = String(value).trim();
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function createAnswerSection(title, answers) {
+    return createArtifactSection(title, answers.map((answer) => {
+      const questionId = answerValue(answer, 'question_id', 'QuestionID');
+      const content = answerValue(answer, 'content', 'Content');
+      const question = state.questionTextById[questionId] || questionId || '回答';
+      return `${question}: ${content}`;
+    }));
+  }
+
+  function markdownSectionsForCard(markdown) {
+    const sections = [];
+    let current = { title: '要点', items: [] };
+    String(markdown || '').split('\n').forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+      const heading = trimmed.match(/^#{1,4}\s+(.+)$/);
+      if (heading) {
+        if (current.items.length) {
+          sections.push(current);
+        }
+        current = { title: heading[1].trim(), items: [] };
+        return;
+      }
+      current.items.push(trimmed.replace(/^[-*]\s+/, ''));
+    });
+    if (current.items.length) {
+      sections.push(current);
+    }
+    return sections.map((section) => ({
+      title: section.title,
+      items: section.items.slice(0, 6),
+    }));
+  }
+
+  function compactTextLines(value, limit) {
+    return String(value || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, limit);
+  }
+
+  function styleGuideMarkdown(data = {}) {
+    return data.guideMarkdown || data.guide_markdown || data.markdown || data.Markdown || data.guide?.markdown || data.guide?.Markdown || data.Guide?.Markdown || '';
+  }
+
+  function briefField(brief, snake, pascal) {
+    if (!brief) {
+      return '';
+    }
+    return brief[snake] ?? brief[toCamelCase(snake)] ?? brief[pascal] ?? '';
+  }
+
+  function toCamelCase(value) {
+    return String(value || '').replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  }
+
+  function arrayFrom(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function formatDateTime(value) {
+    if (!value) {
+      return '';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
+    return date.toLocaleString('ja-JP', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   function renderDraft(data) {
