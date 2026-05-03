@@ -53,9 +53,8 @@ Open work that still matters:
 
 - #63: runtime default correction and browser evaluation unblocker.
 - #40: actual Tailnet Evo X2 quality/runtime scoring across media.
-- #27 and #28: history picker plus readable brief/style/draft artifacts.
-- #13: browser E2E over the now-stable UI flows.
-- #14: umbrella for queryable product memory beyond the schema foundation.
+- #27 and #28: custom persona create/list plus editable brief/style cards are covered by the Phase C polish cut; remaining scope is limited to any issue-owner requested update/delete or broader card semantics.
+- #14: umbrella for queryable product memory beyond the schema, history read surface, custom persona create/list, and brief/style edit persistence.
 - #36 and #45: fallback quality and llama.cpp swap as P2 runtime work.
 - #15: desktop/app-like packaging after the browser workflow is stable.
 
@@ -72,8 +71,8 @@ Known deviations remain:
 
 - `internal/handlers/workflow.go` is still too large and coordinates store lookup, runtime construction, SSE, compatibility handlers, and application calls in one file.
 - LLM clients are constructed directly in handlers. A runtime provider/use-case boundary would make Evo X2/fallback behavior easier to test and configure from the UI.
-- The SQLite repository persists the right data, but the UI does not yet expose projects, article history, draft versions, verification history, or source snapshots as queryable product memory. That is why #14 stays open.
+- The SQLite repository persists the right data and the UI now exposes project, article, draft-version, and source-snapshot cards. The Phase C polish cut adds custom persona create/list persistence and brief/style edit persistence. #14 remains open for complete queryable product memory, including custom persona update/delete and broader artifact version/history semantics.
 - Runtime configuration now has storage UI parity, but LLM endpoint/fallback configuration is still env/default driven. #63 fixes the default and visibility problem; a future settings surface can make runtime selection explicit.
-- The frontend is still one static JavaScript file. That is acceptable for the current local-first prototype, but #13 should lock behavior with browser E2E before #27/#28 add more stateful UI.
+- The frontend is still one static JavaScript file. That is acceptable for the current local-first prototype; the #13 browser E2E cut now provides a baseline before #27/#28 add more stateful UI.
 
 Conclusion: the domain model and application services match ADR 0002 well enough to continue. The largest architectural risk is not the domain vocabulary; it is handler-led orchestration and hidden runtime configuration. The next implementation sequence should reduce those two risks before the full Evo X2 media-matrix evaluation.

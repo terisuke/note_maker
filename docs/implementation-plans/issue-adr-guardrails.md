@@ -13,11 +13,10 @@ This document maps GitHub issues to [ADR 0001](../adrs/0001-three-phase-local-ar
 | [#9](https://github.com/terisuke/note_maker/issues/9) | Draft generation from style guide and brief | Draft Generation | Draft generation must not fetch Note articles; it only consumes `WritingStyleGuide + ArticleBrief`. |
 | [#10](https://github.com/terisuke/note_maker/issues/10) | API, UI, and scenario integration | API Direction / Testing Strategy | `go test ./...` stays offline; network/LLM scenarios require explicit env vars. |
 
-Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/0002-multi-persona-multi-format-extension.md#tracked-issues) for the new umbrella):
+Active issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/0002-multi-persona-multi-format-extension.md#tracked-issues) for the new umbrella):
 
 | Issue | Scope | ADR Section | Guardrail |
 | --- | --- | --- | --- |
-| [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E for model config and question CRUD | ADR 0002 §Testing Strategy | Phase D folds persona switch, format switch, edit-and-fork, streaming, regenerate-section into the E2E surface. |
 | [#14](https://github.com/terisuke/note_maker/issues/14) | Persistent queryable database | ADR 0002 §Persistence direction | SQLite migration is the acceptance for #14; multi-persona schema is mandatory. |
 | [#15](https://github.com/terisuke/note_maker/issues/15) | Desktop launcher packaging | Out of ADR 0002 scope | Tracked separately; depends on Phase C completion before packaging makes sense. |
 | [#36](https://github.com/terisuke/note_maker/issues/36) | local llama.cpp fallback quality | ADR 0001/0002 runtime validation | Non-blocking for Phase A. Do not promote fallback as production-quality until it passes strict draft thresholds. |
@@ -31,7 +30,9 @@ Open issues that ADR 0002 reframes (see [ADR 0002 — Tracked issues](../adrs/00
 
 Current cut status:
 
-- [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus `WORKFLOW_STORE_DRIVER=sqlite` web-app opt-in. [#14](https://github.com/terisuke/note_maker/issues/14) remains the broader queryable-history umbrella until the UI/API surface is exposed.
+- [#26](https://github.com/terisuke/note_maker/issues/26) is implemented as `internal/infrastructure/repository/sqlite` plus `WORKFLOW_STORE_DRIVER=sqlite` web-app opt-in. [#14](https://github.com/terisuke/note_maker/issues/14) remains the broader queryable-history umbrella for complete product memory beyond the current custom-persona and brief/style edit surface.
+- The [#13](https://github.com/terisuke/note_maker/issues/13) browser-E2E gate is closed by the Playwright validation record. Do not track remaining Phase C product polish as #13 scope.
+- The `codex/phase-c-persona-history-polish` cut implements custom persona create/list plus editable brief/style card persistence. Keep custom persona update/delete and broader version/history semantics separate from the #13 browser-coverage gate.
 - [#29](https://github.com/terisuke/note_maker/issues/29) reaches the handler coverage gate: `go test ./internal/handlers -cover` reports 80.0%.
 - [#57](https://github.com/terisuke/note_maker/issues/57) is implemented as `cmd/scenario/live_media_matrix`; it defaults to offline planned aggregate output and requires `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` for Evo X2 calls.
 - [#40](https://github.com/terisuke/note_maker/issues/40) is now an epic with sub-issues [#70](https://github.com/terisuke/note_maker/issues/70)-[#74](https://github.com/terisuke/note_maker/issues/74). The staged validation criteria are met for the current publishing-target scope: the final full matrix passed `5/5` with endpoint, phase models, elapsed time, score, runes, final verification, structural gates, quality gates, and artifacts recorded.
@@ -45,6 +46,7 @@ Closed historical issues:
 | [#5](https://github.com/terisuke/note_maker/issues/5) | DDD boundary split | Provides package boundary precedent. |
 | [#6](https://github.com/terisuke/note_maker/issues/6) | API contract alignment | Existing compatibility endpoint remains while new workflow is added. |
 | [#11](https://github.com/terisuke/note_maker/issues/11) | Strict style threshold tuning | Threshold logic is in place; future persona-specific revisions must be tracked separately. |
+| [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E for model config and question CRUD | Closed. Playwright coverage exists for model config persistence, custom questions, persona/format switching, history/cards, streaming/cancel, edit/fork, and regenerate-section. |
 | [#21](https://github.com/terisuke/note_maker/issues/21) | Persona and OutputFormat domain concepts | B1 landed early; remaining B work must not expand persistence assumptions until Phase C. |
 | [#22](https://github.com/terisuke/note_maker/issues/22) | Historical source acquisition | Zenn/Qiita/Cor blog sources are available; Cor blog style analysis should prefer GitHub Markdown over RSS summaries. |
 | [#23](https://github.com/terisuke/note_maker/issues/23) | Format prompt templates and validators | Format guides and validators exist; new formats must add validator + guide + scenario sample. |
@@ -58,7 +60,7 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 - Phase A (Conversation UX): keep domain changes narrow to auditable conversation state transitions such as fork-on-edit. Must keep all existing `go test ./...` green without weakening expectations.
 - Phase A execution started with [#18](https://github.com/terisuke/note_maker/issues/18) because Tailnet Evo X2 runs are long enough that spinner-only UX is no longer acceptable. [#17](https://github.com/terisuke/note_maker/issues/17) follows and reuses the streaming primitives.
 - Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
-- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup.
+- Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup. Phase C product completion requires persisted custom personas and editable human-readable artifacts, not only built-in persona selection and read-only cards; the current polish cut covers create/list and brief/style edits, while update/delete and broader artifact versioning remain follow-up scope.
 - Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
 
 ## Architectural Guardrails

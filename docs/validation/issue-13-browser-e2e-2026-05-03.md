@@ -35,7 +35,7 @@ git diff --check passed
 
 ## Closure Decision
 
-Issue #13 can close with this cut. The original acceptance and later comments are covered by real browser tests:
+Issue #13 is closed by this cut. The original acceptance and later comments are covered by real browser tests:
 
 - model dropdown population and persisted phase-model choices;
 - custom question add/edit/delete/reset;
@@ -48,4 +48,4 @@ Issue #13 can close with this cut. The original acceptance and later comments ar
 - streaming draft UI, cancellation, failed/partial state recovery surface;
 - section regeneration candidate reject and accept flow.
 
-Remaining work after this cut belongs to broader Phase C product scope, not #13: add-persona authoring UI, richer edit persistence/version semantics, and further project/article/draft browsing polish.
+Remaining work after this cut belongs to broader Phase C product scope, not #13. The later Phase C persona/history/card polish cut adds custom persona create/list and editable brief/style card persistence; remaining product-memory work stays under #14 or follow-up issues.

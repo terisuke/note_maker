@@ -10,7 +10,7 @@ This validation covers:
 - [#27](https://github.com/terisuke/note_maker/issues/27) first saved-history picker cut.
 - [#28](https://github.com/terisuke/note_maker/issues/28) first human-readable style-guide and brief artifact card cut.
 
-It deliberately does not claim completion for add-persona authoring UI, broader edit persistence, project/article/draft history browsing, draft version browsing, or Browser E2E coverage.
+It deliberately did not claim completion for add-persona authoring UI, broader edit persistence, project/article/draft history browsing, draft version browsing, or Browser E2E coverage. Later cuts add those pieces incrementally; see [Phase C persona/history/card polish validation](./phase-c-persona-history-card-polish-2026-05-03.md) for the custom persona and editable brief/style card follow-up.
 
 ## What changed
 
@@ -69,7 +69,7 @@ node --check static/js/script.js
 git diff --check
 ```
 
-These passed after the project/article/draft history follow-up was integrated. The follow-up adds SQLite-backed read routes and UI contract coverage, but it is still browser-contract coverage rather than a real browser E2E close signal for #13.
+These passed after the project/article/draft history follow-up was integrated. The follow-up adds SQLite-backed read routes and UI contract coverage; the later #13 Playwright cut supplies the browser E2E close signal.
 
 Final follow-up validation after the fixture alignment:
 
@@ -80,7 +80,7 @@ node --check static/js/script.js
 git diff --check
 ```
 
-All passed. Project/article/draft history can continue as implementation work, but #13 still needs real browser E2E before it closes.
+All passed. Project/article/draft history can continue as Phase C product work under #14/#27/#28; #13 browser E2E is covered by the later Playwright validation cut.
 
 ## Acceptance Status
 
@@ -94,7 +94,7 @@ All passed. Project/article/draft history can continue as implementation work, b
 
 ## Remaining Work
 
-- Add-persona authoring UI is still unimplemented.
-- Broader edit persistence beyond the existing fork-on-edit/session save flow is still unimplemented.
-- Project/article/draft history browsing from SQLite has a follow-up implementation through read APIs and history cards. Treat it as a separate #83 product-readiness cut from the original #27/#28 first-cut validation.
-- Browser E2E coverage for the new history picker and cards remains under [#13](https://github.com/terisuke/note_maker/issues/13). Static contract tests alone are not enough to close #13.
+- Add-persona authoring UI is implemented by the Phase C persona/history/card polish cut for create/list. Custom persona update/delete remains follow-up work.
+- Brief/style card edit persistence is implemented by the Phase C polish cut. Brief edits update the saved artifact without rewriting original session answers; style edits create a new saved guide version.
+- Project/article/draft history browsing from SQLite has a follow-up implementation through read APIs and history cards. Treat remaining full product-memory semantics as #14 follow-up.
+- Browser E2E coverage for the new history picker and cards is recorded in [Issue #13 Browser E2E Validation](./issue-13-browser-e2e-2026-05-03.md).

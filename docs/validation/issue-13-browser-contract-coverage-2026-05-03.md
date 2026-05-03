@@ -11,17 +11,17 @@ Added practical browser-adjacent coverage that remains part of `go test ./...`:
 - Static JavaScript contract checks for model config persistence, custom question add/edit/delete/reset behavior, history loading/opening flow, and readable artifact-card rendering.
 - `httptest` coverage that the server route table exposes workflow read APIs and serves the browser entrypoint plus the production script.
 
-This validates contract shape, not user behavior in a real browser. Issue [#13](https://github.com/terisuke/note_maker/issues/13) stays open until Playwright or equivalent browser E2E covers the actual flows.
+This validates contract shape, not user behavior in a real browser. The later Playwright validation cut covers the actual browser flows for Issue [#13](https://github.com/terisuke/note_maker/issues/13).
 
-## Why Not Playwright Yet
+## Original Playwright Gap
 
-The current frontend script is a single `DOMContentLoaded` closure with no importable UI functions. A Playwright suite is still the right next step, but adding it now would require a heavier test harness with stubbed API routes and browser setup that is not yet present in this repository.
+At the time of the contract cut, the frontend script was a single `DOMContentLoaded` closure with no importable UI functions. A later cut added the heavier test harness with stubbed API routes and browser setup.
 
 This pass keeps CI friction low by expanding Go tests first. The contract tests intentionally lock DOM IDs, event bindings, persistence calls, fetch endpoints, and card-rendering structure so a later Playwright suite has stable selectors and scenarios to target.
 
-## Next Playwright Path
+## Playwright Path
 
-Recommended scenarios when browser E2E is introduced:
+Scenarios carried into the browser E2E cut:
 
 1. Stub `/api/models`, `/api/personas`, `/api/formats`, `/api/brief-sessions/templates`, and `/api/workflow/artifacts`.
 2. Assert all four model selectors populate from `/api/models`, save into `localStorage["note-maker-config-v1"]`, and restore on reload.
@@ -49,7 +49,7 @@ node --check static/js/script.js
 git diff --check
 ```
 
-This browser-contract document is still a validation checkpoint, not a close signal for #13. The next cut should add browser E2E over stubbed API responses once the project has a Playwright or equivalent harness.
+This browser-contract document is a validation checkpoint. The later browser E2E validation over stubbed API responses closed #13.
 
 ## Browser E2E Follow-up
 
@@ -77,11 +77,11 @@ git diff --check
 
 See [Issue #13 Browser E2E Validation](./issue-13-browser-e2e-2026-05-03.md) for the scenario list.
 
-Issue #13 can close with the browser E2E cut. Remaining work is Phase C product scope rather than browser coverage scope.
+#13 is closed by the browser E2E cut. Remaining work is Phase C product scope rather than browser coverage scope.
 
 ## Issue Policy
 
-- #13: close with the browser E2E cut.
+- #13: closed with the browser E2E cut.
 - #14: keep open. SQLite exists, but queryable product memory is not fully exposed.
 - #27: keep open unless the owner explicitly splits and closes the first saved-history picker cut.
 - #28: keep open unless the owner explicitly splits and closes the first readable-card cut.

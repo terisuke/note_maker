@@ -30,9 +30,12 @@
         </div>
 
         <div class="config-grid">
-          <div class="field-row">
+          <div class="field-row persona-field">
             <label for="persona-select">書き手</label>
-            <select id="persona-select"></select>
+            <div class="inline-select-action">
+              <select id="persona-select"></select>
+              <button id="add-persona-btn" class="secondary-btn compact-btn" type="button">+ Add persona</button>
+            </div>
           </div>
           <div class="field-row">
             <label for="format-select">出力先</label>
@@ -55,6 +58,50 @@
             <select id="verify-model"></select>
           </div>
         </div>
+        <form id="add-persona-form" class="persona-form hidden">
+          <div class="section-heading">
+            <h3>書き手を追加</h3>
+            <div class="button-row">
+              <button id="save-persona-btn" class="primary-btn" type="submit">保存</button>
+              <button id="cancel-persona-btn" class="secondary-btn" type="button">キャンセル</button>
+            </div>
+          </div>
+          <div class="config-grid">
+            <div class="field-row">
+              <label for="persona-id-input">ID</label>
+              <input id="persona-id-input" type="text" autocomplete="off" placeholder="my_persona">
+            </div>
+            <div class="field-row">
+              <label for="persona-display-name-input">表示名</label>
+              <input id="persona-display-name-input" type="text" autocomplete="off" placeholder="新しい書き手">
+            </div>
+            <div class="field-row">
+              <label for="persona-default-format-select">初期出力先</label>
+              <select id="persona-default-format-select"></select>
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-description-input">説明</label>
+              <input id="persona-description-input" type="text" autocomplete="off" placeholder="どんな書き方をするか">
+            </div>
+            <div class="field-row">
+              <label for="persona-first-person-input">一人称</label>
+              <input id="persona-first-person-input" type="text" autocomplete="off" placeholder="私 / 僕">
+            </div>
+            <div class="field-row">
+              <label for="persona-source-kind-input">ソース種別</label>
+              <input id="persona-source-kind-input" type="text" autocomplete="off" placeholder="note / zenn / qiita">
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-source-ref-input">ソース参照</label>
+              <input id="persona-source-ref-input" type="text" autocomplete="off" placeholder="username or URL">
+            </div>
+            <div class="field-row storage-path-field">
+              <label for="persona-source-url-input">ソースURL</label>
+              <input id="persona-source-url-input" type="text" autocomplete="off" placeholder="https://example.com/feed">
+            </div>
+          </div>
+          <div id="persona-status" class="persona-status" aria-live="polite">IDと表示名だけで追加できます。ソースは後から文体ソース欄で変更できます。</div>
+        </form>
         <div class="storage-config">
           <div class="section-heading">
             <h3>保存方式</h3>

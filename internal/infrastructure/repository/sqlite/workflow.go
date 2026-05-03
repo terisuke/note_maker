@@ -17,6 +17,7 @@ import (
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 	sourcedomain "github.com/teradakousuke/note_maker/internal/domain/source"
 )
 
@@ -549,6 +550,76 @@ ORDER BY updated_at DESC, session_id`)
 		return nil, fmt.Errorf("iterate briefs: %w", err)
 	}
 	return briefs, nil
+}
+
+// SavePersona stores a user-authored persona.
+func (s *WorkflowStore) SavePersona(persona personadomain.Persona) error {
+	if err := persona.ValidateCustom(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(persona.ID) == "" {
+		return fmt.Errorf("persona id is required")
+	}
+	personaJSON, err := marshalString(persona)
+	if err != nil {
+		return fmt.Errorf("encode persona: %w", err)
+	}
+	now := nowUTC()
+	_, err = s.db.Exec(`
+INSERT INTO custom_personas (id, display_name, default_format, persona_json, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+	display_name = excluded.display_name,
+	default_format = excluded.default_format,
+	persona_json = excluded.persona_json,
+	updated_at = excluded.updated_at`,
+		persona.ID, persona.DisplayName, persona.DefaultFormat, personaJSON, formatTime(now), formatTime(now))
+	if err != nil {
+		return fmt.Errorf("save persona: %w", err)
+	}
+	return nil
+}
+
+// GetPersona returns a user-authored persona by ID.
+func (s *WorkflowStore) GetPersona(id string) (personadomain.Persona, bool) {
+	var personaJSON string
+	err := s.db.QueryRow(`SELECT persona_json FROM custom_personas WHERE id = ?`, strings.TrimSpace(id)).Scan(&personaJSON)
+	if err != nil {
+		return personadomain.Persona{}, false
+	}
+	var persona personadomain.Persona
+	if err := unmarshalString(personaJSON, &persona); err != nil {
+		return personadomain.Persona{}, false
+	}
+	return persona, true
+}
+
+// ListPersonas returns all user-authored personas in creation order.
+func (s *WorkflowStore) ListPersonas() ([]personadomain.Persona, error) {
+	rows, err := s.db.Query(`
+SELECT persona_json
+FROM custom_personas
+ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list personas: %w", err)
+	}
+	defer rows.Close()
+	var personas []personadomain.Persona
+	for rows.Next() {
+		var personaJSON string
+		if err := rows.Scan(&personaJSON); err != nil {
+			return nil, fmt.Errorf("scan persona: %w", err)
+		}
+		var persona personadomain.Persona
+		if err := unmarshalString(personaJSON, &persona); err != nil {
+			return nil, fmt.Errorf("decode persona: %w", err)
+		}
+		personas = append(personas, persona)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate personas: %w", err)
+	}
+	return personas, nil
 }
 
 // SaveProject stores a project aggregate.

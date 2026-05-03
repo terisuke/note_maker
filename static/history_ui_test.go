@@ -67,6 +67,57 @@ func TestHistoryUIContract(t *testing.T) {
 	})
 }
 
+func TestPersonaAuthoringContract(t *testing.T) {
+	contract := loadStaticContract(t)
+
+	for _, selector := range []string{
+		"#add-persona-btn",
+		"#add-persona-form",
+		"#persona-id-input",
+		"#persona-display-name-input",
+		"#persona-default-format-select",
+		"#persona-description-input",
+		"#persona-first-person-input",
+		"#persona-source-kind-input",
+		"#persona-source-ref-input",
+		"#persona-source-url-input",
+		"#save-persona-btn",
+		"#cancel-persona-btn",
+		"#persona-status",
+	} {
+		assertSelectorCount(t, contract.document, selector, 1)
+	}
+	if got := strings.TrimSpace(contract.document.Find("#add-persona-btn").Text()); got != "+ Add persona" {
+		t.Fatalf("#add-persona-btn text = %q, want + Add persona", got)
+	}
+	if _, ok := contract.document.Find("#add-persona-form").Attr("class"); !ok {
+		t.Fatalf("#add-persona-form should declare a class so it can start compact/hidden")
+	}
+
+	assertScriptContains(t, contract.script, []string{
+		"el.addPersonaToggle.addEventListener('click', togglePersonaForm)",
+		"el.addPersonaForm.addEventListener('submit', createPersona)",
+		"el.cancelPersona.addEventListener('click', hidePersonaForm)",
+		"requestJSON('/api/personas', {",
+		"method: 'POST'",
+		"populatePersonaSelect()",
+		"populateHistoryPersonaSelect()",
+		"additiveEndpointStatus(error, '書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。')",
+	})
+	assertFunctionContains(t, contract.script, "personaPayloadFromForm", []string{
+		"id: slugifyPersonaId(el.personaIdInput.value || el.personaNameInput.value)",
+		"display_name: el.personaNameInput.value.trim()",
+		"description: el.personaDescriptionInput.value.trim()",
+		"default_format: el.personaDefaultFormatSelect.value || currentFormatId()",
+		"payload.voice_notes = { first_person: voice }",
+		"payload.sources = [{ kind: sourceKind || 'manual', ref: sourceRef, url: sourceURL }]",
+	})
+	assertFunctionContains(t, contract.script, "upsertPersona", []string{
+		"state.personas = [",
+		"...state.personas.filter((item) => item.id !== persona.id)",
+	})
+}
+
 func TestModelSelectorConfigContract(t *testing.T) {
 	contract := loadStaticContract(t)
 
@@ -332,6 +383,67 @@ func TestArtifactCardsReadableContract(t *testing.T) {
 	assertFunctionContains(t, contract.script, "createAnswerSection", []string{
 		"state.questionTextById[questionId]",
 		"return `${question}: ${content}`",
+	})
+}
+
+func TestArtifactCardEditContract(t *testing.T) {
+	contract := loadStaticContract(t)
+
+	assertScriptContains(t, contract.script, []string{
+		"styleEditMode: false",
+		"briefEditMode: false",
+		"'edit-brief-btn'",
+		"'edit-style-guide-btn'",
+		"PATCH",
+		"`/api/author-style/${encodeURIComponent(styleId)}`",
+		"`/api/briefs/${encodeURIComponent(sessionId)}`",
+		"additiveEndpointStatus(error, '文体ガイド編集APIはまだ接続されていません。内容は保存されませんでした。')",
+		"additiveEndpointStatus(error, '記事ブリーフ編集APIはまだ接続されていません。内容は保存されませんでした。')",
+	})
+	assertFunctionContains(t, contract.script, "renderStyleGuideCard", []string{
+		"state.currentStyleArtifact = normalized",
+		"if (state.styleEditMode)",
+		"renderStyleGuideEditForm(normalized)",
+		"createCardEditButton('文体ガイドを編集'",
+		"appendArtifactStatus(el.styleGuideCard, state.styleEditStatus, state.styleEditStatusType)",
+	})
+	assertFunctionContains(t, contract.script, "renderBriefCard", []string{
+		"if (state.briefEditMode)",
+		"renderBriefEditForm(brief)",
+		"createCardEditButton('記事ブリーフを編集'",
+		"appendArtifactStatus(el.briefCard, state.briefEditStatus, state.briefEditStatusType)",
+	})
+	assertFunctionContains(t, contract.script, "renderBriefEditForm", []string{
+		"form.id = 'brief-edit-form'",
+		"['theme', 'テーマ', 'input']",
+		"['reader', '読者', 'textarea']",
+		"['must_include', '必ず含めること', 'textarea']",
+		"save.id = 'save-brief-edit-btn'",
+		"cancel.id = 'cancel-brief-edit-btn'",
+		"form.addEventListener('submit', (event) => saveBriefEdit(event, brief))",
+	})
+	assertFunctionContains(t, contract.script, "saveBriefEdit", []string{
+		"method: 'PATCH'",
+		"body: { fields }",
+		"state.completedBrief = { ...originalBrief, ...updatedBrief }",
+		"el.briefPreview.textContent = JSON.stringify(state.completedBrief, null, 2)",
+		"setBriefEditStatus('記事ブリーフを保存しました。', 'success')",
+	})
+	assertFunctionContains(t, contract.script, "saveStyleGuideEdit", []string{
+		"method: 'PATCH'",
+		"guide_markdown: markdown",
+		"setStyleEditStatus('文体ガイドを保存しました。', 'success')",
+		"el.guidePreview.textContent = styleGuideMarkdown(updated)",
+	})
+	assertFunctionContains(t, contract.script, "renderStyleGuideEditForm", []string{
+		"form.id = 'style-guide-edit-form'",
+		"'style-guide-markdown-input'",
+		"save.id = 'save-style-guide-edit-btn'",
+		"cancel.id = 'cancel-style-guide-edit-btn'",
+	})
+	assertFunctionContains(t, contract.script, "artifactStatusIdForContainer", []string{
+		"return 'brief-edit-status'",
+		"return 'style-guide-edit-status'",
 	})
 }
 

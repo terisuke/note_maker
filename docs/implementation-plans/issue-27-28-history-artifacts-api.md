@@ -102,12 +102,22 @@ go test ./...
 git diff --check
 ```
 
+## Phase C Polish Follow-up
+
+The `codex/phase-c-persona-history-polish` cut adds:
+
+- custom persona create/list with memory and SQLite persistence,
+- add-persona UI that saves and selects the custom persona,
+- editable style-guide cards that save a new guide version,
+- editable brief cards that save the updated brief artifact,
+- browser E2E coverage for custom persona add/reload and brief/style save, cancel, and error states.
+
 ## Remaining Phase C Work
 
 Not included in this cut:
 
-- add-persona authoring UI,
-- edit persistence beyond the existing fork-on-edit/session/brief save path,
-- project/article/draft history browsing,
-- draft version and section-regeneration artifact browsing,
-- browser E2E for the new history flow under Issue #13.
+- custom persona update/delete,
+- richer persona source editing after create,
+- project/article/draft editing and write workflows beyond the current read cards,
+- richer draft-version and section-regeneration artifact operations beyond current browsing,
+- browser E2E for the new history flow is covered by the later Issue #13 validation cut.

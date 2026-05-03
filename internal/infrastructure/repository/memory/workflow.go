@@ -10,6 +10,7 @@ import (
 	"github.com/teradakousuke/note_maker/internal/application/authorstyle"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 // WorkflowStore is an in-memory repository for the local three-phase workflow.
@@ -22,12 +23,14 @@ type WorkflowStore struct {
 	guideIndexes   map[string]authorstyle.AnalyzeResult
 	sessions       map[string]briefdomain.ArticleBriefSession
 	briefs         map[string]briefdomain.ArticleBrief
+	personas       map[string]personadomain.Persona
 }
 
 type workflowSnapshot struct {
 	AuthorStyles map[string]authorstyle.AnalyzeResult       `json:"author_styles"`
 	Sessions     map[string]briefdomain.ArticleBriefSession `json:"sessions"`
 	Briefs       map[string]briefdomain.ArticleBrief        `json:"briefs"`
+	Personas     map[string]personadomain.Persona           `json:"personas,omitempty"`
 }
 
 // NewWorkflowStore creates an empty local workflow store.
@@ -38,6 +41,7 @@ func NewWorkflowStore() *WorkflowStore {
 		guideIndexes:   make(map[string]authorstyle.AnalyzeResult),
 		sessions:       make(map[string]briefdomain.ArticleBriefSession),
 		briefs:         make(map[string]briefdomain.ArticleBrief),
+		personas:       make(map[string]personadomain.Persona),
 	}
 }
 
@@ -164,6 +168,39 @@ func (s *WorkflowStore) ListBriefs() (map[string]briefdomain.ArticleBrief, error
 	return briefs, nil
 }
 
+// SavePersona stores a user-authored persona.
+func (s *WorkflowStore) SavePersona(persona personadomain.Persona) error {
+	if err := persona.ValidateCustom(); err != nil {
+		return err
+	}
+	if persona.ID == "" {
+		return fmt.Errorf("persona id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.personas[persona.ID] = persona
+	return s.persistLocked()
+}
+
+// GetPersona returns a user-authored persona by ID.
+func (s *WorkflowStore) GetPersona(id string) (personadomain.Persona, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	persona, ok := s.personas[id]
+	return persona, ok
+}
+
+// ListPersonas returns all user-authored personas.
+func (s *WorkflowStore) ListPersonas() ([]personadomain.Persona, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	personas := make([]personadomain.Persona, 0, len(s.personas))
+	for _, persona := range s.personas {
+		personas = append(personas, persona)
+	}
+	return personas, nil
+}
+
 // GetProfileAndGuide returns style assets by profile, guide, or analysis ID.
 func (s *WorkflowStore) GetProfileAndGuide(id string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool) {
 	result, ok := s.GetAuthorStyle(id)
@@ -190,6 +227,7 @@ func (s *WorkflowStore) load() error {
 	s.authorStyles = nonNilAuthorStyles(snapshot.AuthorStyles)
 	s.sessions = nonNilSessions(snapshot.Sessions)
 	s.briefs = nonNilBriefs(snapshot.Briefs)
+	s.personas = nonNilPersonas(snapshot.Personas)
 	s.rebuildIndexesLocked()
 	return nil
 }
@@ -205,6 +243,7 @@ func (s *WorkflowStore) persistLocked() error {
 		AuthorStyles: s.authorStyles,
 		Sessions:     s.sessions,
 		Briefs:       s.briefs,
+		Personas:     s.personas,
 	}
 	encoded, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -253,6 +292,13 @@ func nonNilSessions(values map[string]briefdomain.ArticleBriefSession) map[strin
 func nonNilBriefs(values map[string]briefdomain.ArticleBrief) map[string]briefdomain.ArticleBrief {
 	if values == nil {
 		return make(map[string]briefdomain.ArticleBrief)
+	}
+	return values
+}
+
+func nonNilPersonas(values map[string]personadomain.Persona) map[string]personadomain.Persona {
+	if values == nil {
+		return make(map[string]personadomain.Persona)
 	}
 	return values
 }

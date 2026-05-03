@@ -1,8 +1,12 @@
-# Next implementation cut
+# Next implementation cut: Phase C persona/history/card polish
 
 Date: 2026-05-03
+Branch: `codex/phase-c-persona-history-polish`
+Route: C, docs/coordination
 
-This document translates the current open issue set into the next executable implementation sequence. The end state is unchanged: run Evo X2 Tailnet scenarios for note, Qiita, Zenn, and Cor.inc company blog with different themes, tones, and target lengths, then compare runtime, score, verification, and final output quality.
+This document records the current Phase C persona/history/card polish cut. The runtime and browser-E2E gates now have validation records; this cut adds custom persona create/list and editable brief/style card persistence on top of the existing history surface.
+
+The remaining limitations are narrower: custom persona update/delete, richer persona source management, and full queryable/versioned product memory remain outside this cut.
 
 ## Current state
 
@@ -48,8 +52,7 @@ Implemented in the `codex/issue13-browser-e2e` cut:
 
 Open and active:
 
-- Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work.
-- Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13), closure-ready after the browser E2E cut lands.
+- Memory/history umbrella: [#14](https://github.com/terisuke/note_maker/issues/14), now backed by the #26 schema work and the project/article/draft read surface.
 - Runtime evaluation: [#40](https://github.com/terisuke/note_maker/issues/40), now satisfied for the current note/Qiita/Zenn/Cor blog publishing-target acceptance scope by the 2026-05-03 full Tailnet Evo X2 matrix.
 - Runtime evaluation sub-issue [#74](https://github.com/terisuke/note_maker/issues/74), satisfied by the staged reruns and the final `5/5` full matrix pass.
 - Fallback and packaging follow-up: [#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15).
@@ -58,11 +61,25 @@ Open and active:
 - Interview usability fixed before measurement: [#66](https://github.com/terisuke/note_maker/issues/66), with details in [Issue 66 plain brief questions validation](../validation/issue-66-plain-brief-questions-2026-05-03.md).
 - Style-source switching fixed before measurement: [#68](https://github.com/terisuke/note_maker/issues/68), with details in [Issue 68 media-aware style source validation](../validation/issue-68-media-aware-style-source-2026-05-03.md).
 
-Remaining Phase C gaps after the current #27/#28 cut:
+Resolved validation baseline:
 
-- Add-persona authoring UI is not implemented; the current UI consumes seeded personas and saved artifacts.
-- Broader edit persistence called out in the issue text is not implemented beyond the existing fork-on-edit/session/brief save paths.
-- Project/article/draft artifact browsing from SQLite's normalized #26 schema now has server routes, response-shape contract coverage, frontend selectors, readable history cards, and browser E2E over those cards. Broader edit/add-persona semantics remain outside #13 and keep #14/#27/#28 open unless the owner explicitly accepts a narrower first-cut closure.
+- Browser E2E coverage: [#13](https://github.com/terisuke/note_maker/issues/13) is closed by the Playwright validation cut. Track remaining Phase C product work under #14/#27/#28.
+
+Implemented in this Phase C polish cut:
+
+- `GET /api/personas` returns built-in and user-authored personas; `POST /api/personas` validates and persists custom personas.
+- Memory and SQLite stores persist custom personas; SQLite restore after reopen is covered.
+- The web UI exposes an add-persona form, selects the new persona after save, keeps the history persona selector aligned, and reloads the saved persona through the API.
+- Style-guide cards can be edited and saved through `PATCH /api/author-style/{id}` / `POST /api/author-style/{id}/versions`; the server stores the edit as a new style-guide version.
+- Brief cards can be edited and saved through `PATCH /api/briefs/{id}`; the saved artifact updates while existing session answers remain auditable.
+- Phase C E2E covers custom persona add/reload plus brief/style card save, cancel, and error behavior.
+
+Remaining Phase C limitations:
+
+- Custom persona update/delete is not implemented.
+- Persona source management is minimal: create accepts initial source metadata, while richer source editing remains future work.
+- Brief-card edits update the saved brief artifact; they do not rewrite the original interview answers or create a separate brief-version table.
+- #14 remains open for full queryable product memory and broader version/history semantics beyond this cut.
 
 ## Current Review Findings
 
@@ -78,16 +95,16 @@ node --check static/js/script.js
 git diff --check
 ```
 
-No blocking code-risk finding remains in the targeted suite after the parallel fixes. The #13 browser E2E closure risk is resolved by the `tests/e2e` suite; #27/#28 still contain product scope that is broader than the first cut.
+No blocking code-risk finding remains in the targeted suite after the parallel fixes. The #13 browser E2E closure risk is resolved by the `tests/e2e` suite. The Phase C polish validation now covers custom persona create/list and editable brief/style card persistence; #14 remains the broader product-memory umbrella.
 
 ## Issue Close/Open Proposal
 
 | Issue | Proposal | Rationale |
 |---|---|---|
-| [#13](https://github.com/terisuke/note_maker/issues/13) | Close with the E2E PR | The new Playwright browser suite covers model config, question customisation and migration, persona/format switching, history open, readable cards, streaming/cancel, edit/fork, regenerate-section, and legacy localStorage migration. `python3 -m pytest tests/e2e -q`, `go test ./...`, and `git diff --check` passed. |
-| [#14](https://github.com/terisuke/note_maker/issues/14) | Keep open | #26 gives the SQLite schema and restart-capable storage foundation, but the product still lacks full queryable project/article/draft browsing and versioned edit/history surfaces. |
-| [#27](https://github.com/terisuke/note_maker/issues/27) | Keep open, or close only if the issue owner accepts the first-cut scope | Saved style-guide/session reuse is implemented, but the original issue still includes add-persona authoring UI, project/article navigation, restart semantics, and broader edit persistence. |
-| [#28](https://github.com/terisuke/note_maker/issues/28) | Keep open, or close only if the issue owner accepts the first-cut scope | Readable style-guide and brief cards landed, but editable card persistence/versioning and richer project/article/draft artifacts are still outstanding. |
+| [#13](https://github.com/terisuke/note_maker/issues/13) | Closed | Browser E2E validation covers model config, questions, persona/format switching, history/cards, streaming/cancel, edit/fork, and regenerate-section. |
+| [#14](https://github.com/terisuke/note_maker/issues/14) | Keep open | #26 gives the SQLite schema, the current branch exposes project/article/draft read cards, and this cut adds custom persona persistence plus editable brief/style cards. Broader queryable product memory, persona update/delete, and complete artifact version/history semantics remain. |
+| [#27](https://github.com/terisuke/note_maker/issues/27) | Close with this PR if the issue owner accepts create/list as the custom-persona scope | Saved style-guide/session/project/article/draft selectors are implemented, custom personas can be created/listed/persisted, and E2E covers selecting the saved persona and loading its history after reload. Custom persona update/delete should be tracked separately if needed. |
+| [#28](https://github.com/terisuke/note_maker/issues/28) | Close with this PR if the issue owner accepts brief/style edit persistence as the card scope | Readable style-guide and brief cards are editable with save/cancel/error behavior. Style edits create a new saved guide version; brief edits persist the saved artifact while leaving original session answers auditable. |
 
 ## Final evaluation target
 
@@ -159,16 +176,15 @@ Use subagents with disjoint write scopes when implementation resumes:
 
 | Lane | Issue | Subagent role | Write scope | Done when |
 |---|---|---|---|---|
-| A | [#74](https://github.com/terisuke/note_maker/issues/74) | Full matrix worker | live aggregate and validation docs | Complete for current scope: note, Qiita, Zenn, and Cor blog rows all pass and record artifacts |
-| D | [#27](https://github.com/terisuke/note_maker/issues/27) / [#28](https://github.com/terisuke/note_maker/issues/28) | History/artifact UI worker | done for this cut | style-guide/session history picker and readable brief/style cards use persisted workflow state |
-| E | [#13](https://github.com/terisuke/note_maker/issues/13) | Browser E2E worker | done for this cut | browser tests cover persona/format switching, history open, readable cards, edit/fork, streaming/cancel, regenerate-section, and legacy localStorage migration |
-| F | Phase C follow-up | Product worker | future history UI/API files | add-persona UI, broader edit persistence, and project/article/draft browsing polish are split from the #27/#28 first cut |
+| A | [#14](https://github.com/terisuke/note_maker/issues/14) | Persistence worker | future SQLite/history API and validation docs | custom personas, edited artifacts, projects, articles, drafts, source snapshots, and versions are queryable as one coherent product history |
+| B | Persona follow-up | Product worker | future persona edit/delete UI and API files | custom personas can be updated or removed without corrupting existing history references |
+| C | Artifact follow-up | Product worker | future artifact version UI and API files | brief edits have explicit version/history semantics comparable to style-guide versions |
 
-Lane A is the next expensive Evo X2 spend. Lane D/E can continue in parallel when they do not need the same frontend files.
+Keep these lanes disjoint when implementation resumes; persona management and artifact history are adjacent but separable.
 
 ## Recommended order
 
-1. Merge the #13 browser E2E cut and close #13 with the validation document.
-2. Split the remaining Phase C product work into explicit follow-up issues before broadening implementation: add-persona authoring UI, broader edit persistence semantics, and project/article/draft artifact browsing polish from the #26 SQLite schema.
-3. Close #74 and #40 for the current publishing-target acceptance scope after the PR lands and the issue comments link the final aggregate artifacts.
+1. Use the #13 Playwright validation as the browser baseline; do not track Phase C product gaps as browser-E2E debt.
+2. Merge this Phase C polish cut if the validation document stays green, then close #27/#28 according to the issue-owner scope decision.
+3. Keep #14 open for complete queryable product memory and decide whether custom persona update/delete or brief-version tables need separate follow-up issues.
 4. Keep #36/#45 as fallback/runtime P2 work and #15 as packaging after persistence/history are usable. Homepage remains a separate short-format check, not part of the #40 closure gate.
