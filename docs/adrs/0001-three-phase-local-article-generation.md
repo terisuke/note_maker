@@ -110,8 +110,10 @@ Adapters remain outside the domain:
   - Scenario output must record the base URL, model, elapsed time, style score, and draft length so accidental runtime swaps are visible.
 
 - Storage:
-  - initial implementation can use in-memory repositories and JSON file fixtures.
-  - durable storage can be added later without changing the domain model.
+  - JSON-file repositories remain the compatibility path.
+  - SQLite is the durable app baseline for queryable workflow memory, including author styles, sessions, briefs, brief versions, projects, articles, source snapshots, drafts, and final verification metadata.
+  - Storage mode must be visible from the settings UI unless environment variables intentionally lock it.
+  - The app-like launcher stores runtime config, workflow data, logs, and the managed server binary in the user data directory described in [Note Maker app handoff](../handoffs/app-handoff-2026-05-03.md).
 
 ## API Direction
 

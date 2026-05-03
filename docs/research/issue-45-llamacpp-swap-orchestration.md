@@ -185,6 +185,9 @@ one active alias at a time. Any future multi-instance or router-mode approach
 must be validated as a separate operational change with memory/latency evidence
 while Ollama is still serving primary traffic.
 
-The #45 implementation therefore satisfies design/script readiness, but not
-live runtime acceptance. Keep the issue open until the pending criteria in
+The #45 implementation therefore satisfies design/script readiness and proves
+that the direct `/llama/v1` route can complete a brief/draft scenario. It does
+not satisfy promotion readiness: the 2026-05-03 live run missed keyword overlap
+(`65 / 70`) and first-chunk latency (`14105ms`) gates. Keep the issue open
+until the pending criteria in
 `docs/validation/issue-45-llamacpp-swap-orchestration-2026-05-03.md` pass.

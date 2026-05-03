@@ -82,6 +82,6 @@ See [Issue #13 Browser E2E Validation](./issue-13-browser-e2e-2026-05-03.md) for
 ## Issue Policy
 
 - #13: closed with the browser E2E cut.
-- #14: keep open. SQLite exists, but queryable product memory is not fully exposed.
-- #27: keep open unless the owner explicitly splits and closes the first saved-history picker cut.
-- #28: keep open unless the owner explicitly splits and closes the first readable-card cut.
+- #14: closed later by PR #87 for the current app baseline after custom persona update/delete and brief-version history landed.
+- #27: closed by the Phase C history/persona picker work.
+- #28: closed by the readable artifact card work.

@@ -6,7 +6,7 @@ Note記事のURLまたはユーザー名を入力し、ローカルLLMが新し�
 
 ADR 0001 を踏まえた次の進化方針は [ADR 0002 — Multi-Persona, Multi-Format Article Generation](docs/adrs/0002-multi-persona-multi-format-extension.md) と [Multi-persona / multi-format 実装計画](docs/implementation-plans/multi-persona-multi-format.md) にまとめています。てりすけ本人と架空キャラ「宇宙野クラウディア」を別人格として扱い、note / cor-jp.com ブログ / Zenn / Qiita / ホームページHTML を切り替え可能にします。
 
-実装 issue と ADR の対応、各層の責務、テスト条件は [Issue and ADR guardrails](docs/implementation-plans/issue-adr-guardrails.md) にまとめています。次に着手する実装順は [Next implementation cut](docs/implementation-plans/next-implementation-cut.md) に整理しています。
+実装 issue と ADR の対応、各層の責務、テスト条件は [Issue and ADR guardrails](docs/implementation-plans/issue-adr-guardrails.md) にまとめています。現在のアプリ化後の引き継ぎ、起動方法、main昇格チェックリストは [Note Maker app handoff](docs/handoffs/app-handoff-2026-05-03.md) に整理しています。次に着手する実装順は [Next implementation cut](docs/implementation-plans/next-implementation-cut.md) に整理しています。
 
 ## 主な機能
 
@@ -20,8 +20,8 @@ ADR 0001 を踏まえた次の進化方針は [ADR 0002 — Multi-Persona, Multi
 
 - フロントエンド: HTML, CSS, JavaScript
 - バックエンド: Go
-- ローカルLLM: llama.cpp `llama-server`
-- モデル: `gemma4:31b` alias for `ggml-org/gemma-4-31B-it-GGUF` Q4_K_M
+- LLM runtime: Evo X2 Ollama OpenAI互換API over Tailnetをprimary、Evo X2 llama.cppと作業端末ローカル llama.cppをfallback
+- 主要モデル: `gemma4:e2b`（文体/ソース整理）、`qwen3.6:27b`（深掘り質問）、`gemma4:31b`（日本語下書き）、`gemma4:latest`（最終検証）
 - Note取得: 公開記事ページ/RSS優先、非公式APIは互換フォールバック
 
 ## 必要な環境

@@ -25,11 +25,11 @@ This PR implements:
 
 Known limitations:
 
-- custom persona update/delete is not implemented;
+- custom persona update/delete was not implemented in this cut, but landed later in PR #87;
 - richer persona source editing is not implemented after create;
-- brief-card edits update the saved brief artifact but do not rewrite original session answers or create a separate brief-version table;
+- brief-card edits update the saved brief artifact; explicit brief versions landed later in PR #87;
 - project/article/draft/source-snapshot cards remain read-only;
-- #14 remains open for broader queryable product memory and version/history semantics.
+- #14 was closed later by PR #87 for the current app baseline.
 
 ## Local Validation
 
@@ -67,10 +67,10 @@ passed
 | Issue | Proposal | Required before closure |
 |---|---|---|
 | [#13](https://github.com/terisuke/note_maker/issues/13) | Closed | Browser E2E validation is already recorded in [Issue #13 Browser E2E Validation](./issue-13-browser-e2e-2026-05-03.md). |
-| [#14](https://github.com/terisuke/note_maker/issues/14) | Keep open | This cut adds custom persona persistence and editable brief/style cards, but broader queryable product memory, persona update/delete, and complete artifact version/history semantics remain. |
+| [#14](https://github.com/terisuke/note_maker/issues/14) | Closed later by PR #87 | This cut added custom persona persistence and editable brief/style cards; PR #87 added persona update/delete and explicit brief versions for the current app baseline. |
 | [#27](https://github.com/terisuke/note_maker/issues/27) | Close with this PR if create/list satisfies the persona authoring scope | Custom personas can be created, persisted, listed with built-ins, selected, reloaded, and used to fetch persona-scoped history. Track persona update/delete separately if needed. |
 | [#28](https://github.com/terisuke/note_maker/issues/28) | Close with this PR if brief/style edit persistence satisfies the card scope | Brief and style cards support edit, cancel, save, and error handling. Style edits create a new saved guide version; brief edits persist the saved artifact while preserving raw/session audit data. |
 
 ## Suggested Merge Comment
 
-Phase C persona/history/card polish validated. #13 is closed. This PR adds custom persona create/list with persistence, plus editable brief/style card persistence. Recommend keeping #14 open for broader queryable product memory and closing #27/#28 if the issue owner accepts create/list and brief/style edit persistence as the intended scope.
+Phase C persona/history/card polish validated. #13 is closed. This PR adds custom persona create/list with persistence, plus editable brief/style card persistence. Historical note: #14 stayed open at this point and was closed later by PR #87 after persona update/delete and brief versions landed.
