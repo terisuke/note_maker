@@ -51,7 +51,7 @@ Two personas ship pre-loaded:
 | `terisuke` | てりすけ | `note.com/cor_instrument`, `cor-jp.com/blog/*` | `note_article` | 一人称「僕」/「私」、内省＋実体験ナラティブ、起業・キャリア・AI駆動開発、「～した話」「～てしまった件」 |
 | `cloudia` | 宇宙野クラウディア | `zenn.dev/cloudia`, `qiita.com/Cloudia_Cor_Inc` | `zenn_article` | 一人称「クラウディア」/「うち」、博多弁混じり、感嘆符・【前編】等の装飾、AI/JS/Pythonチュートリアル、感情的訴求 (「劇的に」「最強の」) |
 
-Personas are user-extensible. Adding a third persona requires only registering it (no code changes inside the prompt builder).
+Personas are user-extensible. Phase C is not complete with built-in persona selection alone. The `codex/phase-c-persona-history-polish` cut implements custom persona create/list with persistence; custom persona update/delete and richer source management remain future product work. Adding a third persona must not require code changes inside the prompt builder.
 
 ### OutputFormat
 
@@ -99,7 +99,12 @@ The flat `data/workflow_store.json` snapshot is replaced by a SQLite-backed stor
 - `brief_sessions`, `brief_answers` — unchanged in shape, gain a `parent_answer_id` for fork-on-edit.
 - `drafts` — versioned per article with score history.
 
-Acceptance criterion: any prior session can be reopened, its accumulated context shown as a transcript, and a new draft regenerated from any point in history.
+Acceptance criteria:
+
+- any prior session can be reopened, its accumulated context shown as a transcript, and a new draft regenerated from any point in history;
+- custom personas can be created, persisted, selected, and reopened after restart;
+- human-readable style-guide and brief artifacts can be edited through explicit product actions without losing raw Markdown/JSON audit data;
+- artifact edits create recoverable history or version records rather than silently replacing prior state.
 
 This subsumes Issue [#14](https://github.com/terisuke/note_maker/issues/14) (queryable database). Issue [#14](https://github.com/terisuke/note_maker/issues/14) is kept open as the umbrella tracker; the SQLite migration becomes its acceptance.
 
@@ -155,7 +160,7 @@ New domain types under `internal/domain`:
 
 Additions:
 
-- `GET /api/personas` / `POST /api/personas` / `PATCH /api/personas/{id}` — persona CRUD.
+- `GET /api/personas` / `POST /api/personas` — built-in plus custom persona listing and custom persona creation. `PATCH /api/personas/{id}` remains future work.
 - `GET /api/formats` — read-only registry of available formats.
 - `GET /api/brief-sessions/templates?persona_id=X&format_id=Y` — composed fixed-question template for the selected persona and output format.
 - `POST /api/projects` / `GET /api/projects` / `GET /api/projects/{id}` — project management.
@@ -173,7 +178,21 @@ Implemented history/artifact read subset as of the #27/#28 cut:
 - `GET /api/brief-sessions` — saved interview session summaries.
 - `GET /api/briefs` and `GET /api/briefs/{id}` — completed brief artifacts for readable card rendering and reuse.
 
-These endpoints are intentionally narrower than the future project/article/draft artifact surface described above. They do not implement add-persona authoring UI, project/article browsing, draft version browsing, or broader edit persistence semantics.
+Implemented project/article/draft read subset as of the Phase C history follow-up:
+
+- `GET /api/projects` and `GET /api/projects/{id}` — SQLite-backed project history and source snapshots when the active store supports them.
+- `GET /api/articles/{id}` — one article with brief, current draft, draft versions, and source snapshots.
+- `GET /api/drafts/{id}` — one draft with regeneration history.
+- `GET /api/workflow/artifacts` includes project, article, and draft summaries when SQLite history is available.
+
+Implemented in the `codex/phase-c-persona-history-polish` cut:
+
+- `POST /api/personas` — stores a user-authored persona after validating required fields, reserved ids, and output format.
+- `GET /api/personas` — returns built-in personas followed by persisted custom personas.
+- `PATCH /api/author-style/{id}` and `POST /api/author-style/{id}/versions` — store edited style-guide cards as new saved guide versions.
+- `PATCH /api/briefs/{id}` — updates the saved brief artifact without rewriting the original session answers.
+
+These endpoints are still narrower than the full Phase C product surface described above. They do not implement custom persona update/delete, rich persona source editing, brief-version tables, or editable project/article/draft/source-snapshot cards.
 
 ## Testing Strategy
 
@@ -221,9 +240,10 @@ Current implementation status as of 2026-05-03:
 - Phase B2/B3/B4 are implemented: historical source acquisition works for note, Zenn, Qiita, Cor RSS, and Cor GitHub Markdown; all five formats have prompt fragments, embedded guides, and validators; `terisuke` and `cloudia` ship as distinct seed personas. Validation is recorded in [Issue 22 source fetcher validation](../validation/issue-22-source-fetchers-2026-05-02.md) and [Issue 23/24 format and persona seed validation](../validation/issue-23-24-format-persona-seed-2026-05-02.md).
 - Phase B5 is implemented: fixed interview questions are composed server-side by `persona_id × output_format_id`, Cloudia technical modes include extra viewpoint/context prompts, the frontend reads `GET /api/brief-sessions/templates`, and `cmd/scenario/media_matrix` produces a six-case cross-media evaluation matrix for note, Cor blog, Zenn, Qiita, and homepage output ([#25](https://github.com/terisuke/note_maker/issues/25)).
 - Phase C1 is implemented and merged: `internal/infrastructure/repository/sqlite` adds migrations and storage for author styles, sessions, briefs, projects, articles, source snapshots, draft versions, final verification, and section-regeneration versions. The JSON store remains the compatibility path, while storage mode can now be inspected and switched from the web settings UI unless environment variables lock it ([#26](https://github.com/terisuke/note_maker/issues/26), [#61](https://github.com/terisuke/note_maker/issues/61)).
-- Phase C2/C3 has an implemented first product cut for workflow history and readable artifacts ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)): the web app now exposes reusable history through `GET /api/history` and `GET /api/workflow/artifacts`, plus focused read endpoints `GET /api/author-style`, `GET /api/brief-sessions`, `GET /api/briefs`, and `GET /api/briefs/{id}`. The memory and SQLite stores both expose `ListAuthorStyles`, `ListSessions`, and `ListBriefs`; SQLite also gained `ListProjects` and `ListArticlesByProject` for the richer #26 schema. The UI adds `履歴から再開`, saved style-guide/session pickers, human-readable style-guide cards, and human-readable article-brief cards while keeping raw Markdown/JSON details available. Validation is recorded in [Issue 27/28 history and artifact UI/API validation](../validation/issue-27-28-history-artifacts-2026-05-03.md).
+- Phase C2/C3 has an implemented first product cut for workflow history and readable artifacts ([#27](https://github.com/terisuke/note_maker/issues/27), [#28](https://github.com/terisuke/note_maker/issues/28)): the web app now exposes reusable history through `GET /api/history` and `GET /api/workflow/artifacts`, plus focused read endpoints `GET /api/author-style`, `GET /api/brief-sessions`, `GET /api/briefs`, and `GET /api/briefs/{id}`. The memory and SQLite stores both expose `ListAuthorStyles`, `ListSessions`, and `ListBriefs`; SQLite also gained project/article/draft/source-snapshot history methods for the richer #26 schema. The UI adds `履歴から再開`, saved style-guide/session/project/article/draft pickers, human-readable style-guide cards, article-brief cards, project/article cards, current-draft cards, draft-version cards, and source-snapshot cards while keeping raw Markdown/JSON details available. Validation is recorded in [Issue 27/28 history and artifact UI/API validation](../validation/issue-27-28-history-artifacts-2026-05-03.md).
 - The #13 follow-up has real browser E2E coverage: Python `pytest` plus Playwright starts the real Go server on a free localhost port, stubs application APIs in the browser, and covers model config persistence, custom question CRUD/reset, legacy localStorage migration, persona/format switching, interview start payloads, history opening/readable cards, edit/fork, streaming/cancel, and section regeneration. Validation is recorded in [Issue #13 Browser E2E Validation](../validation/issue-13-browser-e2e-2026-05-03.md).
-- A Phase C project/article/draft history follow-up now builds on the #26 SQLite schema: `GET /api/workflow/artifacts` includes project/article/draft summaries when SQLite is active, focused read routes expose project/article/draft details, and the history UI renders project, article, brief, current draft, draft versions, and source snapshot cards. Handler/server/static tests and browser E2E are green for this surface; broader Phase C product semantics remain tracked separately from #13.
+- A Phase C project/article/draft history follow-up now builds on the #26 SQLite schema: `GET /api/workflow/artifacts` includes project/article/draft summaries when SQLite is active, focused read routes expose project/article/draft details, and the history UI renders project, article, brief, current draft, draft versions, and source snapshot cards. Handler/server/static tests and browser E2E are green for this surface.
+- The `codex/phase-c-persona-history-polish` cut implements custom persona create/list and editable brief/style card persistence. Memory and SQLite stores persist custom personas, SQLite restores them after reopen, the UI can add a persona and select/reload it, style-card edits save as a new guide version, and brief-card edits update the saved brief artifact. Validation is recorded in [Phase C persona/history/card polish validation](../validation/phase-c-persona-history-card-polish-2026-05-03.md).
 - Phase D1 is implemented and merged: handler tests now cover template selection, edit/fork errors, SSE follow-up and draft paths, completed-session draft fallback, regenerate-section context recovery, Analyze/Generate compatibility handlers, and SQLite driver selection. `go test ./internal/handlers -cover` reports 80%+ statement coverage ([#29](https://github.com/terisuke/note_maker/issues/29)).
 - Runtime runner support is implemented and merged: `cmd/scenario/live_media_matrix` reads the offline matrix, emits planned aggregate JSON/Markdown by default, and executes live Evo X2 draft runs only when `RUN_LIVE_MEDIA_MATRIX=1` or `make scenario-media-matrix-live` is used ([#57](https://github.com/terisuke/note_maker/issues/57)).
 - The 2026-05-03 browser 500 analysis showed an implementation drift: plain web-app startup still defaulted to workstation-local `127.0.0.1:8081`, while this ADR requires Evo X2 Tailnet as primary. Issue [#63](https://github.com/terisuke/note_maker/issues/63) restores the default order to Evo X2 Ollama over Tailnet → Evo X2 llama.cpp → workstation-local llama.cpp and makes the UI show the actual endpoint/model reported by SSE.
@@ -237,8 +257,8 @@ Current implementation status as of 2026-05-03:
 Near-term execution order:
 
 1. Close [#74](https://github.com/terisuke/note_maker/issues/74) and [#40](https://github.com/terisuke/note_maker/issues/40) for the current note/Qiita/Zenn/Cor blog publishing-target scope after linking the final `5/5` aggregate artifacts. Homepage remains a separate short-format check.
-2. Close [#13](https://github.com/terisuke/note_maker/issues/13) with the browser E2E cut after linking the validation document and PR.
-3. Follow with the remaining Phase C product gaps that were intentionally not included in the #27/#28 first cut: add-persona authoring UI, broader edit persistence semantics beyond existing fork-on-edit/session saving, and richer project/article/draft history polish.
+2. Treat [#13](https://github.com/terisuke/note_maker/issues/13) as covered by the browser E2E validation cut; do not move Phase C product gaps back into browser-coverage scope.
+3. Keep [#14](https://github.com/terisuke/note_maker/issues/14) open for broader queryable product memory and split custom persona update/delete or brief-version history if those become required beyond this cut.
 4. Keep fallback-quality and runtime packaging follow-up ([#36](https://github.com/terisuke/note_maker/issues/36), [#45](https://github.com/terisuke/note_maker/issues/45), [#15](https://github.com/terisuke/note_maker/issues/15)) outside the #40 closure gate.
 
 ## Tracked issues
@@ -255,8 +275,8 @@ Filed 2026-05-02 as part of the PR that introduced this ADR.
 - B4 — [#24](https://github.com/terisuke/note_maker/issues/24) Seed persona library with `terisuke` and `cloudia` profiles. Implemented for the built-in registry: seeds include sources, default formats, and voice notes; live source re-analysis remains under [#22](https://github.com/terisuke/note_maker/issues/22).
 - B5 — [#25](https://github.com/terisuke/note_maker/issues/25) Format- and persona-aware fixed question sets
 - C1 — [#26](https://github.com/terisuke/note_maker/issues/26) Replace JSON store with SQLite-backed schema (extends [#14](https://github.com/terisuke/note_maker/issues/14)) — implemented in the current cut as an opt-in SQLite workflow store.
-- C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI — implemented in the current cut for saved style-guide and brief-session reuse through `履歴から再開`, backed by `GET /api/workflow/artifacts`, `GET /api/author-style`, and `GET /api/brief-sessions`. Add-persona authoring UI and broader edit-persistence expectations remain follow-up work.
-- C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards — implemented in the current cut for style-guide cards and article-brief cards, with raw Markdown/JSON details preserved behind disclosure controls. Project/article/draft artifact browsing now has read APIs and history cards, but real browser E2E and remaining edit/add-persona semantics are still outside the #27/#28 first-cut closure claim.
+- C2 — [#27](https://github.com/terisuke/note_maker/issues/27) Persona / past-session picker UI — implemented for built-in and custom persona history reuse through `履歴から再開`, backed by `GET /api/workflow/artifacts`, `GET /api/author-style`, `GET /api/brief-sessions`, SQLite project/article/draft read routes, and `POST /api/personas`. Custom persona update/delete remains follow-up work.
+- C3 — [#28](https://github.com/terisuke/note_maker/issues/28) Render brief and style guide as human-readable cards — implemented for style-guide and article-brief card edit/save flows, plus read-only project, article, draft-version, current-draft, and source-snapshot cards, with raw Markdown/JSON details preserved. Brief edits persist the saved artifact; style edits create new saved guide versions.
 - D1 — [#29](https://github.com/terisuke/note_maker/issues/29) HTTP handler tests for `internal/handlers/workflow.go` — implemented in the current cut with 80.0% handler package coverage.
 - Runtime runner — [#57](https://github.com/terisuke/note_maker/issues/57) Add live LLM media-matrix runner and aggregate evaluator, feeding [#40](https://github.com/terisuke/note_maker/issues/40) — implemented in the current cut.
 - Runtime stabilization epic — [#40](https://github.com/terisuke/note_maker/issues/40) Stabilize Tailnet Evo X2 draft quality and runtime metrics. #70-#73 provide the prerequisite validation and diagnostics. [#74](https://github.com/terisuke/note_maker/issues/74) has passed the bounded Cloudia/Zenn and Cloudia/Qiita proofs plus the final `5/5` publishing-target matrix.

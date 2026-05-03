@@ -39,6 +39,9 @@ type workflowStoreBackend interface {
 	SaveBrief(string, briefdomain.ArticleBrief) error
 	GetBrief(string) (briefdomain.ArticleBrief, bool)
 	ListBriefs() (map[string]briefdomain.ArticleBrief, error)
+	SavePersona(personadomain.Persona) error
+	GetPersona(string) (personadomain.Persona, bool)
+	ListPersonas() ([]personadomain.Persona, error)
 	GetProfileAndGuide(string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, bool)
 }
 
@@ -95,6 +98,15 @@ type seedAuthorStyleRequest struct {
 	OutputFormatID string `json:"output_format_id"`
 }
 
+type createPersonaRequest struct {
+	ID            string                       `json:"id"`
+	DisplayName   string                       `json:"display_name"`
+	Description   string                       `json:"description"`
+	DefaultFormat string                       `json:"default_format"`
+	Sources       []personadomain.AuthorSource `json:"sources"`
+	VoiceNotes    personadomain.VoiceNotes     `json:"voice_notes"`
+}
+
 type authorStyleResponse struct {
 	ID            string `json:"id"`
 	ProfileID     string `json:"profile_id"`
@@ -144,6 +156,23 @@ type answerBriefSessionRequest struct {
 type editBriefAnswerRequest struct {
 	Content    string `json:"content"`
 	BriefModel string `json:"brief_model"`
+}
+
+type updateStyleGuideRequest struct {
+	GuideMarkdown        string   `json:"guide_markdown"`
+	PreferredFirstPerson string   `json:"preferred_first_person"`
+	RecurringThemes      []string `json:"recurring_themes"`
+	ParagraphRhythm      string   `json:"paragraph_rhythm"`
+	SentenceRhythm       string   `json:"sentence_rhythm"`
+	HeadingGuidance      string   `json:"heading_guidance"`
+	QuoteGuidance        string   `json:"quote_guidance"`
+	OpeningPatterns      []string `json:"opening_patterns"`
+	ConclusionPatterns   []string `json:"conclusion_patterns"`
+	Warnings             []string `json:"warnings"`
+}
+
+type updateBriefResponse struct {
+	Brief briefArtifactResponse `json:"brief"`
 }
 
 type briefSessionResponse struct {
@@ -508,9 +537,58 @@ func draftGenerationErrorPayload(result draftapp.GenerateResult, err error, code
 	return response, true
 }
 
-// ListPersonasHandler returns built-in writing personas.
+// ListPersonasHandler returns built-in and user-authored writing personas.
 func ListPersonasHandler(w http.ResponseWriter, r *http.Request) {
-	respondWithJSON(w, http.StatusOK, personadomain.DefaultRegistry().List())
+	personas, err := listPersonas()
+	if err != nil {
+		respondWithError(w, "PERSONA_LIST_FAILED", "Failed to list personas", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, personas)
+}
+
+// CreatePersonaHandler stores a user-authored writing persona.
+func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	var req createPersonaRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	persona := personadomain.Persona{
+		ID:            strings.TrimSpace(req.ID),
+		DisplayName:   strings.TrimSpace(req.DisplayName),
+		Description:   strings.TrimSpace(req.Description),
+		DefaultFormat: strings.TrimSpace(req.DefaultFormat),
+		Sources:       req.Sources,
+		VoiceNotes:    req.VoiceNotes,
+	}
+	if persona.Description == "" && persona.DisplayName != "" {
+		persona.Description = "User-authored persona: " + persona.DisplayName
+	}
+	if strings.TrimSpace(persona.VoiceNotes.Tone) == "" && persona.DisplayName != "" {
+		persona.VoiceNotes.Tone = "Write in the voice of " + persona.DisplayName + "."
+	}
+	if err := persona.ValidateCustom(); err != nil {
+		respondWithError(w, "INVALID_PERSONA", "Invalid persona", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok := personadomain.DefaultRegistry().Get(persona.ID); ok {
+		respondWithError(w, "PERSONA_ID_RESERVED", "Persona id is reserved by a built-in persona", persona.ID, http.StatusConflict)
+		return
+	}
+	if _, ok := workflowStore.GetPersona(persona.ID); ok {
+		respondWithError(w, "PERSONA_ALREADY_EXISTS", "Persona already exists", persona.ID, http.StatusConflict)
+		return
+	}
+	if _, ok := outputformat.DefaultRegistry().Get(persona.DefaultFormat); !ok {
+		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", persona.DefaultFormat, http.StatusBadRequest)
+		return
+	}
+	if err := workflowStore.SavePersona(persona); err != nil {
+		respondWithError(w, "PERSONA_SAVE_FAILED", "Failed to save persona", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusCreated, persona)
 }
 
 // ListFormatsHandler returns built-in output formats.
@@ -520,7 +598,7 @@ func ListFormatsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetBriefSessionTemplateHandler returns the composed fixed-question template.
 func GetBriefSessionTemplateHandler(w http.ResponseWriter, r *http.Request) {
-	persona, ok := personadomain.DefaultRegistry().Get(r.URL.Query().Get("persona_id"))
+	persona, ok := resolvePersona(r.URL.Query().Get("persona_id"))
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", r.URL.Query().Get("persona_id"), http.StatusBadRequest)
 		return
@@ -548,7 +626,7 @@ func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	persona, ok := resolvePersona(req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -582,7 +660,7 @@ func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	persona, ok := resolvePersona(req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -698,6 +776,37 @@ func findPersonaSource(persona personadomain.Persona, kind string) (personadomai
 		}
 	}
 	return personadomain.AuthorSource{}, false
+}
+
+func resolvePersona(id string) (personadomain.Persona, bool) {
+	normalized := personadomain.NormalizeID(id)
+	if persona, ok := personadomain.DefaultRegistry().Get(normalized); ok {
+		return persona, true
+	}
+	return workflowStore.GetPersona(normalized)
+}
+
+func listPersonas() ([]personadomain.Persona, error) {
+	builtIns := personadomain.DefaultRegistry().List()
+	custom, err := workflowStore.ListPersonas()
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(custom, func(i, j int) bool {
+		return custom[i].ID < custom[j].ID
+	})
+	personas := make([]personadomain.Persona, 0, len(builtIns)+len(custom))
+	personas = append(personas, builtIns...)
+	seen := map[string]bool{}
+	for _, persona := range builtIns {
+		seen[persona.ID] = true
+	}
+	for _, persona := range custom {
+		if !seen[persona.ID] {
+			personas = append(personas, persona)
+		}
+	}
+	return personas, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -819,6 +928,30 @@ func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, toAuthorStyleResponse(result))
 }
 
+// CreateStyleGuideVersionHandler stores an edited style guide as a new version.
+func CreateStyleGuideVersionHandler(w http.ResponseWriter, r *http.Request) {
+	var req updateStyleGuideRequest
+	if err := decodeJSONRequest(r, &req); err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
+		return
+	}
+	base, ok := workflowStore.GetAuthorStyle(pathValue(r, "id"))
+	if !ok {
+		respondWithError(w, "AUTHOR_STYLE_NOT_FOUND", "Author style was not found", "", http.StatusNotFound)
+		return
+	}
+	updated, err := styleGuideVersionFromRequest(base, req)
+	if err != nil {
+		respondWithError(w, "INVALID_STYLE_GUIDE_VERSION", "Invalid style guide version", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := workflowStore.SaveAuthorStyle(updated); err != nil {
+		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondWithJSON(w, http.StatusCreated, toStyleGuideArtifactResponse(updated))
+}
+
 // ListBriefSessionsHandler returns saved interview sessions for project history UIs.
 func ListBriefSessionsHandler(w http.ResponseWriter, r *http.Request) {
 	sessions, err := workflowStore.ListSessions()
@@ -855,7 +988,7 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.SessionID) == "" {
 		req.SessionID = newID("abs")
 	}
-	persona, ok := personadomain.DefaultRegistry().Get(req.PersonaID)
+	persona, ok := resolvePersona(req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -927,6 +1060,33 @@ func GetBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	session, sessionOK := workflowStore.GetSession(sessionID)
 	respondWithJSON(w, http.StatusOK, toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK))
+}
+
+// UpdateBriefArtifactHandler updates the saved brief artifact without rewriting session answers.
+func UpdateBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := pathValue(r, "id")
+	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	if !ok {
+		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
+		return
+	}
+	fields, err := decodeBriefUpdateFields(r)
+	if err != nil {
+		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := applyBriefUpdateFields(&articleBrief, fields); err != nil {
+		respondWithError(w, "INVALID_BRIEF_UPDATE", "Invalid brief update", err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := workflowStore.SaveBrief(sessionID, articleBrief); err != nil {
+		respondWithError(w, "BRIEF_SAVE_FAILED", "Failed to save article brief", err.Error(), http.StatusInternalServerError)
+		return
+	}
+	session, sessionOK := workflowStore.GetSession(sessionID)
+	respondWithJSON(w, http.StatusOK, updateBriefResponse{
+		Brief: toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK),
+	})
 }
 
 // ListWorkflowArtifactsHandler returns all currently reusable workflow artifacts.
@@ -1217,7 +1377,7 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 	if formatID == "" {
 		formatID = articleBrief.OutputFormatID
 	}
-	persona, ok := personadomain.DefaultRegistry().Get(personaID)
+	persona, ok := resolvePersona(personaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", personaID, http.StatusBadRequest)
 		return
@@ -1411,7 +1571,7 @@ func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID stri
 	if strings.TrimSpace(personaID) == "" {
 		personaID = articleBrief.PersonaID
 	}
-	persona, ok := personadomain.DefaultRegistry().Get(personaID)
+	persona, ok := resolvePersona(personaID)
 	if !ok {
 		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
 	}
@@ -1588,6 +1748,219 @@ func newDraftServiceWithVerifier(generator draftapp.TextGenerator, model string)
 func decodeJSONRequest(r *http.Request, out any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(out)
+}
+
+func decodeBriefUpdateFields(r *http.Request) (map[string]string, error) {
+	defer r.Body.Close()
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	if fieldsRaw, ok := raw["fields"]; ok {
+		var fields map[string]string
+		if err := json.Unmarshal(fieldsRaw, &fields); err != nil {
+			return nil, fmt.Errorf("fields must be an object of string values")
+		}
+		rawFields := make(map[string]json.RawMessage, len(fields))
+		for key, value := range fields {
+			encoded, _ := json.Marshal(value)
+			rawFields[key] = encoded
+		}
+		raw = rawFields
+	}
+	fields := make(map[string]string, len(raw))
+	for key, value := range raw {
+		if key == "fields" {
+			continue
+		}
+		var content string
+		if err := json.Unmarshal(value, &content); err != nil {
+			return nil, fmt.Errorf("field %q must be a string", key)
+		}
+		fields[key] = content
+	}
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("at least one brief field is required")
+	}
+	return fields, nil
+}
+
+func applyBriefUpdateFields(articleBrief *briefdomain.ArticleBrief, fields map[string]string) error {
+	for key, value := range fields {
+		switch normalizeBriefFieldName(key) {
+		case "style_profile_id":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("style_profile_id cannot be empty")
+			}
+			if _, _, ok := workflowStore.GetProfileAndGuide(value); !ok {
+				return fmt.Errorf("style_profile_id was not found")
+			}
+			articleBrief.StyleProfileID = strings.TrimSpace(value)
+		case "persona_id":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("persona_id cannot be empty")
+			}
+			persona, ok := resolvePersona(value)
+			if !ok {
+				return fmt.Errorf("persona_id was not found")
+			}
+			articleBrief.PersonaID = persona.ID
+		case "output_format_id":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("output_format_id cannot be empty")
+			}
+			format, ok := outputformat.DefaultRegistry().Get(value)
+			if !ok {
+				return fmt.Errorf("output_format_id was not found")
+			}
+			articleBrief.OutputFormatID = format.ID
+		case "theme":
+			articleBrief.Theme = strings.TrimSpace(value)
+		case "opening_episode":
+			articleBrief.OpeningEpisode = strings.TrimSpace(value)
+		case "reader":
+			articleBrief.Reader = strings.TrimSpace(value)
+		case "expected_reader_action":
+			articleBrief.ExpectedReaderAction = strings.TrimSpace(value)
+		case "must_include":
+			articleBrief.MustInclude = strings.TrimSpace(value)
+		case "personal_context":
+			articleBrief.PersonalContext = strings.TrimSpace(value)
+		case "exclusions":
+			articleBrief.Exclusions = strings.TrimSpace(value)
+		case "target_length_structure":
+			articleBrief.TargetLengthStructure = strings.TrimSpace(value)
+		case "tone_stance":
+			articleBrief.ToneStance = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("unsupported brief field %q", key)
+		}
+	}
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{"style_profile_id", articleBrief.StyleProfileID},
+		{"persona_id", articleBrief.PersonaID},
+		{"output_format_id", articleBrief.OutputFormatID},
+		{"theme", articleBrief.Theme},
+		{"reader", articleBrief.Reader},
+		{"expected_reader_action", articleBrief.ExpectedReaderAction},
+		{"must_include", articleBrief.MustInclude},
+		{"personal_context", articleBrief.PersonalContext},
+		{"target_length_structure", articleBrief.TargetLengthStructure},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			return fmt.Errorf("%s cannot be empty", required.name)
+		}
+	}
+	return nil
+}
+
+func normalizeBriefFieldName(name string) string {
+	name = strings.TrimSpace(name)
+	if alias, ok := map[string]string{
+		"StyleProfileID":        "style_profile_id",
+		"PersonaID":             "persona_id",
+		"OutputFormatID":        "output_format_id",
+		"Theme":                 "theme",
+		"OpeningEpisode":        "opening_episode",
+		"Reader":                "reader",
+		"ExpectedReaderAction":  "expected_reader_action",
+		"MustInclude":           "must_include",
+		"PersonalContext":       "personal_context",
+		"Exclusions":            "exclusions",
+		"TargetLengthStructure": "target_length_structure",
+		"ToneStance":            "tone_stance",
+	}[name]; ok {
+		return alias
+	}
+	var builder strings.Builder
+	for i, r := range name {
+		if r == '-' || r == ' ' {
+			builder.WriteRune('_')
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				builder.WriteRune('_')
+			}
+			builder.WriteRune(r + ('a' - 'A'))
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return strings.ToLower(builder.String())
+}
+
+func styleGuideVersionFromRequest(base authorstyleapp.AnalyzeResult, req updateStyleGuideRequest) (authorstyleapp.AnalyzeResult, error) {
+	guide := base.Guide
+	changed := false
+	if value := strings.TrimSpace(req.PreferredFirstPerson); value != "" {
+		guide.PreferredFirstPerson = value
+		changed = true
+	}
+	if len(req.RecurringThemes) > 0 {
+		guide.RecurringThemes = cleanStringSlice(req.RecurringThemes)
+		changed = true
+	}
+	if value := strings.TrimSpace(req.ParagraphRhythm); value != "" {
+		guide.ParagraphRhythm = value
+		changed = true
+	}
+	if value := strings.TrimSpace(req.SentenceRhythm); value != "" {
+		guide.SentenceRhythm = value
+		changed = true
+	}
+	if value := strings.TrimSpace(req.HeadingGuidance); value != "" {
+		guide.HeadingGuidance = value
+		changed = true
+	}
+	if value := strings.TrimSpace(req.QuoteGuidance); value != "" {
+		guide.QuoteGuidance = value
+		changed = true
+	}
+	if len(req.OpeningPatterns) > 0 {
+		guide.OpeningPatterns = cleanStringSlice(req.OpeningPatterns)
+		changed = true
+	}
+	if len(req.ConclusionPatterns) > 0 {
+		guide.ConclusionPatterns = cleanStringSlice(req.ConclusionPatterns)
+		changed = true
+	}
+	if len(req.Warnings) > 0 {
+		guide.Warnings = cleanStringSlice(req.Warnings)
+		changed = true
+	}
+	if markdown := strings.TrimSpace(req.GuideMarkdown); markdown != "" {
+		guide.Markdown = markdown
+		changed = true
+	} else if changed {
+		guide.Markdown = authordomain.GuideMarkdown(guide)
+	}
+	if !changed {
+		return authorstyleapp.AnalyzeResult{}, fmt.Errorf("at least one style guide field is required")
+	}
+	if err := guide.Validate(); err != nil {
+		return authorstyleapp.AnalyzeResult{}, err
+	}
+	suffix := strings.TrimPrefix(newID("edit"), "edit_")
+	guide.ID = firstNonEmpty(base.Guide.ID, "guide") + "_edit_" + suffix
+	updated := base
+	updated.ID = firstNonEmpty(base.ID, "author_style") + "_edit_" + suffix
+	updated.Guide = guide
+	updated.CreatedAt = time.Now().UTC()
+	return updated, nil
+}
+
+func cleanStringSlice(values []string) []string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	return cleaned
 }
 
 func wantsEventStream(r *http.Request) bool {

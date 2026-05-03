@@ -9,6 +9,8 @@ import (
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
 	authordomain "github.com/teradakousuke/note_maker/internal/domain/author"
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
+	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
+	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
 )
 
 func TestPersistentWorkflowStoreRestoresDraftInputs(t *testing.T) {
@@ -58,6 +60,37 @@ func TestPersistentWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	}
 }
 
+func TestPersistentWorkflowStoreRestoresCustomPersonas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow_store.json")
+	store, err := NewPersistentWorkflowStore(path)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	persona := testCustomPersona()
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("save persona: %v", err)
+	}
+
+	reopened, err := NewPersistentWorkflowStore(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	restored, ok := reopened.GetPersona(persona.ID)
+	if !ok {
+		t.Fatal("expected persona after reopen")
+	}
+	if restored.DisplayName != persona.DisplayName || restored.VoiceNotes.Tone != persona.VoiceNotes.Tone {
+		t.Fatalf("unexpected restored persona: %#v", restored)
+	}
+	listed, err := reopened.ListPersonas()
+	if err != nil {
+		t.Fatalf("list personas: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != persona.ID {
+		t.Fatalf("unexpected persona list: %#v", listed)
+	}
+}
+
 func testAnalyzeResult(t *testing.T) authorstyle.AnalyzeResult {
 	t.Helper()
 	fetchedAt := time.Unix(1700000000, 0).UTC()
@@ -86,6 +119,24 @@ func testAnalyzeResult(t *testing.T) authorstyle.AnalyzeResult {
 		Guide:        guide,
 		ArticleCount: 1,
 		CreatedAt:    fetchedAt,
+	}
+}
+
+func testCustomPersona() personadomain.Persona {
+	return personadomain.Persona{
+		ID:            "custom_writer",
+		DisplayName:   "Custom Writer",
+		Description:   "A locally authored test persona.",
+		DefaultFormat: outputformat.IDNoteArticle,
+		Sources: []personadomain.AuthorSource{
+			{Kind: "note", Ref: "custom_writer"},
+		},
+		VoiceNotes: personadomain.VoiceNotes{
+			FirstPerson:   []string{"私"},
+			Tone:          "Calm, direct, and specific.",
+			TitlePatterns: []string{"How I use local workflows"},
+			AntiPatterns:  []string{"empty claims"},
+		},
 	}
 }
 

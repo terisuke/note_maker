@@ -242,11 +242,12 @@ class StubState:
         return [call for call in self.calls if call["path"] == path]
 
 
-def install_routes(page: Page, handlers: dict[str, Any] | None = None) -> StubState:
+def install_routes(page: Page, handlers: dict[str, Any] | None = None, *, clear_storage: bool = True) -> StubState:
     state = StubState()
     handlers = handlers or {}
 
-    page.add_init_script("localStorage.clear();")
+    if clear_storage:
+        page.add_init_script("localStorage.clear();")
     page.route(
         "https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js",
         lambda route: route.fulfill(

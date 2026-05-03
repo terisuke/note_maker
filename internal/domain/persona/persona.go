@@ -1,11 +1,17 @@
 package persona
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 const (
 	IDTerisuke = "terisuke"
 	IDCloudia  = "cloudia"
 )
+
+var customIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
 
 // AuthorSource identifies public material used to derive a persona's style.
 type AuthorSource struct {
@@ -30,6 +36,31 @@ type Persona struct {
 	DefaultFormat string         `json:"default_format"`
 	Sources       []AuthorSource `json:"sources"`
 	VoiceNotes    VoiceNotes     `json:"voice_notes"`
+}
+
+// ValidateCustom checks the user-authored persona fields needed by prompt and UI flows.
+func (p Persona) ValidateCustom() error {
+	if strings.TrimSpace(p.ID) == "" {
+		return fmt.Errorf("persona id is required")
+	}
+	if !customIDPattern.MatchString(strings.TrimSpace(p.ID)) {
+		return fmt.Errorf("persona id must use 2-64 lowercase letters, digits, hyphen, or underscore")
+	}
+	if strings.TrimSpace(p.DisplayName) == "" {
+		return fmt.Errorf("persona display name is required")
+	}
+	if strings.TrimSpace(p.DefaultFormat) == "" {
+		return fmt.Errorf("persona default format is required")
+	}
+	for i, source := range p.Sources {
+		if strings.TrimSpace(source.Kind) == "" {
+			return fmt.Errorf("persona source %d kind is required", i)
+		}
+		if strings.TrimSpace(source.Ref) == "" && strings.TrimSpace(source.URL) == "" {
+			return fmt.Errorf("persona source %d requires ref or url", i)
+		}
+	}
+	return nil
 }
 
 // PromptHint turns voice notes into concise draft-generation guidance.

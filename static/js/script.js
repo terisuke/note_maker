@@ -68,11 +68,33 @@ document.addEventListener('DOMContentLoaded', () => {
     answerAbortController: null,
     draftAbortController: null,
     pendingSectionReplacement: null,
+    currentStyleArtifact: null,
+    styleEditMode: false,
+    styleEditStatus: '',
+    styleEditStatusType: '',
+    briefEditMode: false,
+    briefEditStatus: '',
+    briefEditStatusType: '',
+    personaCreateStatus: '',
+    personaCreateStatusType: '',
   };
 
   const el = {
     modelStatus: document.getElementById('model-status'),
     personaSelect: document.getElementById('persona-select'),
+    addPersonaToggle: document.getElementById('add-persona-btn'),
+    addPersonaForm: document.getElementById('add-persona-form'),
+    personaIdInput: document.getElementById('persona-id-input'),
+    personaNameInput: document.getElementById('persona-display-name-input'),
+    personaDefaultFormatSelect: document.getElementById('persona-default-format-select'),
+    personaDescriptionInput: document.getElementById('persona-description-input'),
+    personaVoiceInput: document.getElementById('persona-first-person-input'),
+    personaSourceKindInput: document.getElementById('persona-source-kind-input'),
+    personaSourceRefInput: document.getElementById('persona-source-ref-input'),
+    personaSourceURLInput: document.getElementById('persona-source-url-input'),
+    savePersona: document.getElementById('save-persona-btn'),
+    cancelPersona: document.getElementById('cancel-persona-btn'),
+    personaStatus: document.getElementById('persona-status'),
     formatSelect: document.getElementById('format-select'),
     modeSummary: document.getElementById('mode-summary'),
     styleModel: document.getElementById('style-model'),
@@ -151,6 +173,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadStorageConfig();
 
   el.personaSelect.addEventListener('change', onPersonaChange);
+  el.addPersonaToggle.addEventListener('click', togglePersonaForm);
+  el.addPersonaForm.addEventListener('submit', createPersona);
+  el.cancelPersona.addEventListener('click', hidePersonaForm);
   el.formatSelect.addEventListener('change', onFormatChange);
   el.styleModel.addEventListener('change', saveModelConfig);
   el.briefModel.addEventListener('change', saveModelConfig);
@@ -202,6 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.formats = formats;
       populatePersonaSelect();
       populateFormatSelect();
+      populatePersonaDefaultFormatSelect();
       populateHistoryPersonaSelect();
       applyPersonaDefaults(false);
       renderModeSummary();
@@ -275,12 +301,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyStyleResult(data) {
-    state.profileId = data.profile_id;
-    el.profileId.textContent = data.profile_id;
-    el.guideId.textContent = data.guide_id;
-    el.articleCount.textContent = String(data.article_count);
-    el.guidePreview.textContent = data.guide_markdown;
-    renderStyleGuideCard(data);
+    const normalized = normalizeHistoryStyle(data);
+    state.currentStyleArtifact = normalized;
+    state.profileId = normalized.profileId || normalized.id;
+    el.profileId.textContent = state.profileId;
+    el.guideId.textContent = normalized.guideId;
+    el.articleCount.textContent = normalized.articleCount === undefined ? '' : String(normalized.articleCount);
+    el.guidePreview.textContent = styleGuideMarkdown(normalized);
+    renderStyleGuideCard(normalized);
     el.styleResult.classList.remove('hidden');
     el.startInterview.disabled = false;
   }
@@ -406,6 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTranscript(data);
     if (data.completed) {
       state.completedBrief = data.brief;
+      state.briefEditMode = false;
       state.nextQuestion = null;
       el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
       renderBriefCard(data.brief);
@@ -789,6 +818,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function populatePersonaDefaultFormatSelect() {
+    el.personaDefaultFormatSelect.innerHTML = '';
+    state.formats.forEach((format) => {
+      const option = document.createElement('option');
+      option.value = format.id;
+      option.textContent = format.display_name;
+      option.selected = format.id === currentFormatId();
+      el.personaDefaultFormatSelect.appendChild(option);
+    });
+    if (!el.personaDefaultFormatSelect.value && state.formats[0]) {
+      el.personaDefaultFormatSelect.value = state.formats[0].id;
+    }
+  }
+
   function populateHistoryPersonaSelect() {
     el.historyPersonaSelect.innerHTML = '';
     state.personas.forEach((persona) => {
@@ -801,6 +844,139 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!el.historyPersonaSelect.value && state.personas[0]) {
       el.historyPersonaSelect.value = state.personas[0].id;
     }
+  }
+
+  function togglePersonaForm() {
+    const willShow = el.addPersonaForm.classList.contains('hidden');
+    el.addPersonaForm.classList.toggle('hidden', !willShow);
+    if (willShow) {
+      resetPersonaForm();
+      el.personaNameInput.focus();
+    }
+  }
+
+  function hidePersonaForm() {
+    el.addPersonaForm.classList.add('hidden');
+    resetPersonaForm();
+  }
+
+  function resetPersonaForm() {
+    el.personaIdInput.value = '';
+    el.personaNameInput.value = '';
+    el.personaDescriptionInput.value = '';
+    el.personaVoiceInput.value = '';
+    el.personaSourceKindInput.value = '';
+    el.personaSourceRefInput.value = '';
+    el.personaSourceURLInput.value = '';
+    populatePersonaDefaultFormatSelect();
+    setPersonaStatus('IDと表示名だけで追加できます。ソースは後から文体ソース欄で変更できます。');
+  }
+
+  async function createPersona(event) {
+    event.preventDefault();
+    clearError();
+    const payload = personaPayloadFromForm();
+    if (!payload.display_name) {
+      setPersonaStatus('表示名を入力してください。', 'warning');
+      el.personaNameInput.focus();
+      return;
+    }
+    if (!payload.id) {
+      setPersonaStatus('IDを入力してください。', 'warning');
+      el.personaIdInput.focus();
+      return;
+    }
+    el.savePersona.disabled = true;
+    setPersonaStatus('書き手を保存しています...');
+    try {
+      const data = await requestJSON('/api/personas', {
+        method: 'POST',
+        body: payload,
+      });
+      const persona = normalizePersonaForSelect({ ...payload, ...data });
+      upsertPersona(persona);
+      config.mode.persona = persona.id;
+      config.mode.format = persona.default_format || config.mode.format;
+      saveConfig();
+      populatePersonaSelect();
+      populateHistoryPersonaSelect();
+      if (persona.default_format && state.formats.some((format) => format.id === persona.default_format)) {
+        el.formatSelect.value = persona.default_format;
+      }
+      applyPersonaDefaults(false);
+      applyStyleSourceDefault(true);
+      renderModeSummary();
+      await loadQuestionTemplate();
+      await loadWorkflowHistory();
+      setPersonaStatus('書き手を追加しました。現在の書き手として選択しています。', 'success');
+    } catch (error) {
+      const message = additiveEndpointStatus(error, '書き手追加APIはまだ接続されていません。バックエンド実装後に保存できます。');
+      setPersonaStatus(message, 'warning');
+    } finally {
+      el.savePersona.disabled = false;
+    }
+  }
+
+  function personaPayloadFromForm() {
+    const sourceKind = el.personaSourceKindInput.value.trim();
+    const sourceRef = el.personaSourceRefInput.value.trim();
+    const sourceURL = el.personaSourceURLInput.value.trim();
+    const voice = el.personaVoiceInput.value.split(/[、,/]/).map((item) => item.trim()).filter(Boolean);
+    const payload = {
+      id: slugifyPersonaId(el.personaIdInput.value || el.personaNameInput.value),
+      display_name: el.personaNameInput.value.trim(),
+      description: el.personaDescriptionInput.value.trim(),
+      default_format: el.personaDefaultFormatSelect.value || currentFormatId(),
+    };
+    if (voice.length) {
+      payload.voice_notes = { first_person: voice };
+      payload.voice = voice.join(' / ');
+    }
+    if (sourceKind || sourceRef || sourceURL) {
+      payload.sources = [{ kind: sourceKind || 'manual', ref: sourceRef, url: sourceURL }];
+      payload.source = sourceRef || sourceURL;
+      payload.source_kind = sourceKind || 'manual';
+      payload.source_ref = sourceRef;
+      payload.source_url = sourceURL;
+    }
+    return payload;
+  }
+
+  function slugifyPersonaId(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  function normalizePersonaForSelect(persona = {}) {
+    return {
+      ...persona,
+      id: String(persona.id || persona.ID || '').trim(),
+      display_name: persona.display_name || persona.displayName || persona.name || persona.Name || persona.id || '',
+      description: persona.description || persona.Description || '',
+      default_format: persona.default_format || persona.defaultFormat || persona.DefaultFormat || '',
+      voice_notes: persona.voice_notes || persona.voiceNotes || persona.VoiceNotes || {},
+      sources: arrayFrom(persona.sources || persona.Sources),
+    };
+  }
+
+  function upsertPersona(persona) {
+    if (!persona.id) {
+      return;
+    }
+    state.personas = [
+      persona,
+      ...state.personas.filter((item) => item.id !== persona.id),
+    ];
+  }
+
+  function setPersonaStatus(message, type = '') {
+    state.personaCreateStatus = message;
+    state.personaCreateStatusType = type;
+    el.personaStatus.className = `persona-status${type ? ` ${type}` : ''}`;
+    el.personaStatus.textContent = message;
   }
 
   function onPersonaChange() {
@@ -816,6 +992,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function onFormatChange() {
     config.mode.format = currentFormatId();
+    if (el.addPersonaForm.classList.contains('hidden') === false) {
+      populatePersonaDefaultFormatSelect();
+    }
     applyStyleSourceDefault(true);
     saveConfig();
     renderModeSummary();
@@ -968,6 +1147,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return `履歴の取得に失敗しました: ${message}`;
   }
 
+  function additiveEndpointStatus(error, fallback) {
+    const message = error.message || '';
+    if (message.includes('HTTP 404') || message.includes('HTTP 501')) {
+      return fallback;
+    }
+    return `保存に失敗しました: ${message}`;
+  }
+
   async function selectHistoryStyle() {
     state.selectedHistoryStyle = findHistoryStyle(el.historyStyleSelect.value);
     el.openHistory.disabled = !historySelectionReady();
@@ -979,6 +1166,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const detail = await loadHistoryStyleDetail(state.selectedHistoryStyle);
       state.selectedHistoryStyle = detail;
+      state.currentStyleArtifact = normalizeHistoryStyle(detail);
+      state.styleEditMode = false;
       renderStyleGuideCard(detail);
       el.guidePreview.textContent = styleGuideMarkdown(detail);
       el.styleResult.classList.remove('hidden');
@@ -1001,6 +1190,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const detail = await loadHistorySessionDetail(state.selectedHistorySession);
       state.selectedHistorySession = detail;
       if (detail.brief) {
+        state.completedBrief = detail.brief;
+        state.briefEditMode = false;
         renderBriefCard(detail.brief);
         el.briefPreview.textContent = JSON.stringify(detail.brief, null, 2);
         el.briefResult.classList.remove('hidden');
@@ -1249,6 +1440,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyHistoryStyle(item) {
     const data = normalizeHistoryStyle(item);
+    state.currentStyleArtifact = data;
+    state.styleEditMode = false;
     state.profileId = data.profileId || data.id;
     el.profileId.textContent = state.profileId;
     el.guideId.textContent = data.guideId || '';
@@ -1279,6 +1472,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.answers = data.answers || [];
     state.nextQuestion = data.nextQuestion || null;
     state.completedBrief = data.completed ? data.brief : null;
+    state.briefEditMode = false;
     rememberQuestions(data.questions || state.templateQuestions);
     rememberQuestion(data.nextQuestion);
     el.interviewArea.classList.remove('hidden');
@@ -1320,6 +1514,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await loadQuestionTemplate();
     if (data.brief) {
       state.completedBrief = data.brief;
+      state.briefEditMode = false;
       renderBriefCard(data.brief);
       el.briefPreview.textContent = JSON.stringify(data.brief, null, 2);
       el.briefResult.classList.remove('hidden');
@@ -2249,12 +2444,18 @@ document.addEventListener('DOMContentLoaded', () => {
     el.styleGuideCard.innerHTML = '';
     const markdown = styleGuideMarkdown(data);
     if (!data || !markdown) {
+      state.currentStyleArtifact = null;
       el.styleGuideCard.className = 'artifact-card empty';
       el.styleGuideCard.textContent = '文体ガイドはまだありません。文体分析または保存済み履歴から選択してください。';
       return;
     }
     const normalized = normalizeHistoryStyle(data);
+    state.currentStyleArtifact = normalized;
     el.styleGuideCard.className = 'artifact-card';
+    if (state.styleEditMode) {
+      renderStyleGuideEditForm(normalized);
+      return;
+    }
     el.styleGuideCard.appendChild(createArtifactHeader(
       normalized.title || '文体ガイド',
       [
@@ -2262,7 +2463,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ['Guide', normalized.guideId],
         ['Articles', normalized.articleCount === undefined ? '' : String(normalized.articleCount)],
       ],
+      createCardEditButton('文体ガイドを編集', () => {
+        state.styleEditMode = true;
+        state.styleEditStatus = '';
+        state.styleEditStatusType = '';
+        renderStyleGuideCard(state.currentStyleArtifact);
+      }, 'edit-style-guide-btn'),
     ));
+    appendArtifactStatus(el.styleGuideCard, state.styleEditStatus, state.styleEditStatusType);
     const sections = markdownSectionsForCard(markdown);
     if (sections.length) {
       sections.slice(0, 5).forEach((section) => {
@@ -2281,6 +2489,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     el.briefCard.className = 'artifact-card';
+    if (state.briefEditMode) {
+      renderBriefEditForm(brief);
+      return;
+    }
     const theme = briefField(brief, 'theme', 'Theme') || '記事ブリーフ';
     el.briefCard.appendChild(createArtifactHeader(
       theme,
@@ -2289,7 +2501,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ['Format', briefField(brief, 'output_format_id', 'OutputFormatID')],
         ['Style', briefField(brief, 'style_profile_id', 'StyleProfileID')],
       ],
+      createCardEditButton('記事ブリーフを編集', () => {
+        state.briefEditMode = true;
+        state.briefEditStatus = '';
+        state.briefEditStatusType = '';
+        renderBriefCard(state.completedBrief || brief);
+      }, 'edit-brief-btn'),
     ));
+    appendArtifactStatus(el.briefCard, state.briefEditStatus, state.briefEditStatusType);
     [
       ['読者', briefField(brief, 'reader', 'Reader')],
       ['冒頭の具体例', briefField(brief, 'opening_episode', 'OpeningEpisode')],
@@ -2312,11 +2531,274 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function createArtifactHeader(title, metaItems) {
+  function renderStyleGuideEditForm(style) {
+    const form = document.createElement('form');
+    form.id = 'style-guide-edit-form';
+    form.className = 'artifact-edit-form';
+    form.appendChild(createArtifactHeader(
+      '文体ガイドを編集',
+      [
+        ['Profile', style.profileId || style.id],
+        ['Guide', style.guideId],
+      ],
+    ));
+
+    const markdownInput = createArtifactEditControl('style-guide-markdown-input', 'Markdown', styleGuideMarkdown(style), 'textarea');
+    markdownInput.wrapper.classList.add('full-width');
+    markdownInput.control.rows = 12;
+    const grid = document.createElement('div');
+    grid.className = 'artifact-edit-grid';
+    grid.append(markdownInput.wrapper);
+
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+    const save = document.createElement('button');
+    save.id = 'save-style-guide-edit-btn';
+    save.type = 'submit';
+    save.className = 'primary-btn';
+    save.textContent = '保存';
+    const cancel = document.createElement('button');
+    cancel.id = 'cancel-style-guide-edit-btn';
+    cancel.type = 'button';
+    cancel.className = 'secondary-btn';
+    cancel.textContent = 'キャンセル';
+    cancel.addEventListener('click', () => {
+      state.styleEditMode = false;
+      renderStyleGuideCard(state.currentStyleArtifact);
+    });
+    actions.append(save, cancel);
+    form.append(grid, actions);
+    appendArtifactStatus(form, state.styleEditStatus, state.styleEditStatusType);
+    form.addEventListener('submit', (event) => saveStyleGuideEdit(event, {
+      guide_markdown: markdownInput.control.value,
+    }));
+    el.styleGuideCard.appendChild(form);
+  }
+
+  function renderBriefEditForm(brief) {
+    const form = document.createElement('form');
+    form.id = 'brief-edit-form';
+    form.className = 'artifact-edit-form';
+    form.appendChild(createArtifactHeader(
+      '記事ブリーフを編集',
+      [
+        ['Session', state.sessionId || briefField(brief, 'session_id', 'SessionID')],
+        ['Persona', briefField(brief, 'persona_id', 'PersonaID')],
+        ['Format', briefField(brief, 'output_format_id', 'OutputFormatID')],
+      ],
+    ));
+
+    const controls = [
+      ['theme', 'テーマ', 'input'],
+      ['reader', '読者', 'textarea'],
+      ['opening_episode', '冒頭の具体例', 'textarea'],
+      ['expected_reader_action', '読後アクション', 'textarea'],
+      ['must_include', '必ず含めること', 'textarea'],
+      ['tone_stance', 'トーンと立場', 'textarea'],
+    ].map(([field, label, type]) => {
+      const item = createArtifactEditControl(`brief-${field}-input`, label, briefField(brief, field, snakeToPascal(field)), type);
+      item.control.dataset.field = field;
+      if (type === 'textarea') {
+        item.control.rows = 3;
+      }
+      return item;
+    });
+    const grid = document.createElement('div');
+    grid.className = 'artifact-edit-grid';
+    controls.forEach((item) => grid.appendChild(item.wrapper));
+
+    const actions = document.createElement('div');
+    actions.className = 'edit-actions';
+    const save = document.createElement('button');
+    save.id = 'save-brief-edit-btn';
+    save.type = 'submit';
+    save.className = 'primary-btn';
+    save.textContent = '保存';
+    const cancel = document.createElement('button');
+    cancel.id = 'cancel-brief-edit-btn';
+    cancel.type = 'button';
+    cancel.className = 'secondary-btn';
+    cancel.textContent = 'キャンセル';
+    cancel.addEventListener('click', () => {
+      state.briefEditMode = false;
+      renderBriefCard(state.completedBrief || brief);
+    });
+    actions.append(save, cancel);
+    form.append(grid, actions);
+    appendArtifactStatus(form, state.briefEditStatus, state.briefEditStatusType);
+    form.addEventListener('submit', (event) => saveBriefEdit(event, brief));
+    el.briefCard.appendChild(form);
+  }
+
+  async function saveStyleGuideEdit(event, fields) {
+    event.preventDefault();
+    clearError();
+    const markdown = String(fields.guide_markdown || '').trim();
+    const styleId = state.currentStyleArtifact?.id || state.profileId;
+    if (!styleId) {
+      setStyleEditStatus('保存する文体ガイドIDがありません。', 'warning');
+      return;
+    }
+    if (!markdown) {
+      setStyleEditStatus('Markdownを入力してください。', 'warning');
+      return;
+    }
+    setStyleEditStatus('文体ガイドを保存しています...');
+    try {
+      const data = await requestJSON(`/api/author-style/${encodeURIComponent(styleId)}`, {
+        method: 'PATCH',
+        body: {
+          guide_markdown: markdown,
+          markdown,
+          profile_id: state.currentStyleArtifact?.profileId || state.profileId,
+          guide_id: state.currentStyleArtifact?.guideId || '',
+          persona_id: currentPersonaId(),
+          output_format_id: currentFormatId(),
+        },
+      });
+      const updated = normalizeHistoryStyle({ ...state.currentStyleArtifact, ...data, guide_markdown: data.guide_markdown || data.guideMarkdown || markdown });
+      state.currentStyleArtifact = updated;
+      state.profileId = updated.profileId || updated.id || state.profileId;
+      el.profileId.textContent = state.profileId;
+      el.guideId.textContent = updated.guideId || '';
+      el.articleCount.textContent = updated.articleCount === undefined ? '' : String(updated.articleCount);
+      el.guidePreview.textContent = styleGuideMarkdown(updated);
+      state.styleEditMode = false;
+      setStyleEditStatus('文体ガイドを保存しました。', 'success');
+      renderStyleGuideCard(updated);
+    } catch (error) {
+      setStyleEditStatus(additiveEndpointStatus(error, '文体ガイド編集APIはまだ接続されていません。内容は保存されませんでした。'), 'warning');
+      renderStyleGuideCard(state.currentStyleArtifact);
+    }
+  }
+
+  async function saveBriefEdit(event, originalBrief) {
+    event.preventDefault();
+    clearError();
+    const sessionId = state.sessionId || briefField(originalBrief, 'session_id', 'SessionID') || briefField(originalBrief, 'brief_session_id', 'BriefSessionID');
+    if (!sessionId) {
+      setBriefEditStatus('保存する取材セッションIDがありません。', 'warning');
+      return;
+    }
+    const fields = {};
+    event.currentTarget.querySelectorAll('[data-field]').forEach((control) => {
+      fields[control.dataset.field] = control.value.trim();
+    });
+    if (!fields.theme) {
+      setBriefEditStatus('テーマを入力してください。', 'warning');
+      return;
+    }
+    setBriefEditStatus('記事ブリーフを保存しています...');
+    try {
+      const data = await requestJSON(`/api/briefs/${encodeURIComponent(sessionId)}`, {
+        method: 'PATCH',
+        body: { fields },
+      });
+      const artifact = data.brief || data.Brief || data;
+      const updatedBrief = artifact.brief || artifact.Brief || artifact;
+      state.completedBrief = { ...originalBrief, ...updatedBrief };
+      el.briefPreview.textContent = JSON.stringify(state.completedBrief, null, 2);
+      state.briefEditMode = false;
+      setBriefEditStatus('記事ブリーフを保存しました。', 'success');
+      renderBriefCard(state.completedBrief);
+      el.generateDraft.disabled = !state.profileId;
+    } catch (error) {
+      setBriefEditStatus(additiveEndpointStatus(error, '記事ブリーフ編集APIはまだ接続されていません。内容は保存されませんでした。'), 'warning');
+      renderBriefCard(originalBrief);
+    }
+  }
+
+  function createArtifactEditControl(id, label, value, type = 'input') {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'field-row';
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = id;
+    labelElement.textContent = label;
+    const control = type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+    control.id = id;
+    if (type !== 'textarea') {
+      control.type = 'text';
+    }
+    control.value = value || '';
+    wrapper.append(labelElement, control);
+    return { wrapper, control };
+  }
+
+  function createCardEditButton(label, onClick, id = '') {
+    const button = document.createElement('button');
+    if (id) {
+      button.id = id;
+    }
+    button.type = 'button';
+    button.className = 'secondary-btn compact-btn';
+    button.textContent = '編集';
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function appendArtifactStatus(container, message, type = '') {
+    if (!message) {
+      return;
+    }
+    const status = document.createElement('div');
+    status.id = artifactStatusIdForContainer(container);
+    status.className = `artifact-edit-status${type ? ` ${type}` : ''}`;
+    status.textContent = message;
+    container.appendChild(status);
+  }
+
+  function setStyleEditStatus(message, type = '') {
+    state.styleEditStatus = message;
+    state.styleEditStatusType = type;
+    updateArtifactStatusElement(el.styleGuideCard, message, type);
+  }
+
+  function setBriefEditStatus(message, type = '') {
+    state.briefEditStatus = message;
+    state.briefEditStatusType = type;
+    updateArtifactStatusElement(el.briefCard, message, type);
+  }
+
+  function updateArtifactStatusElement(container, message, type = '') {
+    if (!container) {
+      return;
+    }
+    let status = container.querySelector('.artifact-edit-status');
+    if (!message) {
+      status?.remove();
+      return;
+    }
+    if (!status) {
+      status = document.createElement('div');
+      status.id = artifactStatusIdForContainer(container);
+      container.appendChild(status);
+    }
+    status.className = `artifact-edit-status${type ? ` ${type}` : ''}`;
+    status.textContent = message;
+  }
+
+  function artifactStatusIdForContainer(container) {
+    if (container === el.briefCard || container?.id === 'brief-edit-form') {
+      return 'brief-edit-status';
+    }
+    if (container === el.styleGuideCard || container?.id === 'style-guide-edit-form') {
+      return 'style-guide-edit-status';
+    }
+    return '';
+  }
+
+  function createArtifactHeader(title, metaItems, action = null) {
     const header = document.createElement('div');
     header.className = 'artifact-card-header';
+    const titleRow = document.createElement('div');
+    titleRow.className = 'artifact-title-row';
     const titleElement = document.createElement('strong');
     titleElement.textContent = title;
+    titleRow.appendChild(titleElement);
+    if (action) {
+      titleRow.appendChild(action);
+    }
     const meta = document.createElement('div');
     meta.className = 'artifact-meta';
     metaItems.filter(([, value]) => value !== undefined && value !== null && String(value).trim()).forEach(([label, value]) => {
@@ -2324,7 +2806,7 @@ document.addEventListener('DOMContentLoaded', () => {
       item.textContent = `${label}: ${value}`;
       meta.appendChild(item);
     });
-    header.append(titleElement, meta);
+    header.append(titleRow, meta);
     return header;
   }
 
@@ -2397,6 +2879,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function toCamelCase(value) {
     return String(value || '').replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  }
+
+  function snakeToPascal(value) {
+    return String(value || '').split('_').filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('');
   }
 
   function arrayFrom(value) {

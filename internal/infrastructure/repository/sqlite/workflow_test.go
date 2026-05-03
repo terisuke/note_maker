@@ -72,6 +72,41 @@ func TestWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	}
 }
 
+func TestWorkflowStoreRestoresCustomPersonas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note_maker.db")
+	store, err := NewWorkflowStore(path)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	persona := testCustomPersona()
+	if err := store.SavePersona(persona); err != nil {
+		t.Fatalf("save persona: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	reopened, err := NewWorkflowStore(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	restored, ok := reopened.GetPersona(persona.ID)
+	if !ok {
+		t.Fatal("expected persona after reopen")
+	}
+	if restored.DisplayName != persona.DisplayName || restored.DefaultFormat != persona.DefaultFormat {
+		t.Fatalf("unexpected restored persona: %#v", restored)
+	}
+	listed, err := reopened.ListPersonas()
+	if err != nil {
+		t.Fatalf("list personas: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != persona.ID {
+		t.Fatalf("unexpected persona list: %#v", listed)
+	}
+}
+
 func TestWorkflowStoreAppliesSchemaMigrations(t *testing.T) {
 	store, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
 	if err != nil {
@@ -86,7 +121,7 @@ func TestWorkflowStoreAppliesSchemaMigrations(t *testing.T) {
 	if migrationCount != 1 {
 		t.Fatalf("migration count = %d, want 1", migrationCount)
 	}
-	for _, table := range []string{"projects", "articles", "brief_sessions", "brief_answers", "drafts", "section_regenerations", "source_selector_snapshots"} {
+	for _, table := range []string{"projects", "articles", "brief_sessions", "brief_answers", "briefs", "custom_personas", "drafts", "section_regenerations", "source_selector_snapshots"} {
 		var name string
 		if err := store.DB().QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
 			t.Fatalf("expected table %s: %v", table, err)
@@ -256,6 +291,24 @@ func testAnalyzeResult(t *testing.T) authorstyleapp.AnalyzeResult {
 		Guide:        guide,
 		ArticleCount: 1,
 		CreatedAt:    fetchedAt,
+	}
+}
+
+func testCustomPersona() personadomain.Persona {
+	return personadomain.Persona{
+		ID:            "custom_writer",
+		DisplayName:   "Custom Writer",
+		Description:   "A locally authored test persona.",
+		DefaultFormat: outputformat.IDNoteArticle,
+		Sources: []personadomain.AuthorSource{
+			{Kind: "note", Ref: "custom_writer"},
+		},
+		VoiceNotes: personadomain.VoiceNotes{
+			FirstPerson:   []string{"私"},
+			Tone:          "Calm, direct, and specific.",
+			TitlePatterns: []string{"How I use local workflows"},
+			AntiPatterns:  []string{"empty claims"},
+		},
 	}
 }
 
