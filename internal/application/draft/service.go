@@ -48,6 +48,27 @@ type Service struct {
 	verifier  DraftVerifier
 }
 
+// UnusableDraftError reports a validation failure while preserving every raw generation attempt.
+type UnusableDraftError struct {
+	FormatID string
+	Attempts []GenerationAttempt
+	Err      error
+}
+
+func (e *UnusableDraftError) Error() string {
+	if e == nil || e.Err == nil {
+		return "local llm returned an unusable draft"
+	}
+	return "local llm returned an unusable draft: " + e.Err.Error()
+}
+
+func (e *UnusableDraftError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // NewService creates a draft generation service.
 func NewService(generator TextGenerator) *Service {
 	return &Service{generator: generator}
@@ -91,6 +112,7 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 	}
 
 	prompt := BuildPromptForModeWithProfile(req.StyleGuide, req.Brief, req.AuthorProfile, persona, format)
+	attempts := make([]GenerationAttempt, 0, 2)
 	if err := emitStatus(events, "draft_generation_started"); err != nil {
 		return GenerateResult{}, err
 	}
@@ -102,15 +124,34 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		return GenerateResult{}, err
 	}
 	articleDraft, err := articledomain.NewDraftForFormat(rawDraft, format.ID)
+	attempts = appendGenerationAttempt(attempts, "initial", rawDraft, err)
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("local llm returned an unusable draft: %w", err)
+		if !isRecoverableFormatValidationError(format.ID, err) {
+			return GenerateResult{}, &UnusableDraftError{FormatID: format.ID, Attempts: attempts, Err: err}
+		}
+		if err := emitStatus(events, "draft_format_repair_started"); err != nil {
+			return GenerateResult{}, err
+		}
+		repairedRaw, repairErr := s.generator.Generate(ctx, BuildFormatRepairPrompt(format, rawDraft, err))
+		if repairErr != nil {
+			return GenerateResult{}, fmt.Errorf("repair draft format with local llm: %w", repairErr)
+		}
+		articleDraft, repairErr = articledomain.NewDraftForFormat(repairedRaw, format.ID)
+		attempts = appendGenerationAttempt(attempts, "format_repair", repairedRaw, repairErr)
+		if repairErr != nil {
+			return GenerateResult{}, &UnusableDraftError{FormatID: format.ID, Attempts: attempts, Err: repairErr}
+		}
 	}
 	evaluation := EvaluateStyle(req.AuthorProfile, req.Brief, articleDraft)
 	if shouldReviseForStrictStyle(evaluation) {
 		if err := emitStatus(events, "style_revision_started"); err != nil {
 			return GenerateResult{}, err
 		}
-		revisedDraft, revisedEvaluation, ok := s.reviseOnce(ctx, prompt, articleDraft, evaluation, format.ID, req)
+		revisedDraft, revisedEvaluation, revisionAttempt, ok := s.reviseOnce(ctx, prompt, articleDraft, evaluation, format.ID, req)
+		if revisionAttempt.RawOutput != "" || revisionAttempt.ValidationError != "" {
+			revisionAttempt.Index = len(attempts) + 1
+			attempts = append(attempts, revisionAttempt)
+		}
 		if ok {
 			articleDraft = revisedDraft
 			evaluation = revisedEvaluation
@@ -130,6 +171,7 @@ func (s *Service) generate(ctx context.Context, req GenerateRequest, events Stre
 		Draft:        articleDraft,
 		Evaluation:   evaluation,
 		Verification: verification,
+		Attempts:     attempts,
 	}, nil
 }
 
@@ -163,21 +205,22 @@ func (s *Service) generateRaw(ctx context.Context, prompt string, onChunk func(s
 	return s.generator.Generate(ctx, prompt)
 }
 
-func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, articleDraft articledomain.Draft, evaluation StyleEvaluation, formatID string, req GenerateRequest) (articledomain.Draft, StyleEvaluation, bool) {
+func (s *Service) reviseOnce(ctx context.Context, originalPrompt string, articleDraft articledomain.Draft, evaluation StyleEvaluation, formatID string, req GenerateRequest) (articledomain.Draft, StyleEvaluation, GenerationAttempt, bool) {
 	revisionPrompt := BuildStyleRevisionPrompt(originalPrompt, articleDraft.Markdown(), evaluation)
 	rawDraft, err := s.generator.Generate(ctx, revisionPrompt)
 	if err != nil {
-		return articledomain.Draft{}, StyleEvaluation{}, false
+		return articledomain.Draft{}, StyleEvaluation{}, GenerationAttempt{}, false
 	}
 	revisedDraft, err := articledomain.NewDraftForFormat(rawDraft, formatID)
 	if err != nil {
-		return articledomain.Draft{}, StyleEvaluation{}, false
+		return articledomain.Draft{}, StyleEvaluation{}, generationAttempt("style_revision", rawDraft, err), false
 	}
+	attempt := generationAttempt("style_revision", rawDraft, nil)
 	revisedEvaluation := EvaluateStyle(req.AuthorProfile, req.Brief, revisedDraft)
 	if revisedEvaluation.Passed || len(revisedEvaluation.Failures) <= len(evaluation.Failures) || revisedEvaluation.Comparison.Score >= evaluation.Comparison.Score {
-		return revisedDraft, revisedEvaluation, true
+		return revisedDraft, revisedEvaluation, attempt, true
 	}
-	return articledomain.Draft{}, StyleEvaluation{}, false
+	return articledomain.Draft{}, StyleEvaluation{}, attempt, false
 }
 
 func emitStatus(events StreamEvents, status string) error {
@@ -197,6 +240,41 @@ func shouldReviseForStrictStyle(evaluation StyleEvaluation) bool {
 		}
 	}
 	return false
+}
+
+func appendGenerationAttempt(attempts []GenerationAttempt, kind, raw string, validationErr error) []GenerationAttempt {
+	attempt := generationAttempt(kind, raw, validationErr)
+	attempt.Index = len(attempts) + 1
+	return append(attempts, attempt)
+}
+
+func generationAttempt(kind, raw string, validationErr error) GenerationAttempt {
+	attempt := GenerationAttempt{
+		Kind:      kind,
+		RawOutput: raw,
+	}
+	if validationErr != nil {
+		attempt.ValidationError = validationErr.Error()
+	}
+	return attempt
+}
+
+func isRecoverableFormatValidationError(formatID string, err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	if strings.Contains(message, "preamble before the article") {
+		return true
+	}
+	switch formatID {
+	case outputformat.IDZennArticle:
+		return strings.Contains(message, "Qiita :::note")
+	case outputformat.IDQiitaArticle:
+		return strings.Contains(message, "Zenn-specific notation")
+	default:
+		return false
+	}
 }
 
 func validateRequest(req GenerateRequest) error {

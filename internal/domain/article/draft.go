@@ -36,7 +36,7 @@ func NewDraftForFormat(raw, formatID string) (Draft, error) {
 	if err := format.Validator.Validate(markdown); err != nil {
 		return Draft{}, err
 	}
-	if strings.Contains(markdown, "以下") && strings.Contains(markdown, "下書き") && strings.Index(markdown, "# ") > 20 {
+	if !strings.HasPrefix(markdown, "---\n") && strings.Contains(markdown, "以下") && strings.Contains(markdown, "下書き") && strings.Index(markdown, "# ") > 20 {
 		return Draft{}, fmt.Errorf("draft appears to contain preamble before the article")
 	}
 	return Draft{markdown: markdown}, nil
@@ -58,7 +58,7 @@ func normalizeDraft(raw string) string {
 		text = strings.TrimSpace(match[1])
 	}
 	droppedPreambleWithFence := false
-	if idx := strings.Index(text, "# "); idx > 0 {
+	if idx := strings.Index(text, "# "); idx > 0 && !strings.HasPrefix(text, "---\n") {
 		preamble := strings.TrimSpace(text[:idx])
 		if looksLikePreamble(preamble) && canDropPreamble(preamble) {
 			droppedPreambleWithFence = strings.Contains(preamble, "```")

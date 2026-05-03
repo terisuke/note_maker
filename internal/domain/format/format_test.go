@@ -96,6 +96,43 @@ func TestPlatformSpecificNotationIsNotMixed(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecificNotationExamplesInsideCodeFencesAreAllowed(t *testing.T) {
+	zennExplainingQiitaNote := "---\n" +
+		"title: \"T\"\n" +
+		"emoji: \"📝\"\n" +
+		"type: \"tech\"\n" +
+		"topics: [\"go\"]\n" +
+		"published: false\n" +
+		"---\n\n" +
+		"## 本文\n\n" +
+		"Qiitaでは `:::note` を使うが、Zenn本文では使わない。\n\n" +
+		"```go\n" +
+		"sample := `:::note info\nwrong\n:::`\n" +
+		"```\n\n" +
+		":::message\n" +
+		"Zenn本文の補足はmessageを使う。\n" +
+		":::"
+	if err := (ZennValidator{}).Validate(zennExplainingQiitaNote); err != nil {
+		t.Fatalf("expected zenn validator to allow explanatory Qiita notation examples: %v", err)
+	}
+
+	qiitaExplainingZennMessage := "---\n" +
+		"title: \"T\"\n" +
+		"tags: [{name: Go}]\n" +
+		"---\n\n" +
+		"## 本文\n\n" +
+		"Zennでは `:::message` を使うが、Qiita本文では使わない。\n\n" +
+		"```go\n" +
+		"sample := `:::message\nwrong\n:::`\n" +
+		"```\n\n" +
+		":::note info\n" +
+		"Qiita本文の補足はnoteを使う。\n" +
+		":::"
+	if err := (QiitaValidator{}).Validate(qiitaExplainingZennMessage); err != nil {
+		t.Fatalf("expected qiita validator to allow explanatory Zenn notation examples: %v", err)
+	}
+}
+
 func TestMarkdownBlogRejectsUnsupportedCorBlogMetadata(t *testing.T) {
 	invalid := `---
 title: "Vision"

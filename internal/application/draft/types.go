@@ -34,6 +34,15 @@ type GenerateResult struct {
 	Draft        articledomain.Draft
 	Evaluation   StyleEvaluation
 	Verification FinalVerification
+	Attempts     []GenerationAttempt
+}
+
+// GenerationAttempt preserves raw model output and validation state for each model call.
+type GenerationAttempt struct {
+	Index           int    `json:"index"`
+	Kind            string `json:"kind"`
+	RawOutput       string `json:"raw_output"`
+	ValidationError string `json:"validation_error,omitempty"`
 }
 
 // FinalVerification reports the lightweight model's final consistency review.

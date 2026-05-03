@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,6 +43,13 @@ func main() {
 	baseURL := envFirst("http://127.0.0.1:8081/v1", "LLM_BASE_URL", "LLAMACPP_BASE_URL")
 	model := envFirst("gemma4:31b", "DRAFT_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
 	verifyModel := envFirst("gemma4:latest", "VERIFY_LLM_MODEL", "LLM_MODEL", "LLAMACPP_MODEL")
+	failureContext := failureAttemptContext{
+		LLMBaseURL:     baseURL,
+		LLMModel:       model,
+		VerifyModel:    verifyModel,
+		PersonaID:      brief.PersonaID,
+		OutputFormatID: brief.OutputFormatID,
+	}
 	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
 	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
 	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
@@ -87,13 +95,24 @@ func main() {
 		}
 		elapsed := time.Since(started)
 		cancel()
+		metrics := attemptRuntimeMetrics{
+			ElapsedSeconds: elapsed.Seconds(),
+			TimeoutSeconds: timeout.Seconds(),
+			Streaming:      streamDraft,
+			FirstChunkMs:   finalFirstChunkMs(firstChunk),
+			Chunks:         chunkCount,
+		}
 		if err != nil {
-			fatalf("generate draft attempt %d: %v", attempt, err)
+			attempts := generationAttemptsFromError(err)
+			artifacts := writeRawAttemptArtifacts(outputDir, attempt, attempts)
+			failurePath := writeFailureAttempt(outputDir, attempt, err, metrics, failureContext, artifacts)
+			fatalf("generate draft attempt %d: %v (failure=%s)", attempt, err, failurePath)
 		}
 		finalElapsed = elapsed
 		finalFirstChunk = firstChunk
 		finalChunks = chunkCount
 		finalAttempt = attempt
+		writeRawAttemptArtifacts(outputDir, attempt, result.Attempts)
 		writeFile(filepath.Join(outputDir, fmt.Sprintf("draft_attempt_%d.md", attempt)), result.Draft.Markdown()+"\n")
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("evaluation_attempt_%d.json", attempt)), result.Evaluation)
 		writeJSON(filepath.Join(outputDir, fmt.Sprintf("verification_attempt_%d.json", attempt)), result.Verification)
@@ -137,6 +156,114 @@ func main() {
 	if runes < minDraftRunes {
 		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
 	}
+}
+
+type attemptRuntimeMetrics struct {
+	ElapsedSeconds float64 `json:"elapsed_seconds"`
+	TimeoutSeconds float64 `json:"timeout_seconds"`
+	Streaming      bool    `json:"streaming"`
+	FirstChunkMs   int64   `json:"first_chunk_ms,omitempty"`
+	Chunks         int     `json:"chunks,omitempty"`
+}
+
+type rawAttemptArtifact struct {
+	GenerationAttempt int    `json:"generation_attempt"`
+	Kind              string `json:"kind"`
+	Path              string `json:"path"`
+	ValidationError   string `json:"validation_error,omitempty"`
+}
+
+type failureAttemptContext struct {
+	LLMBaseURL     string `json:"llm_base_url"`
+	LLMModel       string `json:"llm_model"`
+	VerifyModel    string `json:"verify_model"`
+	PersonaID      string `json:"persona_id"`
+	OutputFormatID string `json:"output_format_id"`
+}
+
+type failureAttemptReport struct {
+	Attempt         int                   `json:"attempt"`
+	Error           string                `json:"error"`
+	ValidationError string                `json:"validation_error,omitempty"`
+	RuntimeMetrics  attemptRuntimeMetrics `json:"runtime_metrics"`
+	Context         failureAttemptContext `json:"context"`
+	RawOutputs      []rawAttemptArtifact  `json:"raw_outputs"`
+}
+
+func generationAttemptsFromError(err error) []draftapp.GenerationAttempt {
+	var unusable *draftapp.UnusableDraftError
+	if errors.As(err, &unusable) {
+		return unusable.Attempts
+	}
+	return nil
+}
+
+func writeRawAttemptArtifacts(outputDir string, scenarioAttempt int, attempts []draftapp.GenerationAttempt) []rawAttemptArtifact {
+	artifacts := make([]rawAttemptArtifact, 0, len(attempts))
+	for _, attempt := range attempts {
+		if strings.TrimSpace(attempt.RawOutput) == "" {
+			continue
+		}
+		kind := sanitizeArtifactPart(attempt.Kind)
+		if kind == "" {
+			kind = "generation"
+		}
+		index := attempt.Index
+		if index <= 0 {
+			index = len(artifacts) + 1
+		}
+		path := filepath.Join(outputDir, fmt.Sprintf("raw_attempt_%d_generation_%d_%s.txt", scenarioAttempt, index, kind))
+		writeFile(path, strings.TrimRight(attempt.RawOutput, "\n")+"\n")
+		artifacts = append(artifacts, rawAttemptArtifact{
+			GenerationAttempt: index,
+			Kind:              attempt.Kind,
+			Path:              path,
+			ValidationError:   attempt.ValidationError,
+		})
+	}
+	return artifacts
+}
+
+func writeFailureAttempt(outputDir string, attempt int, err error, metrics attemptRuntimeMetrics, context failureAttemptContext, artifacts []rawAttemptArtifact) string {
+	report := failureAttemptReport{
+		Attempt:         attempt,
+		Error:           err.Error(),
+		ValidationError: validationErrorFromGenerateError(err),
+		RuntimeMetrics:  metrics,
+		Context:         context,
+		RawOutputs:      artifacts,
+	}
+	path := filepath.Join(outputDir, fmt.Sprintf("failure_attempt_%d.json", attempt))
+	writeJSON(path, report)
+	return path
+}
+
+func validationErrorFromGenerateError(err error) string {
+	var unusable *draftapp.UnusableDraftError
+	if errors.As(err, &unusable) && unusable.Err != nil {
+		return unusable.Err.Error()
+	}
+	return ""
+}
+
+func finalFirstChunkMs(firstChunk time.Duration) int64 {
+	if firstChunk <= 0 {
+		return 0
+	}
+	return firstChunk.Milliseconds()
+}
+
+func sanitizeArtifactPart(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	var builder strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteByte('_')
+	}
+	return strings.Trim(builder.String(), "_")
 }
 
 func readJSON(path string, out any) {

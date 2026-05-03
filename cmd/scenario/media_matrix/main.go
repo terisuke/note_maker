@@ -86,10 +86,18 @@ type caseResult struct {
 	SourceSelectors       []string            `json:"source_selectors"`
 	BriefPath             string              `json:"brief_path"`
 	PromptPath            string              `json:"prompt_path"`
+	ActiveGates           scenarioGates       `json:"active_gates"`
 	PromptChecks          []promptCheckResult `json:"prompt_checks"`
 	QuestionIDs           []string            `json:"question_ids"`
 	PlannedLLMCommand     string              `json:"planned_llm_command"`
 	ExpectedMetrics       []string            `json:"expected_metrics"`
+}
+
+type scenarioGates struct {
+	MinRunes             int      `json:"min_runes"`
+	MinStyleScore        float64  `json:"min_style_score"`
+	StructuralGateLabels []string `json:"structural_gate_labels"`
+	StructuralSignals    []string `json:"structural_signals"`
 }
 
 type promptCheckResult struct {
@@ -125,6 +133,7 @@ func main() {
 			fatalf("%s references unknown output format %s", item.ID, item.OutputFormatID)
 		}
 		verifyCaseSources(item, sourceResults)
+		gates := activeGatesForCase(item)
 		questions := briefdomain.ComposeFixedQuestions(item.PersonaID, item.OutputFormatID)
 		questionIDs := questionIDsFromQuestions(questions)
 
@@ -153,16 +162,20 @@ func main() {
 			SourceSelectors:       append([]string(nil), item.SourceSelectors...),
 			BriefPath:             briefPath,
 			PromptPath:            promptPath,
+			ActiveGates:           gates,
 			PromptChecks:          checks,
 			QuestionIDs:           append([]string(nil), questionIDs...),
-			PlannedLLMCommand:     plannedLLMCommand(outputDir, item.ID, briefPath),
+			PlannedLLMCommand:     plannedLLMCommand(outputDir, item.ID, briefPath, gates),
 			ExpectedMetrics: []string{
 				"elapsed_seconds",
 				"score",
+				"min_style_score",
 				"passed",
 				"verification_performed",
 				"verification_passed",
 				"runes",
+				"min_draft_runes",
+				"active_gates",
 			},
 		})
 	}
@@ -182,7 +195,11 @@ func main() {
 			"target_length_structure",
 			"elapsed_seconds",
 			"score",
+			"min_style_score",
 			"verification_passed",
+			"runes",
+			"min_runes",
+			"structural_gate_labels",
 			"output_path",
 		},
 	}
@@ -467,8 +484,107 @@ func verifyPrompt(item matrixCase, persona personadomain.Persona, format outputf
 	return results
 }
 
-func plannedLLMCommand(outputDir, caseID, briefPath string) string {
-	return fmt.Sprintf("RUN_LOCAL_LLM_SCENARIO=1 ARTICLE_BRIEF_PATH=%s SCENARIO_OUTPUT_DIR=%s go run ./cmd/scenario/draft_generation", briefPath, filepath.Join(outputDir, "live", caseID))
+func activeGatesForCase(item matrixCase) scenarioGates {
+	switch item.ID {
+	case "terisuke_note_essay":
+		return scenarioGates{
+			MinRunes:      2800,
+			MinStyleScore: 82,
+			StructuralGateLabels: []string{
+				"note_long_form",
+				"opening_episode",
+				"reflective_body",
+				"reader_takeaway",
+				"conclusion",
+			},
+			StructuralSignals: []string{"# ", "## ", "体験", "違和感", "読者"},
+		}
+	case "cor_blog_technical_report":
+		return scenarioGates{
+			MinRunes:      2200,
+			MinStyleScore: 80,
+			StructuralGateLabels: []string{
+				"cor_blog_long_form",
+				"frontmatter",
+				"implementation_report",
+				"verification_results",
+				"next_steps",
+			},
+			StructuralSignals: []string{"---", "title:", "category:", "## ", "検証"},
+		}
+	case "cor_blog_vision_sharing":
+		return scenarioGates{
+			MinRunes:      1600,
+			MinStyleScore: 80,
+			StructuralGateLabels: []string{
+				"cor_blog_long_form",
+				"frontmatter",
+				"company_context",
+				"operating_policy",
+				"member_action",
+			},
+			StructuralSignals: []string{"---", "title:", "lang:", "## ", "方針"},
+		}
+	case "cloudia_zenn_tutorial":
+		return scenarioGates{
+			MinRunes:      1800,
+			MinStyleScore: 82,
+			StructuralGateLabels: []string{
+				"zenn_long_form",
+				"frontmatter",
+				"topics",
+				"message_block",
+				"step_by_step",
+				"code_example",
+			},
+			StructuralSignals: []string{"---", "topics:", ":::message", "## ", "```"},
+		}
+	case "cloudia_qiita_how_to":
+		return scenarioGates{
+			MinRunes:      1400,
+			MinStyleScore: 82,
+			StructuralGateLabels: []string{
+				"qiita_long_form",
+				"frontmatter",
+				"note_block",
+				"diff_code",
+				"repro_steps",
+				"result",
+			},
+			StructuralSignals: []string{"---", "title:", ":::note", "```diff", "## "},
+		}
+	case "cor_homepage_section":
+		return scenarioGates{
+			MinRunes:      350,
+			MinStyleScore: 72,
+			StructuralGateLabels: []string{
+				"homepage_short_html",
+				"section_element",
+				"h2_heading",
+				"short_paragraph",
+				"cta",
+				"concise_copy",
+			},
+			StructuralSignals: []string{"<section", "</section>", "<h2", "<p", "href=", "問い合わせ"},
+		}
+	default:
+		return scenarioGates{
+			MinRunes:             2400,
+			MinStyleScore:        80,
+			StructuralGateLabels: []string{"default_long_form"},
+			StructuralSignals:    []string{"# ", "## "},
+		}
+	}
+}
+
+func plannedLLMCommand(outputDir, caseID, briefPath string, gates scenarioGates) string {
+	return fmt.Sprintf(
+		"RUN_LOCAL_LLM_SCENARIO=1 SCENARIO_MIN_STYLE_SCORE=%.1f SCENARIO_MIN_DRAFT_RUNES=%d ARTICLE_BRIEF_PATH=%s SCENARIO_OUTPUT_DIR=%s go run ./cmd/scenario/draft_generation",
+		gates.MinStyleScore,
+		gates.MinRunes,
+		briefPath,
+		filepath.Join(outputDir, "live", caseID),
+	)
 }
 
 func scenarioGuide() authordomain.WritingStyleGuide {
@@ -613,16 +729,17 @@ func casesMarkdown(cases []caseResult) string {
 	var builder strings.Builder
 	builder.WriteString("# Media matrix scenario\n\n")
 	builder.WriteString("Offline planned LLM run matrix. Live source and LLM commands are documented separately and are not run by this scenario.\n\n")
-	builder.WriteString("| Case | Persona | Format | Medium | Style | Target length | Sources |\n")
-	builder.WriteString("|---|---|---|---|---|---|---|\n")
+	builder.WriteString("| Case | Persona | Format | Medium | Style | Target length | Gates | Sources |\n")
+	builder.WriteString("|---|---|---|---|---|---|---|---|\n")
 	for _, item := range cases {
-		builder.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` | %s | %s | %s | `%s` |\n",
+		builder.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` | %s | %s | %s | %s | `%s` |\n",
 			item.ID,
 			item.PersonaID,
 			item.OutputFormatID,
 			escapeTable(item.Medium),
 			escapeTable(item.Style),
 			escapeTable(item.TargetLengthStructure),
+			escapeTable(gateSummary(item.ActiveGates)),
 			strings.Join(item.SourceSelectors, "`, `"),
 		))
 	}
@@ -632,6 +749,15 @@ func casesMarkdown(cases []caseResult) string {
 		builder.WriteString("```sh\n" + item.PlannedLLMCommand + "\n```\n\n")
 	}
 	return builder.String()
+}
+
+func gateSummary(gates scenarioGates) string {
+	return fmt.Sprintf(
+		"min %.1f style / %d runes; %s",
+		gates.MinStyleScore,
+		gates.MinRunes,
+		strings.Join(gates.StructuralGateLabels, ", "),
+	)
 }
 
 func escapeTable(value string) string {

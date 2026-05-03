@@ -237,13 +237,18 @@ func (ZennValidator) Validate(markdown string) error {
 	if err := validateInlineListLimit(frontmatter, "topics", 5); err != nil {
 		return fmt.Errorf("zenn %w", err)
 	}
-	if strings.Contains(markdown, ":::note") {
+	if containsLineOutsideCodeFence(markdown, func(line string) bool {
+		return strings.HasPrefix(strings.TrimSpace(line), ":::note")
+	}) {
 		return fmt.Errorf("zenn article must use :::message, not Qiita :::note")
 	}
 	if strings.Contains(markdown, "```diff_") {
 		return fmt.Errorf("zenn diff code fences use `diff language`, not diff_language")
 	}
-	if containsAny(markdown, []string{"<details", "<summary"}) {
+	if containsLineOutsideCodeFence(markdown, func(line string) bool {
+		line = strings.ToLower(strings.TrimSpace(line))
+		return strings.HasPrefix(line, "<details") || strings.HasPrefix(line, "<summary")
+	}) {
 		return fmt.Errorf("zenn article must use :::details, not HTML details")
 	}
 	return nil
@@ -264,7 +269,10 @@ func (QiitaValidator) Validate(markdown string) error {
 	if !hasNonEmptyYAMLValue(frontmatter, "tags") {
 		return fmt.Errorf("qiita frontmatter tags must not be empty")
 	}
-	if strings.Contains(markdown, ":::message") || strings.Contains(markdown, ":::details") || strings.Contains(markdown, "@[card]") {
+	if containsLineOutsideCodeFence(markdown, func(line string) bool {
+		line = strings.TrimSpace(line)
+		return strings.HasPrefix(line, ":::message") || strings.HasPrefix(line, ":::details") || strings.HasPrefix(line, "@[card]")
+	}) {
 		return fmt.Errorf("qiita article must not contain Zenn-specific notation")
 	}
 	if regexp.MustCompile("(?m)^```diff\\s+\\w+").MatchString(markdown) {
@@ -342,6 +350,24 @@ func hasCodeFenceWithoutLanguage(markdown string) bool {
 			continue
 		}
 		inFence = false
+	}
+	return false
+}
+
+func containsLineOutsideCodeFence(markdown string, matches func(string) bool) bool {
+	inFence := false
+	for _, line := range strings.Split(markdown, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if matches(line) {
+			return true
+		}
 	}
 	return false
 }

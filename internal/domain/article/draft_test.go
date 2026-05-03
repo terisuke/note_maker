@@ -30,6 +30,22 @@ func TestNewDraftForFormatAllowsTechnicalFormats(t *testing.T) {
 	}
 }
 
+func TestNewDraftForFormatDoesNotTreatFrontmatterBodyAsPreamble(t *testing.T) {
+	zenn := "---\n" +
+		"title: \"Goで試す\"\n" +
+		"emoji: \"🧪\"\n" +
+		"type: \"tech\"\n" +
+		"topics: [\"go\", \"test\"]\n" +
+		"published: false\n" +
+		"---\n\n" +
+		"本文では以下の下書きを検証する。\n\n" +
+		"## 実装\n\n" +
+		":::message\n補足\n:::"
+	if _, err := NewDraftForFormat(zenn, "zenn_article"); err != nil {
+		t.Fatalf("frontmatter format should not be rejected as assistant preamble: %v", err)
+	}
+}
+
 func TestNewDraftRejectsNonArticleOutput(t *testing.T) {
 	if _, err := NewDraft("承知しました。記事を書きます。"); err == nil {
 		t.Fatal("expected validation error")
