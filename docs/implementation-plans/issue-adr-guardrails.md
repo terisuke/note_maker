@@ -2,7 +2,7 @@
 
 Date: 2026-05-01 (last updated 2026-05-03)
 
-This document maps GitHub issues to [ADR 0001](../adrs/0001-three-phase-local-article-generation.md) and [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) and defines implementation guardrails.
+This document maps GitHub issues to [ADR 0001](../adrs/0001-three-phase-local-article-generation.md), [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md), [ADR 0003](../adrs/0003-conversation-first-workspace-ui.md), and [ADR 0004](../adrs/0004-three-tier-deployment.md) and defines implementation guardrails.
 
 ## Issue Map
 
@@ -67,6 +67,35 @@ The phases in [ADR 0002](../adrs/0002-multi-persona-multi-format-extension.md) (
 - Phase B (Persona / OutputFormat): implemented for built-in personas, five formats, source acquisition, and question templates. Further persona/library expansion should wait for Phase C persistence.
 - Phase C (SQLite store): repository interfaces stay; only implementations change. JSON-file store remains the compatibility path, but storage selection must be visible in the web settings UI rather than hidden behind make/env setup. The current app baseline includes persisted custom personas, custom persona update/delete with reference protection, editable human-readable artifacts, and explicit brief versions.
 - Phase D (Quality): handler tests are mandatory before any further endpoint-heavy UI work lands. Coverage gate: `internal/handlers/workflow.go` ≥ 80 %.
+
+## ADR 0003 / 0004 Phase Map
+
+[ADR 0003](../adrs/0003-conversation-first-workspace-ui.md) supersedes the UX direction in ADR 0002 §80-86 and defines the conversation-first workspace rewrite with Alpine.js. [ADR 0004](../adrs/0004-three-tier-deployment.md) introduces three deployment tiers (launcher / Wails desktop / multi-user Docker).
+
+| Phase | Scope | ADR | Implementation plan | Issue |
+|---|---|---|---|---|
+| D2 | Conversation-first workspace UI rewrite (3-pane layout, Alpine.js, settings drawer) | ADR 0003 | [conversation-workspace-ui.md](./conversation-workspace-ui.md) | [#91](https://github.com/terisuke/note_maker/issues/91) |
+| E1 | Wails desktop packaging (Tier 2) | ADR 0004 §Tier 2 | [wails-desktop-packaging.md](./wails-desktop-packaging.md) | [#92](https://github.com/terisuke/note_maker/issues/92) |
+| E2 | Multi-user Docker deployment (Tier 3) | ADR 0004 §Tier 3 | [multi-user-docker-deployment.md](./multi-user-docker-deployment.md) | [#93](https://github.com/terisuke/note_maker/issues/93) |
+
+Phase D2 guardrails:
+
+- All existing `#id` selectors that the 13 Playwright e2e tests rely on must remain attached to a DOM element with the same role. IDs may move between regions but must not be deleted in the same PR that updates the test.
+- No new build step. Alpine.js is vendored under `static/vendor/`; no npm/Vite/webpack pipeline is introduced.
+- The Go HTTP handler surface and JSON contract are unchanged. UI restructuring does not move business logic into the frontend.
+
+Phase E1 guardrails:
+
+- Wails v2 is the version target until v3 reaches a stable release. Pin the exact tag in `cmd/desktop/go.mod`.
+- The Tier 2 binary uses the same data directory as Tier 1. Migration from launcher to desktop is automatic.
+- Code signing is gated on the project owner providing credentials. Unsigned dev builds are acceptable for early validation.
+
+Phase E2 guardrails:
+
+- Every handler that returns user-scoped data must accept `RepoContext` and pass `userID` to the repository. A grep audit at the end of E2-7 must confirm no handler is missed.
+- The default mode (`MULTI_USER` unset or `0`) preserves Tier 1 / Tier 2 behaviour. Multi-user mode is opt-in.
+- Built-in personas (`terisuke`, `cloudia`) stay user-agnostic. Custom personas gain `user_id`.
+- A two-user Playwright isolation smoke test is mandatory before promoting any multi-user image to GHCR.
 
 ## Architectural Guardrails
 

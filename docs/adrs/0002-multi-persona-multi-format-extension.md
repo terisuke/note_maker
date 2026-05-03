@@ -77,6 +77,8 @@ The two axes compose: any persona can produce any format. The application layer 
 
 ### UX direction
 
+> **Superseded by [ADR 0003 — Conversation-first workspace UI with Alpine.js](0003-conversation-first-workspace-ui.md) (2026-05-03).** Phase A1/A2/A4 shipped chat bubbles, SSE streaming, and deep-dive rationale, but the page-level three-pane layout described below was never implemented. ADR 0003 is now the authoritative source for the UI rewrite. The text below is preserved as design history.
+
 The single-page form becomes a **conversation-first workspace**:
 
 - **Left rail**: persona switcher, project history, "previous style guides" picker.
