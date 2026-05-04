@@ -1,0 +1,126 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Run signing/notarization steps when secrets are configured"
+        required: false
+        default: "0"
+      dry_run:
+        description: "Only emit Wails dry-run build commands and checksums"
+        required: false
+        default: "0"
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  GO_VERSION: "1.23.x"
+  WAILS_VERSION: "v2.12.0"
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin/universal
+            artifact: note-maker-darwin
+          - os: windows-latest
+            platform: windows/amd64
+            artifact: note-maker-windows
+          - os: ubuntu-latest
+            platform: linux/amd64
+            artifact: note-maker-linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/desktop/go.sum
+
+      - name: Install Linux WebKit dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            nsis
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Verify desktop package compiles
+        run: cd cmd/desktop && go test -tags wails ./...
+
+      - name: Record Wails dry-run build command
+        shell: bash
+        run: |
+          mkdir -p dist
+          (cd cmd/desktop && wails build -dryrun -platform ${{ matrix.platform }}) | tee "dist/${{ matrix.artifact }}.dry-run.txt"
+
+      - name: Build unsigned desktop app
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != '1'
+        run: cd cmd/desktop && wails build -platform ${{ matrix.platform }}
+
+      - name: macOS signing and notarization gate
+        if: runner.os == 'macOS' && (github.event.inputs.release == '1' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$APP_STORE_CONNECT_KEY_ID"
+          test -n "$APP_STORE_CONNECT_ISSUER_ID"
+          test -n "$APP_STORE_CONNECT_KEY"
+          echo "Signing/notarization credentials are present; production signing is handled by the release operator runbook."
+
+      - name: Windows signing gate
+        if: runner.os == 'Windows' && (github.event.inputs.release == '1' || startsWith(github.ref, 'refs/tags/v'))
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          test -n "$WINDOWS_CERTIFICATE"
+          test -n "$WINDOWS_CERTIFICATE_PASSWORD"
+          echo "Windows signing credentials are present; production signing is handled by the release operator runbook."
+
+      - name: Checksums
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ -d build/bin ]; then
+            tar -czf "dist/${{ matrix.artifact }}.tar.gz" -C build/bin .
+          fi
+          find dist -maxdepth 1 -type f \( -name "${{ matrix.artifact }}.tar.gz" -o -name "${{ matrix.artifact }}.dry-run.txt" \) -print0 \
+            | sort -z \
+            | xargs -0 shasum -a 256 > "dist/${{ matrix.artifact }}.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}.tar.gz
+            dist/${{ matrix.artifact }}.dry-run.txt
+            dist/${{ matrix.artifact }}.sha256
+          if-no-files-found: error

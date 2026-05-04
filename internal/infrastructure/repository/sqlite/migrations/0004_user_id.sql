@@ -1,0 +1,38 @@
+ALTER TABLE projects ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE articles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE author_style_results ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE author_source_articles ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE source_selector_snapshots ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE brief_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE brief_answers ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE briefs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE drafts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE section_regenerations ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE custom_personas ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+ALTER TABLE brief_versions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local';
+
+UPDATE projects SET user_id = 'local' WHERE user_id = '';
+UPDATE articles SET user_id = 'local' WHERE user_id = '';
+UPDATE author_style_results SET user_id = 'local' WHERE user_id = '';
+UPDATE author_source_articles SET user_id = 'local' WHERE user_id = '';
+UPDATE source_selector_snapshots SET user_id = 'local' WHERE user_id = '';
+UPDATE brief_sessions SET user_id = 'local' WHERE user_id = '';
+UPDATE brief_answers SET user_id = 'local' WHERE user_id = '';
+UPDATE briefs SET user_id = 'local' WHERE user_id = '';
+UPDATE drafts SET user_id = 'local' WHERE user_id = '';
+UPDATE section_regenerations SET user_id = 'local' WHERE user_id = '';
+UPDATE custom_personas SET user_id = 'local' WHERE user_id = '';
+UPDATE brief_versions SET user_id = 'local' WHERE user_id = '';
+
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_articles_user_id ON articles(user_id);
+CREATE INDEX IF NOT EXISTS idx_author_style_results_user_id ON author_style_results(user_id);
+CREATE INDEX IF NOT EXISTS idx_author_source_articles_user_id ON author_source_articles(user_id);
+CREATE INDEX IF NOT EXISTS idx_source_selector_snapshots_user_id ON source_selector_snapshots(user_id);
+CREATE INDEX IF NOT EXISTS idx_brief_sessions_user_id ON brief_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_brief_answers_user_id ON brief_answers(user_id);
+CREATE INDEX IF NOT EXISTS idx_briefs_user_id ON briefs(user_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_user_id ON drafts(user_id);
+CREATE INDEX IF NOT EXISTS idx_section_regenerations_user_id ON section_regenerations(user_id);
+CREATE INDEX IF NOT EXISTS idx_custom_personas_user_id ON custom_personas(user_id);
+CREATE INDEX IF NOT EXISTS idx_brief_versions_user_id ON brief_versions(user_id);

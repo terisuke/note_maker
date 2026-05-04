@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.env
+.env.*
+data
+tmp
+cmd/desktop
+cmd/scenario
+coverage.txt
+*.log
+Dockerfile
+compose.yaml
+docs
+tests
+scripts

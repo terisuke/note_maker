@@ -4,8 +4,8 @@ Issue: [#45](https://github.com/terisuke/note_maker/issues/45)
 
 ## Decision
 
-Keep Evo X2 Ollama as the primary runtime. Use Evo X2 `llama-server` only as a
-single active fallback profile behind the existing Tailnet/Caddy path:
+Keep Evo X2 Ollama as the primary runtime. For issue #90, adopt `llama-swap`
+as the `/llama/v1` fallback router in front of Evo X2 `llama-server` backends:
 
 ```text
 primary:  http://evo-x2.tailb30e58.ts.net/v1
@@ -15,7 +15,16 @@ fallback: http://evo-x2.tailb30e58.ts.net/llama/v1
 Do not use llama.cpp as the primary multi-model router yet. The app needs
 phase-specific model selection for style, brief, article, draft, and verify
 calls; Ollama already supports that operational model per OpenAI-compatible
-request. The conservative llama.cpp path is an explicit service-profile swap:
+request. The current conservative fallback adoption path is:
+
+1. validate the checked-in llama-swap template locally,
+2. run llama-swap behind the existing `/llama/v1` path during a maintenance
+   window,
+3. route only live-gated validation traffic directly to `/llama/v1`,
+4. keep application fallback defaults unchanged until the gates pass.
+
+The previous explicit systemd service-profile swap is now demoted to a manual
+diagnostic path only:
 
 1. define one systemd service for the shared fallback path,
 2. keep profile env files under `/etc/note-maker/llama-cpp/`,
@@ -48,7 +57,11 @@ Primary sources:
 - Multiple alias feature request: <https://github.com/ggml-org/llama.cpp/issues/17860>
 - Router-mode GPU memory regression report: <https://github.com/ggml-org/llama.cpp/issues/21692>
 
-## Recommended service shape
+## Legacy diagnostic service shape
+
+The systemd shape below is retained for diagnosing the older one-active-profile
+fallback service. It is not the llama-swap adoption path and should not be used
+for routine model routing.
 
 Example systemd unit on Evo X2:
 
@@ -90,10 +103,10 @@ Caddy should continue to publish only the fallback path, for example:
 /llama/* -> http://127.0.0.1:18081/*
 ```
 
-## Phase aliases
+## Legacy phase aliases
 
-Because one active llama.cpp model is exposed at a time, the fallback model env
-vars should all point at the active alias for validation:
+For the demoted one-active-profile diagnostic path, the fallback model env vars
+should all point at the active alias for validation:
 
 ```bash
 EVO_X2_LLAMA_CPP_MODEL=gemma-4-E2B-it-Q8_0.gguf
@@ -109,44 +122,68 @@ default fallback chain and invoke it only through explicit scenario commands.
 
 ## Operations commands
 
-Inspect active primary/fallback models and the configured remote service:
+Run local validation without network, ssh, curl, or systemd:
+
+```bash
+make evo-x2-llama-check
+```
+
+Inspect active primary/fallback models and the configured legacy service:
 
 ```bash
 make evo-x2-llama-status
 ```
 
-Print the selected start/swap plan without changing Evo X2:
+Print the selected legacy start/swap plan without changing Evo X2:
 
 ```bash
 make evo-x2-llama-plan
 ```
 
-Dry-run a start:
+Dry-run a legacy diagnostic start:
 
 ```bash
 make evo-x2-llama-start
 ```
 
-Apply a start only when the service is known to be safe:
+Apply a legacy diagnostic start only during a maintenance window:
 
 ```bash
-EVO_X2_LLAMA_CPP_APPLY=1 make evo-x2-llama-start
+APPLY=1 make evo-x2-llama-start
 ```
 
-Dry-run a profile swap:
+Dry-run a legacy diagnostic profile swap:
 
 ```bash
 EVO_X2_LLAMA_CPP_PROFILE=fallback-gemma-e2b make evo-x2-llama-swap
 ```
 
-Apply a profile swap only in a maintenance window:
+Apply a legacy diagnostic profile swap only during a maintenance window:
 
 ```bash
-EVO_X2_LLAMA_CPP_APPLY=1 \
-EVO_X2_LLAMA_CPP_ALLOW_RESTART=1 \
+APPLY=1 \
+ALLOW_RESTART=1 \
 EVO_X2_LLAMA_CPP_PROFILE=fallback-gemma-e2b \
 make evo-x2-llama-swap
 ```
+
+Run the live-gated llama-swap 3-model validation:
+
+```bash
+RUN_EVO_X2_LLAMA_SWAP_SCENARIO=1 make scenario-evo-x2-llama-swap-brief-draft
+```
+
+Run the live-gated llama-swap five-format matrix:
+
+```bash
+RUN_EVO_X2_LLAMA_SWAP_MEDIA_MATRIX=1 make scenario-evo-x2-llama-swap-media-matrix
+```
+
+`EVO_X2_LLAMA_CPP_APPLY=1` and
+`EVO_X2_LLAMA_CPP_ALLOW_RESTART=1` remain supported for automation, but the
+operator-facing Makefile gate is `APPLY=1` plus `ALLOW_RESTART=1` for swaps.
+Without `APPLY=1`, `start` and `swap` print the remote command and exit before
+ssh. With `APPLY=1` but without `ALLOW_RESTART=1`, `swap` refuses before ssh.
 
 ## Validation gate
 
@@ -161,7 +198,7 @@ signals used around #18's streaming work and current full workflow scenarios:
 - final verification passes when performed,
 - report includes `llm_base_url`, `llm_model`, `verify_model`, and elapsed time.
 
-Live validation is intentionally gated:
+Legacy one-active-profile live validation remains intentionally gated:
 
 ```bash
 RUN_EVO_X2_LLAMA_CPP_SCENARIO=1 make scenario-evo-x2-llama-brief-draft
@@ -169,6 +206,11 @@ RUN_EVO_X2_LLAMA_CPP_SCENARIO=1 make scenario-evo-x2-llama-brief-draft
 
 This command sets `LLM_BASE_URL` directly to `/llama/v1` and clears fallback
 URLs so the run cannot silently pass through Ollama.
+
+The issue #90 llama-swap targets use the same direct `/llama/v1` and no-fallback
+properties, but validate three model IDs (`gemma4:e2b`, `qwen3.6:27b`,
+`gemma4:31b`) across the brief/draft path and all five registered output
+formats.
 
 ## ADR / plan alignment
 

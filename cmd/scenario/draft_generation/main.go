@@ -54,7 +54,9 @@ func main() {
 		OutputFormatID: brief.OutputFormatID,
 	}
 	minStyleScore := envFloat("SCENARIO_MIN_STYLE_SCORE", 80)
+	minKeywordOverlap := envInt("SCENARIO_MIN_KEYWORD_OVERLAP", 0)
 	minDraftRunes := envInt("SCENARIO_MIN_DRAFT_RUNES", 2400)
+	maxFirstChunkMs := envInt("SCENARIO_MAX_FIRST_CHUNK_MS", 0)
 	maxAttempts := envInt("DRAFT_MAX_ATTEMPTS", 2)
 	timeout := scenarioTimeout()
 	streamDraft := os.Getenv("SCENARIO_STREAM_DRAFT") == "1"
@@ -128,10 +130,10 @@ func main() {
 		if betterScenarioAttempt(candidate, bestAttempt, minDraftRunes, minStyleScore) {
 			bestAttempt = candidate
 		}
-		if scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore) {
+		if scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore, minKeywordOverlap, maxFirstChunkMs, candidate.FirstChunk) {
 			break
 		}
-		retryFeedback = scenarioRetryFeedback(result, runes, minDraftRunes, minStyleScore)
+		retryFeedback = scenarioRetryFeedback(result, runes, minDraftRunes, minStyleScore, minKeywordOverlap, maxFirstChunkMs, candidate.FirstChunk)
 	}
 	if bestAttempt.Attempt == 0 {
 		fatalf("no draft generation attempts completed")
@@ -143,7 +145,7 @@ func main() {
 	writeJSON(filepath.Join(outputDir, "verification.json"), result.Verification)
 
 	runes := bestAttempt.Runes
-	passesScenario := scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore)
+	passesScenario := scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore, minKeywordOverlap, maxFirstChunkMs, bestAttempt.FirstChunk)
 	fmt.Printf("draft generation scenario completed\n")
 	fmt.Printf("scenario_passed=%v\n", passesScenario)
 	fmt.Printf("attempt=%d\n", bestAttempt.Attempt)
@@ -152,6 +154,10 @@ func main() {
 	fmt.Printf("passed=%v\n", result.Evaluation.Passed)
 	fmt.Printf("score=%.1f\n", result.Evaluation.Comparison.Score)
 	fmt.Printf("min_style_score=%.1f\n", minStyleScore)
+	fmt.Printf("keyword_overlap=%d\n", keywordOverlapScore(result))
+	if minKeywordOverlap > 0 {
+		fmt.Printf("min_keyword_overlap=%d\n", minKeywordOverlap)
+	}
 	fmt.Printf("runes=%d\n", runes)
 	fmt.Printf("min_draft_runes=%d\n", minDraftRunes)
 	fmt.Printf("verification_performed=%v\n", result.Verification.Performed)
@@ -163,6 +169,9 @@ func main() {
 		fmt.Printf("first_chunk_ms=%d\n", bestAttempt.FirstChunk.Milliseconds())
 		fmt.Printf("chunks=%d\n", bestAttempt.StreamingChunks)
 	}
+	if maxFirstChunkMs > 0 {
+		fmt.Printf("max_first_chunk_ms=%d\n", maxFirstChunkMs)
+	}
 	fmt.Printf("llm_base_url=%s\n", baseURL)
 	fmt.Printf("llm_model=%s\n", model)
 	fmt.Printf("verify_model=%s\n", verifyModel)
@@ -172,8 +181,14 @@ func main() {
 	if result.Evaluation.Comparison.Score < minStyleScore {
 		fatalf("style score %.1f below scenario minimum %.1f", result.Evaluation.Comparison.Score, minStyleScore)
 	}
+	if minKeywordOverlap > 0 && keywordOverlapScore(result) < minKeywordOverlap {
+		fatalf("keyword overlap %d below scenario minimum %d", keywordOverlapScore(result), minKeywordOverlap)
+	}
 	if runes < minDraftRunes {
 		fatalf("draft length %d below scenario minimum %d", runes, minDraftRunes)
+	}
+	if maxFirstChunkMs > 0 && !firstChunkGatePassed(bestAttempt.FirstChunk, maxFirstChunkMs) {
+		fatalf("first chunk %dms exceeded scenario maximum %dms", bestAttempt.FirstChunk.Milliseconds(), maxFirstChunkMs)
 	}
 	if result.Verification.Performed && !result.Verification.Passed {
 		fatalf("final verification failed: %s", result.Verification.Summary)
@@ -281,8 +296,12 @@ func verificationGatePassed(verification draftapp.FinalVerification) bool {
 	return !verification.Performed || verification.Passed
 }
 
-func scenarioAttemptPassed(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) bool {
-	return result.Evaluation.Comparison.Score >= minStyleScore && runes >= minRunes && verificationGatePassed(result.Verification)
+func scenarioAttemptPassed(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64, minKeywordOverlap, maxFirstChunkMs int, firstChunk time.Duration) bool {
+	return result.Evaluation.Comparison.Score >= minStyleScore &&
+		keywordOverlapGatePassed(result, minKeywordOverlap) &&
+		runes >= minRunes &&
+		firstChunkGatePassed(firstChunk, maxFirstChunkMs) &&
+		verificationGatePassed(result.Verification)
 }
 
 func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes int, minStyleScore float64) bool {
@@ -293,8 +312,8 @@ func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes in
 		return true
 	}
 
-	candidatePassed := scenarioAttemptPassed(candidate.Result, candidate.Runes, minRunes, minStyleScore)
-	currentPassed := scenarioAttemptPassed(current.Result, current.Runes, minRunes, minStyleScore)
+	candidatePassed := scenarioAttemptPassed(candidate.Result, candidate.Runes, minRunes, minStyleScore, 0, 0, 0)
+	currentPassed := scenarioAttemptPassed(current.Result, current.Runes, minRunes, minStyleScore, 0, 0, 0)
 	if candidatePassed != currentPassed {
 		return candidatePassed
 	}
@@ -330,6 +349,21 @@ func scenarioAttemptGateScore(result draftapp.GenerateResult, runes, minRunes in
 	return score
 }
 
+func keywordOverlapScore(result draftapp.GenerateResult) int {
+	if result.Evaluation.Comparison.MetricScores == nil {
+		return 0
+	}
+	return result.Evaluation.Comparison.MetricScores["keyword_overlap"]
+}
+
+func keywordOverlapGatePassed(result draftapp.GenerateResult, minKeywordOverlap int) bool {
+	return minKeywordOverlap <= 0 || keywordOverlapScore(result) >= minKeywordOverlap
+}
+
+func firstChunkGatePassed(firstChunk time.Duration, maxFirstChunkMs int) bool {
+	return maxFirstChunkMs <= 0 || (firstChunk > 0 && firstChunk.Milliseconds() <= int64(maxFirstChunkMs))
+}
+
 func briefWithScenarioRetryFeedback(brief briefdomain.ArticleBrief, feedback string) briefdomain.ArticleBrief {
 	feedback = strings.TrimSpace(feedback)
 	if feedback == "" {
@@ -341,13 +375,19 @@ func briefWithScenarioRetryFeedback(brief briefdomain.ArticleBrief, feedback str
 	return updated
 }
 
-func scenarioRetryFeedback(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) string {
+func scenarioRetryFeedback(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64, minKeywordOverlap, maxFirstChunkMs int, firstChunk time.Duration) string {
 	var feedback []string
 	if runes < minRunes {
 		feedback = append(feedback, fmt.Sprintf("前回の下書きは%d字で、最低%d字に届かなかった。次は各見出しを具体例・判断理由・読者の次の行動で厚くし、必ず%d字以上にする", runes, minRunes, minRunes))
 	}
 	if result.Evaluation.Comparison.Score < minStyleScore {
 		feedback = append(feedback, fmt.Sprintf("前回の文体スコアは%.1fで、最低%.1fに届かなかった。文体ガイドの一人称、頻出テーマ、段落リズムを優先して全文を書き直す", result.Evaluation.Comparison.Score, minStyleScore))
+	}
+	if minKeywordOverlap > 0 && keywordOverlapScore(result) < minKeywordOverlap {
+		feedback = append(feedback, fmt.Sprintf("前回のkeyword_overlapは%dで、最低%dに届かなかった。文体ガイドの頻出語と主題語を本文の見出し・具体例・結論に自然に入れる", keywordOverlapScore(result), minKeywordOverlap))
+	}
+	if maxFirstChunkMs > 0 && !firstChunkGatePassed(firstChunk, maxFirstChunkMs) {
+		feedback = append(feedback, fmt.Sprintf("前回のfirst chunkは%dmsで、最大%dmsを超えた。次は冒頭から即座に本文生成に入る", firstChunk.Milliseconds(), maxFirstChunkMs))
 	}
 	if result.Verification.Performed && !result.Verification.Passed {
 		summary := strings.TrimSpace(result.Verification.Summary)

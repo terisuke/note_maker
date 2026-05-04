@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"github.com/teradakousuke/note_maker/internal/handlers"
+	authmw "github.com/teradakousuke/note_maker/internal/handlers/middleware"
 )
 
 func main() {
@@ -24,6 +25,11 @@ func main() {
 
 	// ルーターの設定
 	r := mux.NewRouter()
+	if os.Getenv("MULTI_USER") == "1" {
+		r.Use(authmw.RequirePrincipal(authmw.TrustedHeaderProvider{}))
+	} else {
+		r.Use(authmw.RequirePrincipal(authmw.NoopProvider{}))
+	}
 	registerRoutes(r)
 
 	log.Printf("Starting server on port %s...", port)
@@ -36,6 +42,9 @@ func registerRoutes(r *mux.Router) {
 	fs := http.FileServer(http.Dir("static"))
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", fs))
 	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}).Methods("GET")
+	r.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}).Methods("GET")
 

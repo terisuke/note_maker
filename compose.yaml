@@ -1,0 +1,87 @@
+name: note-maker
+
+x-note-maker-app: &note-maker-app
+  image: note-maker:dev
+  build:
+    context: .
+  environment:
+    PORT: "8080"
+    NOTE_MAKER_CONFIG_PATH: /var/lib/note-maker/app_config.json
+    WORKFLOW_STORE_PATH: /var/lib/note-maker/workflow_store.db
+    WORKFLOW_STORE_DRIVER: ${WORKFLOW_STORE_DRIVER:-sqlite}
+    MULTI_USER: ${MULTI_USER:-0}
+    LLM_RUNTIME: ${LLM_RUNTIME:-remote}
+    LLM_BASE_URL: ${LLM_BASE_URL:-http://evo-x2.tailb30e58.ts.net/v1}
+    LLM_MODEL: ${LLM_MODEL:-gemma4:31b}
+    STYLE_LLM_MODEL: ${STYLE_LLM_MODEL:-gemma4:e2b}
+    BRIEF_LLM_MODEL: ${BRIEF_LLM_MODEL:-qwen3.6:27b}
+    ARTICLE_LLM_MODEL: ${ARTICLE_LLM_MODEL:-gemma4:e2b}
+    DRAFT_LLM_MODEL: ${DRAFT_LLM_MODEL:-gemma4:31b}
+    VERIFY_LLM_MODEL: ${VERIFY_LLM_MODEL:-gemma4:latest}
+    LLM_FALLBACK_BASE_URLS: ${LLM_FALLBACK_BASE_URLS:-http://evo-x2.tailb30e58.ts.net/llama/v1}
+    STYLE_LLM_FALLBACK_MODELS: ${STYLE_LLM_FALLBACK_MODELS:-}
+    BRIEF_LLM_FALLBACK_MODELS: ${BRIEF_LLM_FALLBACK_MODELS:-}
+    ARTICLE_LLM_FALLBACK_MODELS: ${ARTICLE_LLM_FALLBACK_MODELS:-}
+    DRAFT_LLM_FALLBACK_MODELS: ${DRAFT_LLM_FALLBACK_MODELS:-}
+    VERIFY_LLM_FALLBACK_MODELS: ${VERIFY_LLM_FALLBACK_MODELS:-}
+  volumes:
+    - note-maker-data:/var/lib/note-maker
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+    interval: 30s
+    timeout: 5s
+    start_period: 10s
+    retries: 3
+
+services:
+  app:
+    <<: *note-maker-app
+    ports:
+      - "${NOTE_MAKER_HOST_PORT:-8080}:8080"
+
+  # Optional Tailscale sidecar pattern:
+  # 1. Set TS_AUTHKEY and optional TS_HOSTNAME in the shell or an uncommitted .env.
+  # 2. Run:
+  #    docker compose --profile tailscale up -d tailscale app-via-tailscale
+  # 3. The app shares the sidecar network namespace, so Evo X2 MagicDNS names
+  #    resolve through Tailscale. This follows the Tailscale Docker guide:
+  #    https://tailscale.com/blog/docker-tailscale-guide
+  # If the default app service is also running, the sidecar path publishes on
+  # NOTE_MAKER_TAILSCALE_HOST_PORT to avoid colliding with NOTE_MAKER_HOST_PORT.
+  tailscale:
+    image: tailscale/tailscale:stable
+    profiles: ["tailscale"]
+    hostname: ${TS_HOSTNAME:-note-maker}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    ports:
+      - "${NOTE_MAKER_TAILSCALE_HOST_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "tailscale", "status", "--peers=false"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
+  app-via-tailscale:
+    <<: *note-maker-app
+    profiles: ["tailscale"]
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+
+volumes:
+  note-maker-data:
+  tailscale-state:

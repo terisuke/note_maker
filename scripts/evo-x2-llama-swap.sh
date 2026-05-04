@@ -3,13 +3,35 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/evo-x2-llama-swap.sh [inspect|plan|start|swap]
+Usage: scripts/evo-x2-llama-swap.sh [inspect|plan|validate|start|swap]
+
+Primary issue #90 path:
+
+  validate    Network-free llama-swap adoption/template validation.
+  inspect     Read-only API and legacy service diagnostic.
+  plan        Print the legacy service diagnostic command plan.
+
+Manual diagnostic only:
+
+  start       Legacy systemd fallback service start.
+  swap        Legacy systemd profile symlink swap + service restart.
+
+The legacy start/swap path is not the llama-swap adoption path. Use it only
+during an explicitly scheduled maintenance diagnostic.
 
 Dry-run is the default. Mutating remote actions require:
+
+  APPLY=1
+
+or:
 
   EVO_X2_LLAMA_CPP_APPLY=1
 
 Restarting the shared llama.cpp service for a profile swap also requires:
+
+  ALLOW_RESTART=1
+
+or:
 
   EVO_X2_LLAMA_CPP_ALLOW_RESTART=1
 
@@ -23,12 +45,13 @@ Environment:
   EVO_X2_LLAMA_CPP_PROFILE_ENV        profile env file on Evo X2
   EVO_X2_LLAMA_CPP_ACTIVE_ENV         active env symlink on Evo X2
   EVO_X2_LLAMA_CPP_HEALTH_PATH        health path, default /health
+  LLAMA_SWAP_CONFIG                   local llama-swap YAML template to validate
 EOF
 }
 
 action="${1:-inspect}"
 case "$action" in
-  inspect|plan|start|swap)
+  inspect|plan|validate|start|swap)
     ;;
   -h|--help|help)
     usage
@@ -52,8 +75,11 @@ profile="${EVO_X2_LLAMA_CPP_PROFILE:-fallback-gemma-e2b}"
 profile_env="${EVO_X2_LLAMA_CPP_PROFILE_ENV:-/etc/note-maker/llama-cpp/${profile}.env}"
 active_env="${EVO_X2_LLAMA_CPP_ACTIVE_ENV:-/etc/note-maker/llama-cpp/active.env}"
 health_path="${EVO_X2_LLAMA_CPP_HEALTH_PATH:-/health}"
-apply="${EVO_X2_LLAMA_CPP_APPLY:-0}"
-allow_restart="${EVO_X2_LLAMA_CPP_ALLOW_RESTART:-0}"
+apply="${EVO_X2_LLAMA_CPP_APPLY:-${APPLY:-0}}"
+allow_restart="${EVO_X2_LLAMA_CPP_ALLOW_RESTART:-${ALLOW_RESTART:-0}}"
+llama_swap_config="${LLAMA_SWAP_CONFIG:-deploy/llama-swap/evo-x2.example.yaml}"
+llama_swap_models=("gemma4:e2b" "qwen3.6:27b" "gemma4:31b")
+llama_swap_optional_aliases=("gemma4:latest")
 
 strip_v1() {
   local value="$1"
@@ -116,13 +142,18 @@ remote_command() {
 
 print_strategy() {
   cat <<EOF
-Recommended strategy:
+Recommended issue #90 strategy:
   Keep Evo X2 Ollama primary at ${ollama_base_url}.
-  Keep Evo X2 llama.cpp as an explicit fallback at ${llama_base_url}.
-  Run exactly one shared llama.cpp fallback profile behind /llama/v1 unless live
-  validation proves concurrent model services do not starve Ollama.
+  Put llama-swap in front of llama-server backends at ${llama_base_url}.
+  Use llama-swap model aliases for the explicit fallback path and keep the app
+  pointed directly at /llama/v1 only inside live-gated validation targets.
 
-Selected llama.cpp service profile:
+Legacy manual diagnostic:
+  The old systemd profile path below is retained only for diagnosing the
+  previous one-active-profile fallback service. It is not the adoption path for
+  llama-swap and should not be used for routine model routing.
+
+Selected legacy llama.cpp service profile:
   service:     ${service}
   profile:     ${profile}
   profile env: ${profile_env}
@@ -140,6 +171,177 @@ inspect_remote_systemd() {
     echo "Remote systemd status unavailable; API inspection above is still authoritative for clients." >&2
   fi
 }
+
+validate_equal() {
+  local label="$1"
+  local got="$2"
+  local want="$3"
+
+  if [ "$got" = "$want" ]; then
+    echo "ok - ${label}"
+    return 0
+  fi
+
+  echo "not ok - ${label}" >&2
+  echo "  got:  ${got}" >&2
+  echo "  want: ${want}" >&2
+  return 1
+}
+
+validate_contains() {
+  local label="$1"
+  local got="$2"
+  local want="$3"
+
+  case "$got" in
+    *"$want"*)
+      echo "ok - ${label}"
+      return 0
+      ;;
+    *)
+      echo "not ok - ${label}" >&2
+      echo "  missing: ${want}" >&2
+      echo "  in:      ${got}" >&2
+      return 1
+      ;;
+  esac
+}
+
+validate_local() {
+  local failures=0
+  local start_command swap_command
+  local expected_start expected_swap
+
+  echo "== Network-free llama-swap validation"
+  echo "This validation does not call curl, ssh, or systemctl."
+  echo
+
+  if [ "$ollama_base_url" != "$llama_base_url" ]; then
+    echo "ok - primary and fallback URLs are distinct"
+  else
+    echo "not ok - primary and fallback URLs must be distinct (${ollama_base_url})" >&2
+    failures=$((failures + 1))
+  fi
+
+  if [ "$apply" != "1" ]; then
+    echo "ok - mutating actions are dry-run by default (APPLY=${apply})"
+  else
+    echo "not ok - validation must run with APPLY unset or 0" >&2
+    failures=$((failures + 1))
+  fi
+
+  if [ "$allow_restart" != "1" ]; then
+    echo "ok - profile swaps require an explicit restart gate (ALLOW_RESTART=${allow_restart})"
+  else
+    echo "not ok - validation must run with ALLOW_RESTART unset or 0" >&2
+    failures=$((failures + 1))
+  fi
+
+  start_command="$(remote_command start)"
+  swap_command="$(remote_command swap)"
+  expected_start="sudo systemctl start $(remote_quote "$service")"
+  expected_swap="sudo ln -sfn $(remote_quote "$profile_env") $(remote_quote "$active_env") && sudo systemctl restart $(remote_quote "$service")"
+
+  validate_equal "start command is deterministic" "$start_command" "$expected_start" || failures=$((failures + 1))
+  validate_equal "swap command is deterministic" "$swap_command" "$expected_swap" || failures=$((failures + 1))
+  validate_contains "swap command updates active profile symlink" "$swap_command" "ln -sfn" || failures=$((failures + 1))
+  validate_contains "swap command restarts only the llama.cpp service" "$swap_command" "systemctl restart $(remote_quote "$service")" || failures=$((failures + 1))
+  validate_llama_swap_config || failures=$((failures + 1))
+
+  echo
+  echo "Validated command plan:"
+  echo "  start: ${start_command}"
+  echo "  swap:  ${swap_command}"
+
+  if [ "$failures" -ne 0 ]; then
+    echo
+    echo "Network-free validation failed with ${failures} failure(s)." >&2
+    return 1
+  fi
+
+  echo
+  echo "Network-free validation passed."
+}
+
+validate_llama_swap_config() {
+  local failures=0
+
+  echo
+  echo "== llama-swap config template validation"
+  if [ ! -f "$llama_swap_config" ]; then
+    echo "not ok - llama-swap config template exists (${llama_swap_config})" >&2
+    return 1
+  fi
+  echo "ok - llama-swap config template exists (${llama_swap_config})"
+
+  for required in "healthCheckTimeout:" "models:" "cmd:"; do
+    if grep -Fq -- "$required" "$llama_swap_config"; then
+      echo "ok - config contains ${required}"
+    else
+      echo "not ok - config must contain ${required}" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  for model in "${llama_swap_models[@]}"; do
+    if grep -Fq -- "\"${model}\":" "$llama_swap_config" && grep -Fq -- "--alias ${model}" "$llama_swap_config"; then
+      echo "ok - config maps ${model} with matching llama-server alias"
+    else
+      echo "not ok - config must map ${model} and use --alias ${model}" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  for model in "${llama_swap_optional_aliases[@]}"; do
+    if grep -Fq -- "\"${model}\":" "$llama_swap_config" || grep -Fq -- "--alias ${model}" "$llama_swap_config"; then
+      if grep -Fq -- "\"${model}\":" "$llama_swap_config" && grep -Fq -- "--alias ${model}" "$llama_swap_config"; then
+        echo "ok - optional alias ${model} is internally consistent"
+      else
+        echo "not ok - optional alias ${model} must include both model key and --alias" >&2
+        failures=$((failures + 1))
+      fi
+    fi
+  done
+
+  if grep -Fq -- "llama-server" "$llama_swap_config"; then
+    echo "ok - config launches llama-server backends"
+  else
+    echo "not ok - config must launch llama-server backends" >&2
+    failures=$((failures + 1))
+  fi
+
+  if grep -Ev '^[[:space:]]*#' "$llama_swap_config" | grep -Eiq "ollama|systemctl|sudo|ssh "; then
+    echo "not ok - llama-swap config must not call Ollama, systemctl, sudo, or ssh" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok - config does not call Ollama, systemctl, sudo, or ssh"
+  fi
+
+  local ports unique_ports host_count
+  ports="$(grep -E -- "--port[[:space:]]+[0-9]+" "$llama_swap_config" | awk '{print $2}' | sort)"
+  unique_ports="$(printf '%s\n' "$ports" | sed '/^$/d' | uniq)"
+  if [ "$(printf '%s\n' "$ports" | sed '/^$/d' | wc -l | tr -d ' ')" -ge "${#llama_swap_models[@]}" ] && [ "$ports" = "$unique_ports" ]; then
+    echo "ok - backend ports are present and unique"
+  else
+    echo "not ok - backend ports must be present and unique" >&2
+    failures=$((failures + 1))
+  fi
+
+  host_count="$(grep -Fc -- "--host 127.0.0.1" "$llama_swap_config" || true)"
+  if [ "$host_count" -ge "${#llama_swap_models[@]}" ]; then
+    echo "ok - llama-server backends bind to localhost"
+  else
+    echo "not ok - llama-server backends should bind to 127.0.0.1" >&2
+    failures=$((failures + 1))
+  fi
+
+  return "$failures"
+}
+
+if [ "$action" = "validate" ]; then
+  validate_local
+  exit 0
+fi
 
 if [ "$ollama_base_url" = "$llama_base_url" ]; then
   echo "Refusing to operate: Ollama and llama.cpp URLs are identical (${ollama_base_url})." >&2
@@ -159,7 +361,7 @@ print_strategy
 
 if [ "$action" = "plan" ]; then
   echo
-  echo "Dry-run remote commands:"
+  echo "Legacy manual diagnostic commands (not the llama-swap adoption path):"
   echo "  start: $(remote_command start)"
   echo "  swap:  $(remote_command swap)"
   echo
@@ -173,15 +375,17 @@ command_text="$(remote_command)"
 echo
 echo "Remote command:"
 echo "  ${command_text}"
+echo
+echo "Manual diagnostic only: this legacy systemd profile path is not the llama-swap adoption path."
 
 if [ "$apply" != "1" ]; then
   echo
-  echo "Dry-run only. Set EVO_X2_LLAMA_CPP_APPLY=1 to run this on ${ssh_host}."
+  echo "Dry-run only. Set APPLY=1 or EVO_X2_LLAMA_CPP_APPLY=1 to run this on ${ssh_host}."
   exit 0
 fi
 
 if [ "$action" = "swap" ] && [ "$allow_restart" != "1" ]; then
-  echo "Refusing swap without EVO_X2_LLAMA_CPP_ALLOW_RESTART=1." >&2
+  echo "Refusing swap without ALLOW_RESTART=1 or EVO_X2_LLAMA_CPP_ALLOW_RESTART=1." >&2
   exit 2
 fi
 

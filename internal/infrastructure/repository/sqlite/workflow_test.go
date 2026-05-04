@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,6 +82,33 @@ func TestWorkflowStoreRestoresDraftInputs(t *testing.T) {
 	}
 	if len(versions) != 2 || versions[0].Brief.Theme == editedBrief.Theme || versions[1].Brief.Theme != editedBrief.Theme {
 		t.Fatalf("unexpected brief versions: %#v", versions)
+	}
+}
+
+func TestWorkflowStoreRejectsCrossUserNaturalIDConflicts(t *testing.T) {
+	base, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = base.Close() })
+	alice := base.ForUser("alice")
+	bob := base.ForUser("bob")
+
+	persona := testCustomPersona()
+	if err := alice.SavePersona(persona); err != nil {
+		t.Fatalf("save alice persona: %v", err)
+	}
+	if err := bob.SavePersona(persona); !errors.Is(err, ErrScopedIDConflict) {
+		t.Fatalf("save bob persona err = %v, want ErrScopedIDConflict", err)
+	}
+
+	now := time.Unix(1710000200, 0).UTC()
+	project := ProjectRecord{ID: "shared-project", Name: "Shared ID", CreatedAt: now, UpdatedAt: now}
+	if err := alice.SaveProject(project); err != nil {
+		t.Fatalf("save alice project: %v", err)
+	}
+	if err := bob.SaveProject(project); !errors.Is(err, ErrScopedIDConflict) {
+		t.Fatalf("save bob project err = %v, want ErrScopedIDConflict", err)
 	}
 }
 
@@ -174,11 +202,98 @@ func TestWorkflowStoreAppliesSchemaMigrations(t *testing.T) {
 	if migrationCount != 1 {
 		t.Fatalf("brief version migration count = %d, want 1", migrationCount)
 	}
+	if err := store.DB().QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 4`).Scan(&migrationCount); err != nil {
+		t.Fatalf("query user id migration: %v", err)
+	}
+	if migrationCount != 1 {
+		t.Fatalf("user id migration count = %d, want 1", migrationCount)
+	}
 	for _, table := range []string{"projects", "articles", "brief_sessions", "brief_answers", "briefs", "brief_versions", "custom_personas", "drafts", "section_regenerations", "source_selector_snapshots"} {
 		var name string
 		if err := store.DB().QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
 			t.Fatalf("expected table %s: %v", table, err)
 		}
+		var columnName string
+		if err := store.DB().QueryRow(`SELECT name FROM pragma_table_info(?) WHERE name = 'user_id'`, table).Scan(&columnName); err != nil {
+			t.Fatalf("expected %s.user_id column: %v", table, err)
+		}
+	}
+}
+
+func TestWorkflowStoreScopesRecordsByUser(t *testing.T) {
+	base, err := NewWorkflowStore(filepath.Join(t.TempDir(), "note_maker.db"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = base.Close() })
+	alice := base.ForUser("alice")
+	bob := base.ForUser("bob")
+	now := time.Unix(1710000100, 0).UTC()
+
+	aliceStyle := testAnalyzeResult(t)
+	aliceStyle.ID = "asr_alice"
+	aliceStyle.Profile.ID = "profile_alice"
+	aliceStyle.Guide.ID = "guide_alice"
+	if err := alice.SaveAuthorStyle(aliceStyle); err != nil {
+		t.Fatalf("save alice style: %v", err)
+	}
+	bobStyle := testAnalyzeResult(t)
+	bobStyle.ID = "asr_bob"
+	bobStyle.Profile.ID = "profile_bob"
+	bobStyle.Guide.ID = "guide_bob"
+	if err := bob.SaveAuthorStyle(bobStyle); err != nil {
+		t.Fatalf("save bob style: %v", err)
+	}
+	aliceSession := testCompletedSessionWithID(t, "brief_alice", aliceStyle.Profile.ID)
+	if err := alice.SaveSession(aliceSession); err != nil {
+		t.Fatalf("save alice session: %v", err)
+	}
+	if err := alice.SaveBrief(aliceSession.ID, aliceSession.AssembleBrief()); err != nil {
+		t.Fatalf("save alice brief: %v", err)
+	}
+	bobSession := testCompletedSessionWithID(t, "brief_bob", bobStyle.Profile.ID)
+	if err := bob.SaveSession(bobSession); err != nil {
+		t.Fatalf("save bob session: %v", err)
+	}
+	if err := bob.SaveBrief(bobSession.ID, bobSession.AssembleBrief()); err != nil {
+		t.Fatalf("save bob brief: %v", err)
+	}
+	if err := alice.SaveProject(ProjectRecord{ID: "project_alice", Name: "Alice", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("save alice project: %v", err)
+	}
+	if err := bob.SaveProject(ProjectRecord{ID: "project_bob", Name: "Bob", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("save bob project: %v", err)
+	}
+
+	if _, ok := alice.GetAuthorStyle(bobStyle.ID); ok {
+		t.Fatal("alice should not read bob author style")
+	}
+	if _, ok := alice.GetBrief(bobSession.ID); ok {
+		t.Fatal("alice should not read bob brief")
+	}
+	if _, ok := alice.GetProject("project_bob"); ok {
+		t.Fatal("alice should not read bob project")
+	}
+	styles, err := alice.ListAuthorStyles()
+	if err != nil {
+		t.Fatalf("list alice styles: %v", err)
+	}
+	if len(styles) != 1 || styles[0].ID != aliceStyle.ID {
+		t.Fatalf("alice styles = %#v", styles)
+	}
+	briefs, err := alice.ListBriefs()
+	if err != nil {
+		t.Fatalf("list alice briefs: %v", err)
+	}
+	if len(briefs) != 1 {
+		t.Fatalf("alice brief count = %d, want 1", len(briefs))
+	}
+	projects, err := alice.ListProjects()
+	if err != nil {
+		t.Fatalf("list alice projects: %v", err)
+	}
+	if len(projects) != 1 || projects[0].ID != "project_alice" {
+		t.Fatalf("alice projects = %#v", projects)
 	}
 }
 
@@ -403,6 +518,10 @@ func testCustomPersona() personadomain.Persona {
 }
 
 func testCompletedSession(t *testing.T, profileID string) briefdomain.ArticleBriefSession {
+	return testCompletedSessionWithID(t, "brief_test", profileID)
+}
+
+func testCompletedSessionWithID(t *testing.T, sessionID, profileID string) briefdomain.ArticleBriefSession {
 	t.Helper()
 	questions := append(briefdomain.FixedQuestions(), briefdomain.ArticleQuestion{
 		ID:          "custom_origin",
@@ -411,7 +530,7 @@ func testCompletedSession(t *testing.T, profileID string) briefdomain.ArticleBri
 		Required:    false,
 		TargetField: "custom",
 	})
-	session, err := briefdomain.NewArticleBriefSessionWithQuestions("brief_test", profileID, questions)
+	session, err := briefdomain.NewArticleBriefSessionWithQuestions(sessionID, profileID, questions)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

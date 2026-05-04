@@ -1,0 +1,47 @@
+# Example llama-swap config for Evo X2 /llama/v1 adoption.
+#
+# This file is intentionally safe to commit: it contains command templates and
+# model aliases, not credentials. Operators should copy it to the Evo X2 host
+# and replace model paths, GPU flags, and ports for the actual machine.
+# It is a llama-swap router template, not the legacy systemd profile-symlink
+# service. Do not add Ollama, ssh, sudo, or systemctl commands here.
+
+healthCheckTimeout: 10
+logRequests: true
+
+models:
+  "gemma4:e2b":
+    cmd: >
+      llama-server
+      --model /srv/models/gemma-4-e2b-it.gguf
+      --alias gemma4:e2b
+      --host 127.0.0.1
+      --port 18081
+      --ctx-size 8192
+
+  "qwen3.6:27b":
+    cmd: >
+      llama-server
+      --model /srv/models/qwen3.6-27b-instruct.gguf
+      --alias qwen3.6:27b
+      --host 127.0.0.1
+      --port 18082
+      --ctx-size 32768
+
+  "gemma4:31b":
+    cmd: >
+      llama-server
+      --model /srv/models/gemma-4-31b-it.gguf
+      --alias gemma4:31b
+      --host 127.0.0.1
+      --port 18083
+      --ctx-size 32768
+
+  "gemma4:latest":
+    cmd: >
+      llama-server
+      --model /srv/models/gemma-4-31b-it.gguf
+      --alias gemma4:latest
+      --host 127.0.0.1
+      --port 18084
+      --ctx-size 32768
