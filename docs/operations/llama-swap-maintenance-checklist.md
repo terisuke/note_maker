@@ -45,6 +45,17 @@ Expected result:
    RUN_EVO_X2_LLAMA_SWAP_SCENARIO=1 make scenario-evo-x2-llama-swap-brief-draft
    ```
 
+   The draft phase performs a read-only `/models` preflight and a tiny
+   streaming warmup before the measured draft request whenever
+   `SCENARIO_MAX_FIRST_CHUNK_MS` is set. Record these emitted fields alongside
+   the draft metrics:
+
+   - `preflight_passed`
+   - `preflight_models`
+   - `preflight_required_models`
+   - `warmup_passed`
+   - `warmup_first_chunk_ms`
+
 4. Run the five-format direct fallback matrix:
 
    ```bash
@@ -62,6 +73,9 @@ Expected result:
 - All live requests use `http://evo-x2.tailb30e58.ts.net/llama/v1`.
 - Fallback env vars are empty in the live-gated targets, so success cannot
   silently route through Ollama.
+- Preflight reports all required model aliases:
+  `gemma4:e2b`, `qwen3.6:27b`, and `gemma4:31b`.
+- Warmup succeeds before the measured draft request.
 - `scenario_passed=true`.
 - `score >= 82`.
 - `keyword_overlap >= 70`.

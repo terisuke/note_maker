@@ -43,6 +43,35 @@ func TestGenerateCallsChatCompletions(t *testing.T) {
 	}
 }
 
+func TestGenerateUsesPurposeGenerationSettingsFromEnv(t *testing.T) {
+	t.Setenv("LLM_BASE_URL", "http://example.test/v1")
+	t.Setenv("DRAFT_LLM_MODEL", "draft-model")
+	t.Setenv("DRAFT_LLM_MAX_TOKENS", "6144")
+	t.Setenv("DRAFT_LLM_TEMPERATURE", "0.8")
+	t.Setenv("DRAFT_LLM_TOP_P", "0.9")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.MaxTokens != 6144 || request.Temperature != 0.8 || request.TopP != 0.9 {
+			t.Fatalf("unexpected generation settings: %#v", request)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Draft"}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("LLM_BASE_URL", server.URL+"/v1")
+
+	client, err := NewClientFromEnvForPurpose("DRAFT")
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, err := client.Generate(context.Background(), "write"); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+}
+
 func TestListModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
@@ -103,6 +132,46 @@ func TestGenerateStreamCallsChatCompletionsAndAssemblesChunks(t *testing.T) {
 	}
 	if strings.Join(chunks, "") != draft {
 		t.Fatalf("chunks did not assemble to draft: %#v", chunks)
+	}
+}
+
+func TestWarmupUsesSmallStreamingRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "gemma4:31b" || !request.Stream {
+			t.Fatalf("unexpected warmup request: model=%s stream=%v", request.Model, request.Stream)
+		}
+		if request.MaxTokens != 12 {
+			t.Fatalf("max tokens = %d, want 12", request.MaxTokens)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	t.Setenv("LLM_WARMUP_MAX_TOKENS", "12")
+	client, err := NewClient(server.URL+"/v1", "gemma4:31b", server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	var chunks []string
+	content, err := client.Warmup(context.Background(), "ok", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("warmup: %v", err)
+	}
+	if content != "ok" || strings.Join(chunks, "") != "ok" {
+		t.Fatalf("unexpected warmup content: content=%q chunks=%q", content, strings.Join(chunks, ""))
 	}
 }
 

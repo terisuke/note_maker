@@ -49,6 +49,10 @@ docker compose --profile tailscale up -d tailscale app-via-tailscale
 curl -fsS http://127.0.0.1:${NOTE_MAKER_TAILSCALE_HOST_PORT:-8081}/api/models
 ```
 
+The sidecar intentionally exits before running `tailscale up` when
+`TS_AUTHKEY` is empty. This avoids an unattended container waiting on an
+interactive Tailscale login URL.
+
 The app shares the sidecar network namespace with
 `network_mode: service:tailscale`. Compose waits for the sidecar healthcheck
 before starting the app. The sidecar publishes
@@ -74,6 +78,25 @@ curl -fsS http://127.0.0.1:8080/api/models
 
 For GHCR releases, set the image tag in `compose.yaml` or override it from an
 environment-specific Compose file.
+
+## Release Readiness Check
+
+Before promoting Docker release changes, run:
+
+```sh
+./scripts/release-readiness-check.sh
+```
+
+The helper validates GitHub Actions syntax, records default-branch workflow and
+secret-name visibility when `gh` is available, renders default and Tailscale
+Compose configs, verifies no-auth Tailscale sidecar fail-fast behavior, runs
+`docker buildx build --check` for `linux/amd64,linux/arm64`, and performs a
+cache-only multi-arch build without pushing to GHCR.
+
+If the repository default branch does not yet contain
+`.github/workflows/docker-publish.yml`, manual workflow dispatch is expected to
+return `404`; promote `develop` to the default branch before treating GHCR
+publish evidence as actionable.
 
 ## Backup
 

@@ -53,6 +53,15 @@ services:
     image: tailscale/tailscale:stable
     profiles: ["tailscale"]
     hostname: ${TS_HOSTNAME:-note-maker}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$TS_AUTHKEY" ]; then
+          echo "TS_AUTHKEY is required for the tailscale profile." >&2
+          exit 64
+        fi
+        exec /usr/local/bin/containerboot
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_STATE_DIR: /var/lib/tailscale
@@ -72,7 +81,7 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
-    restart: unless-stopped
+    restart: ${TAILSCALE_RESTART_POLICY:-unless-stopped}
 
   app-via-tailscale:
     <<: *note-maker-app

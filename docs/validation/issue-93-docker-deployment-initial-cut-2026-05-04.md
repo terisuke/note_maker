@@ -16,6 +16,8 @@ Implemented the Docker and multi-user readiness slice:
 - Optional Tailscale sidecar Compose pattern with an `app-via-tailscale` service sharing `network_mode: service:tailscale`.
 - Tailscale sidecar host publishing now uses `${NOTE_MAKER_TAILSCALE_HOST_PORT:-8081}:8080`, so the default `app` service can remain on `${NOTE_MAKER_HOST_PORT:-8080}:8080` without a profile port conflict.
 - Tailscale sidecar healthcheck using `tailscale status --peers=false`, with the app gated by `depends_on: condition: service_healthy`.
+- Tailscale sidecar now fails fast when `TS_AUTHKEY` is empty, instead of
+  waiting on an interactive login URL during unattended startup.
 - Docker-focused Makefile targets.
 - `MULTI_USER=1` trusted-header auth using `X-Forwarded-User`.
 - SQLite `0004_user_id.sql` migration with `user_id` backfill and indexes.
@@ -46,6 +48,14 @@ docker compose --profile tailscale config
 
 Result: passed. The optional Tailscale profile renders successfully with `tailscale` and `app-via-tailscale`.
 The rendered profile includes the sidecar healthcheck, `condition: service_healthy`, the default app published on `8080`, and the sidecar path published on `8081`.
+
+```sh
+TS_AUTHKEY= TAILSCALE_RESTART_POLICY=no docker compose --profile tailscale up --no-build --no-deps tailscale
+```
+
+Result: passed after the fail-fast guard was added. The sidecar exits non-zero
+before `tailscale up` and logs `TS_AUTHKEY is required for the tailscale
+profile.`
 
 ```sh
 docker build -t note-maker:dev .

@@ -39,8 +39,11 @@ func main() {
 	}
 
 	answers := scenarioAnswers(variant)
-
-	for _, answer := range answers {
+	for !result.Completed && result.NextQuestion != nil && result.NextQuestion.FlowType == briefdomain.QuestionFlowMain {
+		answer, ok := answers[result.NextQuestion.ID]
+		if !ok {
+			answer = "なし"
+		}
 		result, err = service.Answer(context.Background(), result.Session, answer)
 		if err != nil {
 			fatalf("answer fixed question: %v", err)
@@ -76,30 +79,40 @@ func main() {
 	fmt.Printf("brief=%s\n", filepath.Join(outputDir, "brief.json"))
 }
 
-func scenarioAnswers(variant string) []string {
+func scenarioAnswers(variant string) map[string]string {
 	if variant == "cor_blog" {
-		return []string{
-			"Evo X2を中心にしたローカルLLM推論基盤を、会社ブログとして技術知見と運用判断の両方から共有する",
-			"CIは通っているのに、実際の推論経路がローカルに落ちると開発機を占有してしまう、という運用上の痛みから始めたい",
-			"Cor.incの社員、AI実装に関わる開発者、ローカル推論基盤を業務導入したい技術責任者",
-			"推論基盤は速さだけでなく、誰が使っても同じ経路で検証できることが重要だと理解してほしい",
-			"Tailscale VPN越しのOpenAI互換APIを主経路にすること、Ollamaとllama.cppの役割分担、シナリオごとの秒数・スコア・文字数を記録すること、失敗時にローカルfallbackを最終手段として扱うこと",
-			"自分たちはAIを道具として使うだけではなく、社員が安心して試せる検証基盤を会社として育てたい。速度が出ても再現性がなければチームの知見にならない、というビジョンを共有したい",
-			"単なるベンチマーク自慢、特定モデル礼賛、SSH前提の属人的な運用、根拠のないコスト削減表現",
-			"2400字前後。導入、問題設定、設計判断、実装内容、検証結果、今後の課題、社員へのメッセージで構成する",
-			"会社ブログとして明確で実務的に書く。断定はするが、検証結果と意思決定の背景を必ずセットで説明する",
+		return map[string]string{
+			briefdomain.QuestionIDTheme:                 "Evo X2を中心にしたローカルLLM推論基盤を、会社ブログとして技術知見と運用判断の両方から共有する",
+			briefdomain.QuestionIDOpeningEpisode:        "CIは通っているのに、実際の推論経路がローカルに落ちると開発機を占有してしまう、という運用上の痛みから始めたい",
+			briefdomain.QuestionIDReader:                "Cor.incの社員、AI実装に関わる開発者、ローカル推論基盤を業務導入したい技術責任者",
+			briefdomain.QuestionIDReaderProblem:         "検証経路が属人化し、CIの緑と実運用の安心感がつながっていない",
+			briefdomain.QuestionIDExpectedReaderAction:  "推論基盤は速さだけでなく、誰が使っても同じ経路で検証できることが重要だと理解してほしい",
+			briefdomain.QuestionIDKeyTakeaway:           "速度、品質、再現性を同じシナリオ指標で見ることで、モデル選定をチームの知見に変えられる",
+			briefdomain.QuestionIDMustInclude:           "Tailscale VPN越しのOpenAI互換APIを主経路にすること、Ollamaとllama.cppの役割分担、シナリオごとの秒数・スコア・文字数を記録すること、失敗時にローカルfallbackを最終手段として扱うこと",
+			briefdomain.QuestionIDConcreteExample:       "Evo X2 primary、llama.cpp fallback、local fallbackを同じbrief/draftシナリオで比較し、score・keyword_overlap・first_chunk_msを残す",
+			briefdomain.QuestionIDEvidence:              "scenario_passed、style score、keyword_overlap、runes、verification、elapsed_seconds、first_chunk_msを検証ログとして使う",
+			briefdomain.QuestionIDPersonalContext:       "自分たちはAIを道具として使うだけではなく、社員が安心して試せる検証基盤を会社として育てたい。速度が出ても再現性がなければチームの知見にならない、というビジョンを共有したい",
+			briefdomain.QuestionIDExclusions:            "単なるベンチマーク自慢、特定モデル礼賛、SSH前提の属人的な運用、根拠のないコスト削減表現",
+			briefdomain.QuestionIDTargetLengthStructure: "2400字前後。導入、問題設定、設計判断、実装内容、検証結果、今後の課題、社員へのメッセージで構成する",
+			briefdomain.QuestionIDToneStance:            "会社ブログとして明確で実務的に書く。断定はするが、検証結果と意思決定の背景を必ずセットで説明する",
+			briefdomain.QuestionIDTitleKeywords:         "Evo X2、ローカルLLM、検証基盤、Tailscale、fallback",
 		}
 	}
-	return []string{
-		"ローカルLLMで自分の過去記事を読み直し、文体ではなく思想まで再現できるのかを検証する話",
-		"以前の生成記事を読んだとき、形は似ているのに自分の切実さが抜け落ちていると感じた場面から始めたい",
-		"AIで発信を効率化したいが、自分らしさが薄まることに不安がある個人開発者や発信者",
-		"AIに代筆させるのではなく、自分の思想を深掘りする取材相手として使う視点を持ってほしい",
-		"Note APIで記事を集めること、文体ガイドと一問一答を分けること、深掘り質問で記事の核を作ること。音楽家からエンジニア、起業、LT登壇、AI駆動開発という自分の文脈も自然に接続したい",
-		"音楽家として練習を積み重ねてきた経験、エンジニアとして実装と検証を繰り返してきた経験、起業やLT登壇で自分の言葉を人前に出してきた経験を入れたい。便利さに飛びつく一方で、自分の思想が薄まることへの怖さも正直に書きたい",
-		"ローカルLLMを万能だと断言すること、根拠のない性能比較、Gemini依存",
-		"3000字前後、最低2800字。導入、違和感、設計変更、Evo X2でのモデル使い分け、実装と検証、読者への提案、結論で構成する",
-		"内省的だが技術検証の具体性もある。僕という一人称で、音楽やLTの経験も比喩として使いながら、読者に問いかける調子にする",
+	return map[string]string{
+		briefdomain.QuestionIDTheme:                 "ローカルLLMで自分の過去記事を読み直し、文体ではなく思想まで再現できるのかを検証する話",
+		briefdomain.QuestionIDOpeningEpisode:        "以前の生成記事を読んだとき、形は似ているのに自分の切実さが抜け落ちていると感じた場面から始めたい",
+		briefdomain.QuestionIDReader:                "AIで発信を効率化したいが、自分らしさが薄まることに不安がある個人開発者や発信者",
+		briefdomain.QuestionIDReaderProblem:         "AIに代筆させるほど発信は楽になるが、思想や違和感まで薄まるのではないかと迷っている",
+		briefdomain.QuestionIDExpectedReaderAction:  "AIに代筆させるのではなく、自分の思想を深掘りする取材相手として使う視点を持ってほしい",
+		briefdomain.QuestionIDKeyTakeaway:           "便利さに飛びつく前に、自分の違和感を言語化する工程が発信の核を守る",
+		briefdomain.QuestionIDMustInclude:           "Note APIで記事を集めること、文体ガイドと一問一答を分けること、深掘り質問で記事の核を作ること。音楽家からエンジニア、起業、LT登壇、AI駆動開発という自分の文脈も自然に接続したい",
+		briefdomain.QuestionIDConcreteExample:       "以前の生成記事を読み返し、形は似ているが切実さがないと気づいた場面。そこから文体分析、ブリーフ質問、深掘り質問へ設計を変えた流れ",
+		briefdomain.QuestionIDEvidence:              "style score、keyword_overlap、verification、生成文字数を残し、感覚だけでなく検証可能な形にする",
+		briefdomain.QuestionIDPersonalContext:       "音楽家として練習を積み重ねてきた経験、エンジニアとして実装と検証を繰り返してきた経験、起業やLT登壇で自分の言葉を人前に出してきた経験を入れたい。便利さに飛びつく一方で、自分の思想が薄まることへの怖さも正直に書きたい",
+		briefdomain.QuestionIDExclusions:            "ローカルLLMを万能だと断言すること、根拠のない性能比較、Gemini依存",
+		briefdomain.QuestionIDTargetLengthStructure: "3000字前後、最低2800字。導入、違和感、設計変更、Evo X2でのモデル使い分け、実装と検証、読者への提案、結論で構成する",
+		briefdomain.QuestionIDToneStance:            "内省的だが技術検証の具体性もある。僕という一人称で、音楽やLTの経験も比喩として使いながら、読者に問いかける調子にする",
+		briefdomain.QuestionIDTitleKeywords:         "ローカルLLM、過去記事、文体分析、思想、違和感、AI駆動開発",
 	}
 }
 

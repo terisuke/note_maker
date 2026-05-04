@@ -60,6 +60,9 @@ func TestResultFromDraftOutputParsesThresholdMetrics(t *testing.T) {
 func TestCommandEnvClearsFallbackChainAndPinsLocalRuntime(t *testing.T) {
 	t.Setenv("LLM_FALLBACK_BASE_URLS", "http://evo-x2.tailb30e58.ts.net/llama/v1")
 	t.Setenv("DRAFT_FALLBACK_LLM_BASE_URLS", "http://evo-x2.tailb30e58.ts.net/llama/v1")
+	t.Setenv("LOCAL_LLAMACPP_FALLBACK_MAX_TOKENS", "4096")
+	t.Setenv("LOCAL_LLAMACPP_FALLBACK_TEMPERATURE", "0.8")
+	t.Setenv("LOCAL_LLAMACPP_FALLBACK_TOP_P", "0.9")
 	config := scenarioConfig{
 		BaseURL:           "http://127.0.0.1:8081/v1",
 		Model:             "local-qwen",
@@ -76,6 +79,15 @@ func TestCommandEnvClearsFallbackChainAndPinsLocalRuntime(t *testing.T) {
 
 	if env["LLM_BASE_URL"] != config.BaseURL || env["DRAFT_LLM_MODEL"] != config.Model || env["VERIFY_LLM_MODEL"] != config.VerifyModel {
 		t.Fatalf("local runtime env not pinned: %#v", env)
+	}
+	if env["SCENARIO_MIN_KEYWORD_OVERLAP"] != "70" {
+		t.Fatalf("keyword gate was not forwarded to draft scenario: %#v", env)
+	}
+	if env["DRAFT_LLM_MAX_TOKENS"] != "4096" || env["DRAFT_LLM_TEMPERATURE"] != "0.8" || env["DRAFT_LLM_TOP_P"] != "0.9" {
+		t.Fatalf("local fallback generation defaults not applied: %#v", env)
+	}
+	if env["SCENARIO_VERIFY_DRAFT"] != "0" {
+		t.Fatalf("local fallback should default to metric-only verification: %#v", env)
 	}
 	if env["LLM_FALLBACK_BASE_URLS"] != "" || env["DRAFT_LLM_FALLBACK_BASE_URLS"] != "" || env["DRAFT_FALLBACK_LLM_BASE_URLS"] != "" {
 		t.Fatalf("fallback chain was not cleared: %#v", env)

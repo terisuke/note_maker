@@ -177,8 +177,8 @@ func TestBetterScenarioAttemptKeepsBestWhenRetryRegresses(t *testing.T) {
 		Runes: 2600,
 	}
 
-	if betterScenarioAttempt(regressedRetry, selected, minRunes, minStyleScore) {
-		t.Fatalf("regressed retry replaced selected attempt; gate scores retry=%d selected=%d", scenarioAttemptGateScore(regressedRetry.Result, regressedRetry.Runes, minRunes, minStyleScore), scenarioAttemptGateScore(selected.Result, selected.Runes, minRunes, minStyleScore))
+	if betterScenarioAttempt(regressedRetry, selected, minRunes, minStyleScore, 0) {
+		t.Fatalf("regressed retry replaced selected attempt; gate scores retry=%d selected=%d", scenarioAttemptGateScore(regressedRetry.Result, regressedRetry.Runes, minRunes, minStyleScore, 0), scenarioAttemptGateScore(selected.Result, selected.Runes, minRunes, minStyleScore, 0))
 	}
 }
 
@@ -204,7 +204,7 @@ func TestBetterScenarioAttemptPrefersFullPassOverHigherFailingScore(t *testing.T
 		Runes: 2400,
 	}
 
-	if !betterScenarioAttempt(fullPass, selected, minRunes, minStyleScore) {
+	if !betterScenarioAttempt(fullPass, selected, minRunes, minStyleScore, 0) {
 		t.Fatal("full pass should replace higher-scoring failed verification attempt")
 	}
 }
@@ -231,8 +231,30 @@ func TestBetterScenarioAttemptUsesLaterAttemptOnlyAsTieBreaker(t *testing.T) {
 		Runes: 2400,
 	}
 
-	if !betterScenarioAttempt(equalQualityRetry, selected, minRunes, minStyleScore) {
+	if !betterScenarioAttempt(equalQualityRetry, selected, minRunes, minStyleScore, 0) {
 		t.Fatal("later attempt should win only when pass state, gate score, style score, and length all tie")
+	}
+}
+
+func TestBetterScenarioAttemptPrefersKeywordOverlapForIssue36Gate(t *testing.T) {
+	const (
+		minRunes          = 2800
+		minStyleScore     = 82
+		minKeywordOverlap = 70
+	)
+	selected := scenarioAttemptResult{
+		Attempt: 1,
+		Result:  scenarioSelectionResultWithKeyword(84, 52, draftapp.FinalVerification{Performed: true, Passed: true}),
+		Runes:   3200,
+	}
+	keywordBetterRetry := scenarioAttemptResult{
+		Attempt: 2,
+		Result:  scenarioSelectionResultWithKeyword(83, 72, draftapp.FinalVerification{Performed: true, Passed: true}),
+		Runes:   3000,
+	}
+
+	if !betterScenarioAttempt(keywordBetterRetry, selected, minRunes, minStyleScore, minKeywordOverlap) {
+		t.Fatal("retry that satisfies keyword_overlap should replace higher-scoring keyword failure")
 	}
 }
 
@@ -251,11 +273,56 @@ func TestScenarioAttemptPassedHonorsKeywordAndFirstChunkGates(t *testing.T) {
 	}
 }
 
+func TestScenarioPreflightRequiredModelsIncludesLlamaSwapPhaseAliases(t *testing.T) {
+	t.Setenv("LLM_MODEL", "gemma4:31b")
+	t.Setenv("STYLE_LLM_MODEL", "gemma4:e2b")
+	t.Setenv("BRIEF_LLM_MODEL", "qwen3.6:27b")
+	t.Setenv("ARTICLE_LLM_MODEL", "gemma4:e2b")
+	t.Setenv("DRAFT_LLM_MODEL", "gemma4:31b")
+	t.Setenv("VERIFY_LLM_MODEL", "gemma4:31b")
+
+	models := scenarioPreflightRequiredModels("http://evo-x2.tailb30e58.ts.net/llama/v1", "gemma4:31b")
+	for _, want := range []string{"gemma4:31b", "gemma4:e2b", "qwen3.6:27b"} {
+		if !containsString(models, want) {
+			t.Fatalf("required models missing %q: %v", want, models)
+		}
+	}
+	if len(models) != 3 {
+		t.Fatalf("required models should be unique: %v", models)
+	}
+}
+
+func TestScenarioPreflightRequiredModelsCanBeOverridden(t *testing.T) {
+	t.Setenv("SCENARIO_PREFLIGHT_REQUIRED_MODELS", "a, b, a")
+
+	models := scenarioPreflightRequiredModels("http://example.test/v1", "ignored")
+
+	if strings.Join(models, ",") != "a,b,a" {
+		t.Fatalf("override models = %v", models)
+	}
+}
+
 func scenarioSelectionResult(score float64, verification draftapp.FinalVerification) draftapp.GenerateResult {
+	return scenarioSelectionResultWithKeyword(score, 0, verification)
+}
+
+func scenarioSelectionResultWithKeyword(score float64, keywordOverlap int, verification draftapp.FinalVerification) draftapp.GenerateResult {
 	return draftapp.GenerateResult{
 		Evaluation: draftapp.StyleEvaluation{
-			Comparison: articledomain.StyleComparison{Score: score},
+			Comparison: articledomain.StyleComparison{
+				Score:        score,
+				MetricScores: map[string]int{"keyword_overlap": keywordOverlap},
+			},
 		},
 		Verification: verification,
 	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }

@@ -72,6 +72,10 @@ func TestApplyRunMetricsCapturesAttemptCount(t *testing.T) {
 		"scenario_passed":     "true",
 		"score":               "88.1",
 		"min_style_score":     "82.0",
+		"keyword_overlap":     "75",
+		"min_keyword_overlap": "70",
+		"first_chunk_ms":      "1200",
+		"max_first_chunk_ms":  "8000",
 		"runes":               "5040",
 		"min_draft_runes":     "1800",
 		"verification_passed": "true",
@@ -79,6 +83,9 @@ func TestApplyRunMetricsCapturesAttemptCount(t *testing.T) {
 
 	if row.Attempt != 2 {
 		t.Fatalf("attempt = %d, want 2", row.Attempt)
+	}
+	if row.KeywordOverlap != 75 || row.MinKeywordOverlap != 70 || row.FirstChunkMS != 1200 || row.MaxFirstChunkMS != 8000 {
+		t.Fatalf("strict gate metrics not captured: %+v", row)
 	}
 }
 
@@ -115,6 +122,32 @@ func TestAttachQualityGatesReportsScenarioGateDetails(t *testing.T) {
 	}
 	if gate.Reason == "" || !contains(gate.StructuralGateLabels, "reader_takeaway") {
 		t.Fatalf("quality gate detail missing: %+v", gate)
+	}
+}
+
+func TestQualityGateReportsKeywordAndFirstChunkFailures(t *testing.T) {
+	row := resultRow{
+		Status:            "failed",
+		ScenarioPassed:    false,
+		Score:             84,
+		MinStyleScore:     82,
+		KeywordOverlap:    66,
+		MinKeywordOverlap: 70,
+		FirstChunkMS:      16868,
+		MaxFirstChunkMS:   8000,
+		Runes:             3096,
+		MinRunes:          2800,
+		Error:             "first chunk 16868ms exceeded scenario maximum 8000ms",
+	}
+	row.FailureGroup = failureGroup(row)
+	rows := attachQualityGates([]resultRow{row})
+
+	gate := rows[0].QualityGate
+	if gate.KeywordPassed || gate.FirstChunkPassed {
+		t.Fatalf("strict latency/keyword gates passed unexpectedly: %+v", gate)
+	}
+	if rows[0].FailureGroup != "keyword_overlap" {
+		t.Fatalf("failure group not classified: %+v", rows[0])
 	}
 }
 

@@ -40,6 +40,16 @@ Run the `Desktop Release` workflow manually with `release=0`.
 
 Set `dry_run=1` to upload only Wails dry-run command logs and checksums.
 
+If the workflow file is present on `develop` but not yet on the repository
+default branch, GitHub Actions manual dispatch returns `404`. In that state,
+run the local release readiness helper instead and promote `develop` to the
+default branch before attempting the Actions dispatch:
+
+```sh
+./scripts/release-readiness-check.sh
+gh workflow list --all
+```
+
 Expected output:
 
 - macOS unsigned developer artifact archive.
@@ -70,6 +80,9 @@ Required GitHub Actions secrets:
 The workflow verifies that secrets are present before a release run. Final
 signing and notarization remain operator-controlled because certificate
 material and platform-specific installer policy are outside the source tree.
+Use `gh secret list --repo <owner>/<repo>` to verify the secret names are
+configured before dispatching a signed release. A missing secret-name check is a
+release blocker, but not a source-tree blocker.
 
 ## Smoke Test
 

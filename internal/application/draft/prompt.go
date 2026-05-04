@@ -75,6 +75,11 @@ func BuildPromptForModeWithProfile(guide WritingStyleGuide, brief ArticleBrief, 
 		prompt.WriteString(calibration)
 		prompt.WriteString("\n")
 	}
+	if hints := qualityGateHints(profile, brief); hints != "" {
+		prompt.WriteString("\n## quality gate hints\n")
+		prompt.WriteString(hints)
+		prompt.WriteString("\n")
+	}
 
 	prompt.WriteString("\n## 出力条件\n")
 	appendOutputConditions(&prompt, format.ID)
@@ -360,10 +365,46 @@ func keywordCalibration(profile AuthorStyleProfile) string {
 		return ""
 	}
 	sortStrings(keywords)
+	minKeywordTargets := int(math.Ceil(float64(len(keywords)) * 0.7))
 	return fmt.Sprintf(
-		"参照文体の主要キーワード候補: %s。本文ではこのうち少なくとも10語を、不自然な羅列ではなく体験・比喩・判断基準の中で自然に回収してください。\n",
+		"参照文体の主要キーワード候補: %s。keyword_overlapは出現有無で評価されます。本文ではこのうち少なくとも%d語を、不自然な羅列ではなく体験・比喩・判断基準の中で自然に回収してください。\n",
 		strings.Join(keywords, " / "),
+		minKeywordTargets,
 	)
+}
+
+func qualityGateHints(profile AuthorStyleProfile, brief ArticleBrief) string {
+	var lines []string
+	targetRunes := targetRunesFromBrief(brief.TargetLengthStructure)
+	if targetRunes > 0 {
+		minRunes := int(math.Round(float64(targetRunes) * 0.93))
+		if minRunes < 2800 && targetRunes >= 3000 {
+			minRunes = 2800
+		}
+		lines = append(lines, fmt.Sprintf("- draft_length: 最低%d字、できれば%d字前後。導入で短くまとめず、各見出しに体験、判断理由、検証結果、読者への接続を入れて厚く書く。", minRunes, targetRunes))
+	}
+	if len(profile.Metrics.KeywordCounts) > 0 {
+		keywords := positiveStyleKeywords(profile.Metrics.KeywordCounts)
+		if len(keywords) > 0 {
+			minKeywordTargets := int(math.Ceil(float64(len(keywords)) * 0.7))
+			lines = append(lines, fmt.Sprintf("- keyword_overlap: 評価対象語から最低%d語を本文中に自然に一度以上入れる。候補: %s。", minKeywordTargets, strings.Join(keywords, " / ")))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func positiveStyleKeywords(counts map[string]int) []string {
+	keywords := make([]string, 0, len(counts))
+	for keyword, count := range counts {
+		if count > 0 {
+			keywords = append(keywords, keyword)
+		}
+	}
+	sortStrings(keywords)
+	return keywords
 }
 
 func sortStrings(values []string) {
