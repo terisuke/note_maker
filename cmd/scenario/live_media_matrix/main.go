@@ -111,9 +111,12 @@ type resultRow struct {
 	ElapsedSeconds        float64       `json:"elapsed_seconds,omitempty"`
 	Attempt               int           `json:"attempt,omitempty"`
 	FirstChunkMS          int           `json:"first_chunk_ms,omitempty"`
+	MaxFirstChunkMS       int           `json:"max_first_chunk_ms,omitempty"`
 	Chunks                int           `json:"chunks,omitempty"`
 	Score                 float64       `json:"score,omitempty"`
 	MinStyleScore         float64       `json:"min_style_score,omitempty"`
+	KeywordOverlap        int           `json:"keyword_overlap,omitempty"`
+	MinKeywordOverlap     int           `json:"min_keyword_overlap,omitempty"`
 	Runes                 int           `json:"runes,omitempty"`
 	MinRunes              int           `json:"min_runes,omitempty"`
 	Passed                bool          `json:"passed,omitempty"`
@@ -150,6 +153,12 @@ type qualityGate struct {
 	StylePassed           bool     `json:"style_passed"`
 	Score                 float64  `json:"score,omitempty"`
 	MinStyleScore         float64  `json:"min_style_score,omitempty"`
+	KeywordPassed         bool     `json:"keyword_passed"`
+	KeywordOverlap        int      `json:"keyword_overlap,omitempty"`
+	MinKeywordOverlap     int      `json:"min_keyword_overlap,omitempty"`
+	FirstChunkPassed      bool     `json:"first_chunk_passed"`
+	FirstChunkMS          int      `json:"first_chunk_ms,omitempty"`
+	MaxFirstChunkMS       int      `json:"max_first_chunk_ms,omitempty"`
 	LengthPassed          bool     `json:"length_passed"`
 	Runes                 int      `json:"runes,omitempty"`
 	MinRunes              int      `json:"min_runes,omitempty"`
@@ -401,9 +410,12 @@ func applyRunMetrics(row *resultRow, values map[string]string, gates scenarioGat
 	row.ElapsedSeconds = floatValue(values["elapsed_seconds"])
 	row.Attempt = intValue(values["attempt"])
 	row.FirstChunkMS = intValue(values["first_chunk_ms"])
+	row.MaxFirstChunkMS = intValue(values["max_first_chunk_ms"])
 	row.Chunks = intValue(values["chunks"])
 	row.Score = floatValue(values["score"])
 	row.MinStyleScore = floatValueOrDefault(values["min_style_score"], gates.MinStyleScore)
+	row.KeywordOverlap = intValue(values["keyword_overlap"])
+	row.MinKeywordOverlap = intValue(values["min_keyword_overlap"])
 	row.Runes = intValue(values["runes"])
 	row.MinRunes = intValueOrDefault(values["min_draft_runes"], gates.MinRunes)
 	row.Passed = boolValue(values["passed"])
@@ -482,6 +494,10 @@ func failureGroup(row resultRow) string {
 		return "generation_or_validation"
 	case styleScoreFailure(row):
 		return "style_score"
+	case keywordOverlapFailure(row):
+		return "keyword_overlap"
+	case firstChunkFailure(row):
+		return "first_chunk_latency"
 	case row.Runes > 0 && row.MinRunes > 0 && row.Runes < row.MinRunes:
 		return "draft_length"
 	case row.VerificationPerformed && !row.VerificationPassed:
@@ -501,6 +517,22 @@ func styleScoreFailure(row resultRow) bool {
 	return strings.Contains(errorText, "style score") && strings.Contains(errorText, "below scenario minimum")
 }
 
+func keywordOverlapFailure(row resultRow) bool {
+	if row.MinKeywordOverlap > 0 && row.KeywordOverlap > 0 && row.KeywordOverlap < row.MinKeywordOverlap {
+		return true
+	}
+	errorText := strings.ToLower(strings.TrimSpace(row.Error))
+	return strings.Contains(errorText, "keyword overlap") && strings.Contains(errorText, "below scenario minimum")
+}
+
+func firstChunkFailure(row resultRow) bool {
+	if row.MaxFirstChunkMS > 0 && row.FirstChunkMS > 0 && row.FirstChunkMS > row.MaxFirstChunkMS {
+		return true
+	}
+	errorText := strings.ToLower(strings.TrimSpace(row.Error))
+	return strings.Contains(errorText, "first chunk") && strings.Contains(errorText, "exceeded scenario maximum")
+}
+
 func attachQualityGates(rows []resultRow) []resultRow {
 	out := append([]resultRow(nil), rows...)
 	for i := range out {
@@ -518,6 +550,10 @@ func qualityGateForRow(row resultRow) qualityGate {
 		FailureGroup:          row.FailureGroup,
 		Score:                 row.Score,
 		MinStyleScore:         row.MinStyleScore,
+		KeywordOverlap:        row.KeywordOverlap,
+		MinKeywordOverlap:     row.MinKeywordOverlap,
+		FirstChunkMS:          row.FirstChunkMS,
+		MaxFirstChunkMS:       row.MaxFirstChunkMS,
 		Runes:                 row.Runes,
 		MinRunes:              row.MinRunes,
 		VerificationPerformed: row.VerificationPerformed,
@@ -527,6 +563,16 @@ func qualityGateForRow(row resultRow) qualityGate {
 	}
 	if row.MinStyleScore > 0 {
 		gate.StylePassed = row.Score >= row.MinStyleScore
+	}
+	if row.MinKeywordOverlap > 0 {
+		gate.KeywordPassed = row.KeywordOverlap >= row.MinKeywordOverlap
+	} else {
+		gate.KeywordPassed = true
+	}
+	if row.MaxFirstChunkMS > 0 {
+		gate.FirstChunkPassed = row.FirstChunkMS > 0 && row.FirstChunkMS <= row.MaxFirstChunkMS
+	} else {
+		gate.FirstChunkPassed = true
 	}
 	if row.MinRunes > 0 {
 		gate.LengthPassed = row.Runes >= row.MinRunes
@@ -671,10 +717,10 @@ func markdownReport(report aggregateReport) string {
 	}
 
 	builder.WriteString("## Case Results\n\n")
-	builder.WriteString("| Run | Case | Medium | Style | Outcome | Status | Gates | Attempt | Seconds | Score | Runes | Verification | Output |\n")
-	builder.WriteString("|---:|---|---|---|---|---|---|---:|---:|---:|---:|---|---|\n")
+	builder.WriteString("| Run | Case | Medium | Style | Outcome | Status | Gates | Attempt | Seconds | Score | Keyword | First chunk | Runes | Verification | Output |\n")
+	builder.WriteString("|---:|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|\n")
 	for _, row := range report.Rows {
-		builder.WriteString(fmt.Sprintf("| %d | `%s` | %s | %s | %s | %s | %s | %d | %.2f | %.1f / %.1f | %d / %d | %v | `%s` |\n",
+		builder.WriteString(fmt.Sprintf("| %d | `%s` | %s | %s | %s | %s | %s | %d | %.2f | %.1f / %.1f | %d / %d | %d / %d | %d / %d | %v | `%s` |\n",
 			row.RunOrdinal,
 			row.CaseID,
 			escapePipes(row.Medium),
@@ -686,6 +732,10 @@ func markdownReport(report aggregateReport) string {
 			row.ElapsedSeconds,
 			row.Score,
 			row.MinStyleScore,
+			row.KeywordOverlap,
+			row.MinKeywordOverlap,
+			row.FirstChunkMS,
+			row.MaxFirstChunkMS,
 			row.Runes,
 			row.MinRunes,
 			row.VerificationPassed,

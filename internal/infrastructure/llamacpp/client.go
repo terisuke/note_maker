@@ -25,6 +25,7 @@ const (
 type Client struct {
 	baseURL    string
 	model      string
+	purpose    string
 	httpClient *http.Client
 	fallback   *Client
 }
@@ -69,6 +70,7 @@ func newClientFromEnvForPurpose(purpose, modelOverride string) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
+	client.purpose = strings.ToUpper(strings.TrimSpace(purpose))
 	fallback, err := fallbackChainFromEnv(purpose, model, usingDefaultBaseURL)
 	if err != nil {
 		return nil, err
@@ -123,6 +125,18 @@ func streamFirstByteTimeoutFromEnv() time.Duration {
 		return 45 * time.Second
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func warmupMaxTokensFromEnv() int {
+	raw := strings.TrimSpace(firstEnv("LLM_WARMUP_MAX_TOKENS", "LLAMACPP_WARMUP_MAX_TOKENS"))
+	if raw == "" {
+		return 32
+	}
+	tokens, err := strconv.Atoi(raw)
+	if err != nil || tokens <= 0 {
+		return 32
+	}
+	return tokens
 }
 
 func modelFromEnv(purpose string) string {
@@ -216,6 +230,7 @@ func fallbackChainFromEnv(purpose, primaryModel string, usingDefaultBaseURL bool
 		if err != nil {
 			return nil, err
 		}
+		client.purpose = purpose
 		if head == nil {
 			head = client
 		}
@@ -322,7 +337,7 @@ func (c *Client) GenerateWithSystem(ctx context.Context, systemPrompt, prompt st
 // every text delta. It returns the assembled response so callers can validate it
 // with the same path as the non-streaming API.
 func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
-	content, err := c.generateStream(ctx, prompt, onChunk)
+	content, err := c.generateStream(ctx, defaultSystemPrompt, prompt, 0, onChunk)
 	if err != nil {
 		if c.fallback != nil && strings.TrimSpace(content) == "" && ctx.Err() == nil {
 			if streamingFallback, ok := any(c.fallback).(interface {
@@ -337,13 +352,38 @@ func (c *Client) GenerateStream(ctx context.Context, prompt string, onChunk func
 	return content, nil
 }
 
+// Warmup sends a tiny streaming request through the same endpoint and model.
+// It is intended for scenario preflight where model loading and llama-swap
+// backend selection should happen before measured draft generation.
+func (c *Client) Warmup(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	systemPrompt := "Return only the requested short response. Do not explain."
+	content, err := c.generateStream(ctx, systemPrompt, prompt, warmupMaxTokensFromEnv(), onChunk)
+	if err != nil {
+		if c.fallback != nil && strings.TrimSpace(content) == "" && ctx.Err() == nil {
+			if warmingFallback, ok := any(c.fallback).(interface {
+				Warmup(context.Context, string, func(string) error) (string, error)
+			}); ok {
+				return warmingFallback.Warmup(ctx, prompt, onChunk)
+			}
+			return c.fallback.Generate(ctx, prompt)
+		}
+		return content, err
+	}
+	return content, nil
+}
+
 const defaultSystemPrompt = "You are a careful Japanese editor. Return only a paste-ready Markdown article. Do not include reasoning, preambles, or code fences."
 
 func (c *Client) chatCompletionRequest(systemPrompt, prompt string, stream bool) chatCompletionRequest {
+	return c.chatCompletionRequestWithMaxTokens(systemPrompt, prompt, stream, 0)
+}
+
+func (c *Client) chatCompletionRequestWithMaxTokens(systemPrompt, prompt string, stream bool, maxTokens int) chatCompletionRequest {
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	if systemPrompt == "" {
 		systemPrompt = defaultSystemPrompt
 	}
+	maxTokens = c.maxTokens(maxTokens)
 	body := chatCompletionRequest{
 		Model: c.model,
 		Messages: []message{
@@ -356,16 +396,59 @@ func (c *Client) chatCompletionRequest(systemPrompt, prompt string, stream bool)
 				Content: prompt,
 			},
 		},
-		Temperature: 1.0,
-		TopP:        0.95,
-		MaxTokens:   4096,
+		Temperature: chatCompletionFloatSetting(c.purpose, "TEMPERATURE", 1.0),
+		TopP:        chatCompletionFloatSetting(c.purpose, "TOP_P", 0.95),
+		MaxTokens:   maxTokens,
 		Stream:      stream,
 	}
 	return body
 }
 
-func (c *Client) generateStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
-	encoded, err := json.Marshal(c.chatCompletionRequest(defaultSystemPrompt, prompt, true))
+func (c *Client) maxTokens(override int) int {
+	if override > 0 {
+		return override
+	}
+	return chatCompletionIntSetting(c.purpose, "MAX_TOKENS", 4096)
+}
+
+func chatCompletionIntSetting(purpose, suffix string, fallback int) int {
+	raw := strings.TrimSpace(firstPurposeEnv(purpose, "LLM_"+suffix, "LLAMACPP_"+suffix))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func chatCompletionFloatSetting(purpose, suffix string, fallback float64) float64 {
+	raw := strings.TrimSpace(firstPurposeEnv(purpose, "LLM_"+suffix, "LLAMACPP_"+suffix))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func firstPurposeEnv(purpose string, names ...string) string {
+	purpose = strings.ToUpper(strings.TrimSpace(purpose))
+	if purpose != "" {
+		for _, name := range names {
+			if value := os.Getenv(purpose + "_" + name); value != "" {
+				return value
+			}
+		}
+	}
+	return firstEnv(names...)
+}
+
+func (c *Client) generateStream(ctx context.Context, systemPrompt, prompt string, maxTokens int, onChunk func(string) error) (string, error) {
+	encoded, err := json.Marshal(c.chatCompletionRequestWithMaxTokens(systemPrompt, prompt, true, maxTokens))
 	if err != nil {
 		return "", fmt.Errorf("encode llama.cpp request: %w", err)
 	}

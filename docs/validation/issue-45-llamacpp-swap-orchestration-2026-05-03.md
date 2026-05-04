@@ -231,3 +231,28 @@ against the selected active profile and proves quality plus operations gates.
 The 2026-05-03 live run proves the route works, but it missed keyword-overlap
 and first-chunk gates. The current implementation is intentionally P2: Ollama
 remains primary.
+
+## 2026-05-04 non-mutating follow-up
+
+The recommended scenario path now includes operational latency controls without
+remote mutation:
+
+- draft preflight writes `tmp/draft_generation/preflight.json`,
+- draft warmup writes `tmp/draft_generation/warmup.json`,
+- measured `first_chunk_ms` is still taken from the real draft stream,
+- live media-matrix aggregate reports keyword and first-chunk gates per row.
+
+Latest known llama-swap live metrics before this update were:
+
+| Metric | Value |
+|---|---:|
+| score | `84.2 / 82.0` |
+| keyword_overlap | `75 / 70` |
+| runes | `3096 / 2800` |
+| verification_passed | `true` |
+| first_chunk_ms | `16868 / 8000` |
+
+#45 still should not close from this evidence alone. It can close only after
+the recommended strategy/script plus brief/draft metrics include a passing
+first-chunk latency gate and the operator records that Ollama primary remained
+available.

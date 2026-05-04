@@ -111,9 +111,15 @@ jobs:
           if [ -d build/bin ]; then
             tar -czf "dist/${{ matrix.artifact }}.tar.gz" -C build/bin .
           fi
-          find dist -maxdepth 1 -type f \( -name "${{ matrix.artifact }}.tar.gz" -o -name "${{ matrix.artifact }}.dry-run.txt" \) -print0 \
-            | sort -z \
-            | xargs -0 shasum -a 256 > "dist/${{ matrix.artifact }}.sha256"
+          checksum_file="dist/${{ matrix.artifact }}.sha256"
+          : > "$checksum_file"
+          while IFS= read -r -d '' file; do
+            if command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 "$file" >> "$checksum_file"
+            else
+              sha256sum "$file" >> "$checksum_file"
+            fi
+          done < <(find dist -maxdepth 1 -type f \( -name "${{ matrix.artifact }}.tar.gz" -o -name "${{ matrix.artifact }}.dry-run.txt" \) -print0 | sort -z)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

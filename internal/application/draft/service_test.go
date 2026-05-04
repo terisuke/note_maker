@@ -550,7 +550,7 @@ func TestBuildPromptCalibratesFirstPersonDensityFromReferenceProfile(t *testing.
 		TargetLengthStructure: "3000字、導入・本論・結論",
 	}, profile, persona, format)
 
-	for _, want := range []string{"strict style calibration", "参照文体の一人称密度", "一人称「僕」", "参照文体の鉤括弧密度", "参照文体の主要キーワード候補", "今回の目標長さ"} {
+	for _, want := range []string{"strict style calibration", "quality gate hints", "参照文体の一人称密度", "一人称「僕」", "参照文体の鉤括弧密度", "参照文体の主要キーワード候補", "keyword_overlapは出現有無", "draft_length", "最低2800字", "今回の目標長さ"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
 		}

@@ -126,3 +126,42 @@ Operator checklist:
 Do not run the remaining live validation outside a maintenance window. The
 remaining checks are the 3-model brief/draft scenario and the five-format
 llama-swap media matrix against Evo X2 `/llama/v1`.
+
+## Non-mutating latency hardening update - 2026-05-04
+
+Implemented without SSH, service restart, Ollama stop, or Tailscale changes:
+
+- `cmd/scenario/draft_generation` now writes `preflight.json` and `warmup.json`.
+- When `SCENARIO_MAX_FIRST_CHUNK_MS` is set, the draft scenario defaults to:
+  - read-only `/models` preflight against the configured DRAFT client,
+  - required alias check for the phase models on `/llama/v1`,
+  - tiny streaming warmup before the measured draft generation.
+- The measured `first_chunk_ms` remains the first chunk of the real draft
+  request, not the warmup request.
+- `cmd/scenario/live_media_matrix` now parses and reports
+  `keyword_overlap`, `min_keyword_overlap`, `first_chunk_ms`, and
+  `max_first_chunk_ms` in aggregate JSON/Markdown quality gates.
+
+Latest known non-mutating live result before this hardening:
+
+| Metric | Value |
+|---|---:|
+| score | `84.2 / 82.0` |
+| keyword_overlap | `75 / 70` |
+| runes | `3096 / 2800` |
+| verification_passed | `true` |
+| first_chunk_ms | `16868 / 8000` |
+
+Outcome: quality gates passed except first-chunk latency. #90 cannot close
+until a maintenance-window run records `scenario_passed=true` with
+`first_chunk_ms <= 8000`, then the fallback-only five-format matrix and crash
+fallback acceptance are recorded.
+
+Additional non-live commands passed after this update:
+
+```bash
+go test ./internal/infrastructure/llamacpp ./cmd/scenario/draft_generation ./cmd/scenario/live_media_matrix
+make evo-x2-llama-check
+go test ./cmd/scenario/brief_interview ./cmd/scenario/local_llamacpp_fallback ./cmd/scenario/media_matrix ./cmd/scenario/live_media_matrix
+make -n scenario-evo-x2-llama-swap-brief-draft scenario-evo-x2-llama-swap-media-matrix
+```

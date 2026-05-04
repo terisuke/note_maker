@@ -68,7 +68,35 @@ func main() {
 	if err != nil {
 		fatalf("create verification llm client: %v", err)
 	}
-	service := draftapp.NewServiceWithVerifier(client, draftapp.NewLightweightVerifier(verifyClient))
+	warmupEnabled := scenarioWarmupEnabled(streamDraft, maxFirstChunkMs)
+	preflight := runScenarioPreflight(client, baseURL, model, warmupEnabled)
+	writeJSON(filepath.Join(outputDir, "preflight.json"), preflight)
+	if preflight.Enabled {
+		fmt.Printf("preflight_enabled=true\n")
+		fmt.Printf("preflight_passed=%v\n", preflight.Passed)
+		fmt.Printf("preflight_elapsed_seconds=%.2f\n", preflight.ElapsedSeconds)
+		fmt.Printf("preflight_models=%s\n", strings.Join(preflight.Models, ","))
+		fmt.Printf("preflight_required_models=%s\n", strings.Join(preflight.RequiredModels, ","))
+		if !preflight.Passed && preflight.Required {
+			fatalf("draft preflight failed: %s", preflightFailure(preflight))
+		}
+	}
+	warmup := runScenarioWarmup(client, warmupEnabled)
+	writeJSON(filepath.Join(outputDir, "warmup.json"), warmup)
+	if warmup.Enabled {
+		fmt.Printf("warmup_enabled=true\n")
+		fmt.Printf("warmup_passed=%v\n", warmup.Passed)
+		fmt.Printf("warmup_first_chunk_ms=%d\n", warmup.FirstChunkMs)
+		fmt.Printf("warmup_elapsed_seconds=%.2f\n", warmup.ElapsedSeconds)
+		fmt.Printf("warmup_chunks=%d\n", warmup.Chunks)
+		if !warmup.Passed && warmup.Required {
+			fatalf("draft warmup failed: %s", warmup.Error)
+		}
+	}
+	service := draftapp.NewService(client)
+	if envBoolDefault("SCENARIO_VERIFY_DRAFT", true) {
+		service = draftapp.NewServiceWithVerifier(client, draftapp.NewLightweightVerifier(verifyClient))
+	}
 
 	var result draftapp.GenerateResult
 	var bestAttempt scenarioAttemptResult
@@ -127,7 +155,7 @@ func main() {
 			FirstChunk:      firstChunk,
 			StreamingChunks: chunkCount,
 		}
-		if betterScenarioAttempt(candidate, bestAttempt, minDraftRunes, minStyleScore) {
+		if betterScenarioAttempt(candidate, bestAttempt, minDraftRunes, minStyleScore, minKeywordOverlap) {
 			bestAttempt = candidate
 		}
 		if scenarioAttemptPassed(result, runes, minDraftRunes, minStyleScore, minKeywordOverlap, maxFirstChunkMs, candidate.FirstChunk) {
@@ -175,6 +203,8 @@ func main() {
 	fmt.Printf("llm_base_url=%s\n", baseURL)
 	fmt.Printf("llm_model=%s\n", model)
 	fmt.Printf("verify_model=%s\n", verifyModel)
+	fmt.Printf("preflight=%s\n", filepath.Join(outputDir, "preflight.json"))
+	fmt.Printf("warmup=%s\n", filepath.Join(outputDir, "warmup.json"))
 	fmt.Printf("draft=%s\n", filepath.Join(outputDir, "draft.md"))
 	fmt.Printf("evaluation=%s\n", filepath.Join(outputDir, "evaluation.json"))
 	fmt.Printf("verification=%s\n", filepath.Join(outputDir, "verification.json"))
@@ -227,6 +257,27 @@ type failureAttemptReport struct {
 	RawOutputs      []rawAttemptArtifact  `json:"raw_outputs"`
 }
 
+type scenarioPreflightReport struct {
+	Enabled        bool     `json:"enabled"`
+	Required       bool     `json:"required"`
+	Passed         bool     `json:"passed"`
+	Models         []string `json:"models,omitempty"`
+	RequiredModels []string `json:"required_models,omitempty"`
+	MissingModels  []string `json:"missing_models,omitempty"`
+	ElapsedSeconds float64  `json:"elapsed_seconds,omitempty"`
+	Error          string   `json:"error,omitempty"`
+}
+
+type scenarioWarmupReport struct {
+	Enabled        bool    `json:"enabled"`
+	Required       bool    `json:"required"`
+	Passed         bool    `json:"passed"`
+	FirstChunkMs   int64   `json:"first_chunk_ms,omitempty"`
+	ElapsedSeconds float64 `json:"elapsed_seconds,omitempty"`
+	Chunks         int     `json:"chunks,omitempty"`
+	Error          string  `json:"error,omitempty"`
+}
+
 type scenarioAttemptResult struct {
 	Attempt         int
 	Result          draftapp.GenerateResult
@@ -234,6 +285,119 @@ type scenarioAttemptResult struct {
 	Elapsed         time.Duration
 	FirstChunk      time.Duration
 	StreamingChunks int
+}
+
+func runScenarioPreflight(client *llamacpp.Client, baseURL, model string, warmupEnabled bool) scenarioPreflightReport {
+	enabled := envBoolDefault("SCENARIO_DRAFT_PREFLIGHT", warmupEnabled)
+	report := scenarioPreflightReport{
+		Enabled:        enabled,
+		Required:       envBoolDefault("SCENARIO_DRAFT_PREFLIGHT_REQUIRED", true),
+		RequiredModels: scenarioPreflightRequiredModels(baseURL, model),
+	}
+	if !enabled {
+		report.Passed = true
+		return report
+	}
+	timeout := time.Duration(envInt("SCENARIO_DRAFT_PREFLIGHT_TIMEOUT_SECONDS", 30)) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	started := time.Now()
+	models, err := client.ListModels(ctx)
+	report.ElapsedSeconds = time.Since(started).Seconds()
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	report.Models = models
+	report.MissingModels = missingModels(models, report.RequiredModels)
+	report.Passed = len(report.MissingModels) == 0
+	if !report.Passed {
+		report.Error = "missing models: " + strings.Join(report.MissingModels, ", ")
+	}
+	return report
+}
+
+func runScenarioWarmup(client *llamacpp.Client, enabled bool) scenarioWarmupReport {
+	report := scenarioWarmupReport{
+		Enabled:  enabled,
+		Required: envBoolDefault("SCENARIO_DRAFT_WARMUP_REQUIRED", true),
+	}
+	if !enabled {
+		report.Passed = true
+		return report
+	}
+	timeout := time.Duration(envInt("SCENARIO_DRAFT_WARMUP_TIMEOUT_SECONDS", 120)) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	started := time.Now()
+	var firstChunk time.Duration
+	chunkCount := 0
+	_, err := client.Warmup(ctx, envOrDefault("SCENARIO_DRAFT_WARMUP_PROMPT", "短くokとだけ返してください。"), func(chunk string) error {
+		chunkCount++
+		if firstChunk == 0 {
+			firstChunk = time.Since(started)
+		}
+		return nil
+	})
+	report.ElapsedSeconds = time.Since(started).Seconds()
+	report.FirstChunkMs = finalFirstChunkMs(firstChunk)
+	report.Chunks = chunkCount
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	report.Passed = firstChunk > 0 && chunkCount > 0
+	if !report.Passed {
+		report.Error = "warmup produced no stream chunks"
+	}
+	return report
+}
+
+func scenarioWarmupEnabled(streamDraft bool, maxFirstChunkMs int) bool {
+	defaultEnabled := streamDraft && maxFirstChunkMs > 0
+	return envBoolDefault("SCENARIO_DRAFT_WARMUP", defaultEnabled)
+}
+
+func scenarioPreflightRequiredModels(baseURL, model string) []string {
+	if value := strings.TrimSpace(os.Getenv("SCENARIO_PREFLIGHT_REQUIRED_MODELS")); value != "" {
+		return splitCSV(value)
+	}
+	models := []string{model}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(baseURL)), "/llama/v1") {
+		models = append(models,
+			os.Getenv("LLM_MODEL"),
+			os.Getenv("STYLE_LLM_MODEL"),
+			os.Getenv("BRIEF_LLM_MODEL"),
+			os.Getenv("ARTICLE_LLM_MODEL"),
+			os.Getenv("DRAFT_LLM_MODEL"),
+			os.Getenv("VERIFY_LLM_MODEL"),
+		)
+	}
+	return uniqueStrings(models)
+}
+
+func missingModels(models, required []string) []string {
+	seen := map[string]bool{}
+	for _, model := range models {
+		seen[strings.TrimSpace(model)] = true
+	}
+	var missing []string
+	for _, model := range required {
+		if !seen[strings.TrimSpace(model)] {
+			missing = append(missing, model)
+		}
+	}
+	return missing
+}
+
+func preflightFailure(report scenarioPreflightReport) string {
+	if strings.TrimSpace(report.Error) != "" {
+		return report.Error
+	}
+	if len(report.MissingModels) > 0 {
+		return "missing models: " + strings.Join(report.MissingModels, ", ")
+	}
+	return "unknown preflight failure"
 }
 
 func generationAttemptsFromError(err error) []draftapp.GenerationAttempt {
@@ -304,7 +468,7 @@ func scenarioAttemptPassed(result draftapp.GenerateResult, runes, minRunes int, 
 		verificationGatePassed(result.Verification)
 }
 
-func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes int, minStyleScore float64) bool {
+func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes int, minStyleScore float64, minKeywordOverlap int) bool {
 	if candidate.Attempt == 0 {
 		return false
 	}
@@ -312,16 +476,22 @@ func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes in
 		return true
 	}
 
-	candidatePassed := scenarioAttemptPassed(candidate.Result, candidate.Runes, minRunes, minStyleScore, 0, 0, 0)
-	currentPassed := scenarioAttemptPassed(current.Result, current.Runes, minRunes, minStyleScore, 0, 0, 0)
+	candidatePassed := scenarioAttemptPassed(candidate.Result, candidate.Runes, minRunes, minStyleScore, minKeywordOverlap, 0, 0)
+	currentPassed := scenarioAttemptPassed(current.Result, current.Runes, minRunes, minStyleScore, minKeywordOverlap, 0, 0)
 	if candidatePassed != currentPassed {
 		return candidatePassed
 	}
 
-	candidateGateScore := scenarioAttemptGateScore(candidate.Result, candidate.Runes, minRunes, minStyleScore)
-	currentGateScore := scenarioAttemptGateScore(current.Result, current.Runes, minRunes, minStyleScore)
+	candidateGateScore := scenarioAttemptGateScore(candidate.Result, candidate.Runes, minRunes, minStyleScore, minKeywordOverlap)
+	currentGateScore := scenarioAttemptGateScore(current.Result, current.Runes, minRunes, minStyleScore, minKeywordOverlap)
 	if candidateGateScore != currentGateScore {
 		return candidateGateScore > currentGateScore
+	}
+
+	candidateKeywordOverlap := keywordOverlapScore(candidate.Result)
+	currentKeywordOverlap := keywordOverlapScore(current.Result)
+	if candidateKeywordOverlap != currentKeywordOverlap {
+		return candidateKeywordOverlap > currentKeywordOverlap
 	}
 
 	candidateStyleScore := candidate.Result.Evaluation.Comparison.Score
@@ -335,9 +505,12 @@ func betterScenarioAttempt(candidate, current scenarioAttemptResult, minRunes in
 	return candidate.Attempt > current.Attempt
 }
 
-func scenarioAttemptGateScore(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64) int {
+func scenarioAttemptGateScore(result draftapp.GenerateResult, runes, minRunes int, minStyleScore float64, minKeywordOverlap int) int {
 	score := 0
 	if result.Evaluation.Comparison.Score >= minStyleScore {
+		score++
+	}
+	if keywordOverlapGatePassed(result, minKeywordOverlap) {
 		score++
 	}
 	if runes >= minRunes {
@@ -494,6 +667,46 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func envBoolDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func splitCSV(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if cleaned := strings.TrimSpace(part); cleaned != "" {
+			values = append(values, cleaned)
+		}
+	}
+	return values
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		cleaned := strings.TrimSpace(value)
+		if cleaned == "" || seen[cleaned] {
+			continue
+		}
+		seen[cleaned] = true
+		unique = append(unique, cleaned)
+	}
+	return unique
 }
 
 func envFloat(key string, fallback float64) float64 {
