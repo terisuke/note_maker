@@ -1,0 +1,29 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "version": "2",
+  "name": "note-maker",
+  "outputfilename": "note-maker",
+  "build:dir": "build",
+  "build:tags": "wails",
+  "frontend:dir": "cmd/desktop/frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:install": "",
+  "frontend:dev:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "assetdir": ".",
+  "reloaddirs": "static,cmd/desktop/frontend",
+  "wailsjsdir": "build/wailsjs",
+  "author": {
+    "name": "teradakousuke",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Note Maker",
+    "productName": "Note Maker",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026",
+    "comments": "Desktop package scaffold for Note Maker"
+  }
+}

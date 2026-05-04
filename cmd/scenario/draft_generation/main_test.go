@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	draftapp "github.com/teradakousuke/note_maker/internal/application/draft"
 	articledomain "github.com/teradakousuke/note_maker/internal/domain/article"
@@ -135,9 +136,10 @@ func TestScenarioRetryFeedbackCapturesLengthStyleAndVerificationFailures(t *test
 		},
 	}
 
-	feedback := scenarioRetryFeedback(result, 2554, 2800, 82)
+	result.Evaluation.Comparison.MetricScores = map[string]int{"keyword_overlap": 64}
+	feedback := scenarioRetryFeedback(result, 2554, 2800, 82, 70, 8000, 9*time.Second)
 
-	for _, want := range []string{"最低2800字", "文体スコアは73.5", "根拠が不足している"} {
+	for _, want := range []string{"最低2800字", "文体スコアは73.5", "keyword_overlapは64", "first chunkは9000ms", "根拠が不足している"} {
 		if !strings.Contains(feedback, want) {
 			t.Fatalf("feedback missing %q: %s", want, feedback)
 		}
@@ -231,6 +233,21 @@ func TestBetterScenarioAttemptUsesLaterAttemptOnlyAsTieBreaker(t *testing.T) {
 
 	if !betterScenarioAttempt(equalQualityRetry, selected, minRunes, minStyleScore) {
 		t.Fatal("later attempt should win only when pass state, gate score, style score, and length all tie")
+	}
+}
+
+func TestScenarioAttemptPassedHonorsKeywordAndFirstChunkGates(t *testing.T) {
+	result := scenarioSelectionResult(88, draftapp.FinalVerification{Performed: true, Passed: true})
+	result.Evaluation.Comparison.MetricScores = map[string]int{"keyword_overlap": 72}
+
+	if !scenarioAttemptPassed(result, 3000, 2800, 82, 70, 8000, 1200*time.Millisecond) {
+		t.Fatal("expected all gates to pass")
+	}
+	if scenarioAttemptPassed(result, 3000, 2800, 82, 75, 8000, 1200*time.Millisecond) {
+		t.Fatal("keyword overlap below threshold must fail")
+	}
+	if scenarioAttemptPassed(result, 3000, 2800, 82, 70, 8000, 9*time.Second) {
+		t.Fatal("first chunk over threshold must fail")
 	}
 }
 

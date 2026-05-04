@@ -399,6 +399,79 @@ func TestGenerateUsesOrderedFallbackChain(t *testing.T) {
 	}
 }
 
+func TestGenerateUsesNextFallbackWhenIntermediateBackendCrashes(t *testing.T) {
+	crashedFallback := httptest.NewServer(crashConnectionHandler(t))
+	defer crashedFallback.Close()
+	recoveredFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "healthy-fallback" {
+			t.Fatalf("unexpected recovered fallback model: %s", request.Model)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"# Recovered Fallback"}}]}`))
+	}))
+	defer recoveredFallback.Close()
+
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+	t.Setenv("LLM_MODEL", "remote-ollama")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", crashedFallback.URL+"/v1, "+recoveredFallback.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "crashing-fallback, healthy-fallback")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	draft, err := client.Generate(context.Background(), "write")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if draft != "# Recovered Fallback" {
+		t.Fatalf("unexpected draft: %q", draft)
+	}
+}
+
+func TestGenerateStreamUsesNextFallbackWhenIntermediateBackendCrashes(t *testing.T) {
+	crashedFallback := httptest.NewServer(crashConnectionHandler(t))
+	defer crashedFallback.Close()
+	recoveredFallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "healthy-stream" || !request.Stream {
+			t.Fatalf("unexpected recovered stream request: model=%s stream=%v", request.Model, request.Stream)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"# Stream Recovered\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer recoveredFallback.Close()
+
+	t.Setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+	t.Setenv("LLM_MODEL", "remote-ollama")
+	t.Setenv("LLM_FALLBACK_BASE_URLS", crashedFallback.URL+"/v1, "+recoveredFallback.URL+"/v1")
+	t.Setenv("LLM_FALLBACK_MODELS", "crashing-stream, healthy-stream")
+	t.Setenv("LLM_STREAM_FIRST_BYTE_TIMEOUT_MILLISECONDS", "200")
+
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	var chunks []string
+	draft, err := client.GenerateStream(context.Background(), "write", func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate stream: %v", err)
+	}
+	if draft != "# Stream Recovered" || strings.Join(chunks, "") != draft {
+		t.Fatalf("unexpected recovered stream: draft=%q chunks=%q", draft, strings.Join(chunks, ""))
+	}
+}
+
 func TestGenerateFallsBackWhenResponseContentIsEmpty(t *testing.T) {
 	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""}}]}`))
@@ -424,5 +497,20 @@ func TestGenerateFallsBackWhenResponseContentIsEmpty(t *testing.T) {
 	}
 	if draft != "# Non Empty" {
 		t.Fatalf("unexpected draft: %q", draft)
+	}
+}
+
+func crashConnectionHandler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("response writer does not support hijacking")
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			t.Fatalf("hijack connection: %v", err)
+		}
+		_ = conn.Close()
 	}
 }

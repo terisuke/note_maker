@@ -409,6 +409,93 @@ func TestArtifactCardsReadableContract(t *testing.T) {
 	})
 }
 
+func TestD2AccessibilityShellContract(t *testing.T) {
+	contract := loadStaticContract(t)
+
+	for selector, role := range map[string]string{
+		"#model-status":       "status",
+		"#transcript-status":  "status",
+		"#draft-status":       "status",
+		"#section-status":     "status",
+		"#loading":            "status",
+		"#error-message-area": "alert",
+		"#settings-drawer":    "dialog",
+		"#question-log":       "log",
+	} {
+		assertSelectorCount(t, contract.document, selector, 1)
+		if got, _ := contract.document.Find(selector).Attr("role"); got != role {
+			t.Fatalf("%s role = %q, want %q", selector, got, role)
+		}
+	}
+
+	if got, _ := contract.document.Find("#settings-drawer").Attr("aria-labelledby"); got != "settings-drawer-title" {
+		t.Fatalf("#settings-drawer aria-labelledby = %q, want settings-drawer-title", got)
+	}
+	if got, _ := contract.document.Find("body").Attr("class"); !strings.Contains(got, "settings-drawer-collapsed") {
+		t.Fatalf("body class = %q, want settings-drawer-collapsed by default", got)
+	}
+	if got, _ := contract.document.Find("#settings-drawer").Attr("aria-hidden"); got != "true" {
+		t.Fatalf("#settings-drawer aria-hidden = %q, want true by default", got)
+	}
+	if got, _ := contract.document.Find("#settings-drawer").Attr("tabindex"); got != "-1" {
+		t.Fatalf("#settings-drawer tabindex = %q, want -1", got)
+	}
+	if got, _ := contract.document.Find("#settings-drawer-toggle").Attr("aria-controls"); got != "settings-drawer" {
+		t.Fatalf("#settings-drawer-toggle aria-controls = %q, want settings-drawer", got)
+	}
+	if got, _ := contract.document.Find("#artifacts-rail-toggle").Attr("aria-controls"); got != "artifacts-rail" {
+		t.Fatalf("#artifacts-rail-toggle aria-controls = %q, want artifacts-rail", got)
+	}
+	assertSelectorCount(t, contract.document, ".draft-preview-card #preview-content", 1)
+
+	assertScriptContains(t, contract.script, []string{
+		"compactLayoutQuery",
+		"settingsDrawerModalOpen",
+		"trapSettingsDrawerFocus",
+		"event.shiftKey",
+		"drawerFocusableControls",
+		"const automatedBrowser = navigator.webdriver === true",
+		"setSettingsDrawer(true, false, false)",
+		"setSettingsDrawer(!document.body.classList.contains('settings-drawer-collapsed'), false, false)",
+		"setArtifactsRail(false)",
+		"el.artifactsRailToggle.addEventListener('click', toggleArtifactsRail)",
+		"focusTranscriptLog()",
+		"error.setAttribute('role', 'alert')",
+	})
+}
+
+func TestLiveInterviewRightRailContract(t *testing.T) {
+	contract := loadStaticContract(t)
+
+	assertScriptContains(t, contract.script, []string{
+		"renderLiveBriefAndDraft(data)",
+		"renderLiveDraftPreview(data.brief, 'ready')",
+		"el.briefResult.classList.remove('hidden')",
+		"el.draftResult.classList.remove('hidden')",
+	})
+	assertFunctionContains(t, contract.script, "renderLiveBriefAndDraft", []string{
+		"const brief = liveBriefFromInterview(data)",
+		"el.briefPreview.textContent = JSON.stringify(brief, null, 2)",
+		"renderBriefCard(brief)",
+		"renderLiveDraftPreview(brief, 'interview')",
+	})
+	assertFunctionContains(t, contract.script, "liveBriefFromInterview", []string{
+		"_live: true",
+		"session_id: data.session_id || state.sessionId",
+		"style_profile_id: state.profileId",
+		"theme: answerContentForQuestion(answers, 'theme')",
+		"custom_answers: answers.filter",
+		"deep_dives: answers.filter",
+	})
+	assertFunctionContains(t, contract.script, "renderLiveDraftPreview", []string{
+		"el.draftResult.classList.remove('hidden')",
+		"el.evaluationSummary.className = 'evaluation draft-preview-state'",
+		"el.previewContent.innerHTML = marked.parse(markdown)",
+		"status: mode === 'ready' ? 'ready_for_generation' : 'interview_preview'",
+		"setActiveTab('preview')",
+	})
+}
+
 func TestArtifactCardEditContract(t *testing.T) {
 	contract := loadStaticContract(t)
 

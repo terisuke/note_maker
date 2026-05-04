@@ -206,7 +206,7 @@ func TestSaveGeneratedDraftHistoryPersistsDraftAndRegeneration(t *testing.T) {
 		t.Fatalf("new generated draft: %v", err)
 	}
 
-	draftID := saveGeneratedDraftHistory(generateDraftRequest{
+	draftID := saveGeneratedDraftHistory(store, generateDraftRequest{
 		StyleProfileID: "style-save",
 		SessionID:      "session-save",
 	}, draftapp.GenerateResult{
@@ -239,7 +239,7 @@ func TestSaveGeneratedDraftHistoryPersistsDraftAndRegeneration(t *testing.T) {
 		t.Fatalf("saved draft = %#v ok=%v", savedDraft, ok)
 	}
 
-	regenerationID := saveSectionRegenerationHistory(savedDraft, true, regenerateDraftSectionRequest{
+	regenerationID := saveSectionRegenerationHistory(store, savedDraft, true, regenerateDraftSectionRequest{
 		SectionAnchor: "saved",
 	}, draftapp.RegenerateSectionResult{
 		Section:              draftapp.MarkdownSection{Anchor: "saved", Heading: "Saved"},

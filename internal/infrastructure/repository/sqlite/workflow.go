@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,8 @@ import (
 	sourcedomain "github.com/teradakousuke/note_maker/internal/domain/source"
 )
 
+var ErrScopedIDConflict = errors.New("record id belongs to another user")
+
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
@@ -32,7 +35,8 @@ const (
 // WorkflowStore persists workflow state in SQLite while keeping the memory
 // store's public behavior for current callers.
 type WorkflowStore struct {
-	db *sql.DB
+	db     *sql.DB
+	userID string
 }
 
 // ProjectRecord is the persisted project aggregate prepared for history UI.
@@ -118,7 +122,7 @@ func NewWorkflowStore(path string) (*WorkflowStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite workflow store: %w", err)
 	}
-	store := &WorkflowStore{db: db}
+	store := &WorkflowStore{db: db, userID: defaultUserID}
 	if err := store.configure(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -135,7 +139,7 @@ func NewWorkflowStoreDB(db *sql.DB) (*WorkflowStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("sqlite db is required")
 	}
-	store := &WorkflowStore{db: db}
+	store := &WorkflowStore{db: db, userID: defaultUserID}
 	if err := store.configure(); err != nil {
 		return nil, err
 	}
@@ -148,6 +152,38 @@ func NewWorkflowStoreDB(db *sql.DB) (*WorkflowStore, error) {
 // DB returns the underlying database handle for advanced queries in focused tests/tools.
 func (s *WorkflowStore) DB() *sql.DB {
 	return s.db
+}
+
+const defaultUserID = "local"
+
+// ForUser returns a shallow store view scoped to one authenticated principal.
+func (s *WorkflowStore) ForUser(userID string) *WorkflowStore {
+	if s == nil {
+		return nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = defaultUserID
+	}
+	return &WorkflowStore{db: s.db, userID: userID}
+}
+
+func (s *WorkflowStore) currentUserID() string {
+	if s == nil || strings.TrimSpace(s.userID) == "" {
+		return defaultUserID
+	}
+	return strings.TrimSpace(s.userID)
+}
+
+func ensureScopedWrite(result sql.Result, resourceType, resourceID, userID string) error {
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s %q for user %q", ErrScopedIDConflict, resourceType, resourceID, userID)
+	}
+	return nil
 }
 
 // Close releases the underlying SQLite connection pool.
@@ -245,9 +281,9 @@ func (s *WorkflowStore) SaveAuthorStyle(result authorstyleapp.AnalyzeResult) err
 		return fmt.Errorf("begin save author style: %w", err)
 	}
 	defer rollbackUnlessDone(tx)
-	_, err = tx.Exec(`
-INSERT INTO author_style_results (id, profile_id, guide_id, source_json, profile_json, guide_json, article_count, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	resultExec, err := tx.Exec(`
+INSERT INTO author_style_results (id, profile_id, guide_id, source_json, profile_json, guide_json, article_count, created_at, user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	profile_id = excluded.profile_id,
 	guide_id = excluded.guide_id,
@@ -255,12 +291,16 @@ ON CONFLICT(id) DO UPDATE SET
 	profile_json = excluded.profile_json,
 	guide_json = excluded.guide_json,
 	article_count = excluded.article_count,
-	created_at = excluded.created_at`,
-		result.ID, result.Profile.ID, result.Guide.ID, sourceJSON, profileJSON, guideJSON, result.ArticleCount, formatTime(createdAt))
+	created_at = excluded.created_at
+	WHERE author_style_results.user_id = excluded.user_id`,
+		result.ID, result.Profile.ID, result.Guide.ID, sourceJSON, profileJSON, guideJSON, result.ArticleCount, formatTime(createdAt), s.currentUserID())
 	if err != nil {
 		return fmt.Errorf("save author style: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM author_source_articles WHERE analysis_id = ?`, result.ID); err != nil {
+	if err := ensureScopedWrite(resultExec, "author_style_result", result.ID, s.currentUserID()); err != nil {
+		return fmt.Errorf("save author style: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM author_source_articles WHERE analysis_id = ? AND user_id = ?`, result.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("replace source articles: %w", err)
 	}
 	for i, article := range result.Source.Articles {
@@ -270,9 +310,9 @@ ON CONFLICT(id) DO UPDATE SET
 		}
 		contentHash := hashString(strings.Join([]string{article.ID, article.URL, article.Title}, "\x00"))
 		_, err = tx.Exec(`
-INSERT INTO author_source_articles (analysis_id, position, article_id, url, title, fetched_at, content_hash, source_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			result.ID, i, article.ID, article.URL, article.Title, formatTime(article.At), contentHash, articleJSON)
+INSERT INTO author_source_articles (analysis_id, position, article_id, url, title, fetched_at, content_hash, source_json, user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			result.ID, i, article.ID, article.URL, article.Title, formatTime(article.At), contentHash, articleJSON, s.currentUserID())
 		if err != nil {
 			return fmt.Errorf("save source article %d: %w", i, err)
 		}
@@ -290,9 +330,9 @@ func (s *WorkflowStore) GetAuthorStyle(id string) (authorstyleapp.AnalyzeResult,
 	err := s.db.QueryRow(`
 SELECT id, source_json, profile_json, guide_json, article_count, created_at
 FROM author_style_results
-WHERE id = ? OR profile_id = ? OR guide_id = ?
+WHERE user_id = ? AND (id = ? OR profile_id = ? OR guide_id = ?)
 ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, created_at DESC
-LIMIT 1`, id, id, id, id).Scan(&result.ID, &sourceJSON, &profileJSON, &guideJSON, &result.ArticleCount, &createdAt)
+LIMIT 1`, s.currentUserID(), id, id, id, id).Scan(&result.ID, &sourceJSON, &profileJSON, &guideJSON, &result.ArticleCount, &createdAt)
 	if err != nil {
 		return authorstyleapp.AnalyzeResult{}, false
 	}
@@ -314,7 +354,8 @@ func (s *WorkflowStore) ListAuthorStyles() ([]authorstyleapp.AnalyzeResult, erro
 	rows, err := s.db.Query(`
 SELECT id, source_json, profile_json, guide_json, article_count, created_at
 FROM author_style_results
-ORDER BY created_at DESC, id`)
+WHERE user_id = ?
+ORDER BY created_at DESC, id`, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list author styles: %w", err)
 	}
@@ -375,13 +416,13 @@ func (s *WorkflowStore) SaveSession(session briefdomain.ArticleBriefSession) err
 		return fmt.Errorf("begin save session: %w", err)
 	}
 	defer rollbackUnlessDone(tx)
-	_, err = tx.Exec(`
+	resultExec, err := tx.Exec(`
 INSERT INTO brief_sessions (
 	id, style_profile_id, persona_id, output_format_id, parent_session_id, phase,
 	completed, deep_dive_skipped, question_template_version, questions_json,
-	answers_json, created_at, updated_at
+	answers_json, created_at, updated_at, user_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	style_profile_id = excluded.style_profile_id,
 	persona_id = excluded.persona_id,
@@ -393,13 +434,17 @@ ON CONFLICT(id) DO UPDATE SET
 	question_template_version = excluded.question_template_version,
 	questions_json = excluded.questions_json,
 	answers_json = excluded.answers_json,
-	updated_at = excluded.updated_at`,
+	updated_at = excluded.updated_at
+	WHERE brief_sessions.user_id = excluded.user_id`,
 		session.ID, session.StyleProfileID, session.PersonaID, session.OutputFormatID, session.ParentSessionID, string(session.Phase),
-		boolInt(session.Completed), boolInt(session.DeepDiveSkipped), defaultTemplateVersion, questionsJSON, answersJSON, formatTime(now), formatTime(now))
+		boolInt(session.Completed), boolInt(session.DeepDiveSkipped), defaultTemplateVersion, questionsJSON, answersJSON, formatTime(now), formatTime(now), s.currentUserID())
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM brief_answers WHERE session_id = ?`, session.ID); err != nil {
+	if err := ensureScopedWrite(resultExec, "brief_session", session.ID, s.currentUserID()); err != nil {
+		return fmt.Errorf("save session: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM brief_answers WHERE session_id = ? AND user_id = ?`, session.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("replace brief answers: %w", err)
 	}
 	for i, answer := range session.Answers {
@@ -410,10 +455,10 @@ ON CONFLICT(id) DO UPDATE SET
 		_, err = tx.Exec(`
 INSERT INTO brief_answers (
 	session_id, position, question_id, content, flow_type,
-	target_question_id, follow_up_index, parent_answer_id, answer_json
+	target_question_id, follow_up_index, parent_answer_id, answer_json, user_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			session.ID, i, answer.QuestionID, answer.Content, string(answer.FlowType), answer.TargetQuestionID, answer.FollowUpIndex, "", answerJSON)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			session.ID, i, answer.QuestionID, answer.Content, string(answer.FlowType), answer.TargetQuestionID, answer.FollowUpIndex, "", answerJSON, s.currentUserID())
 		if err != nil {
 			return fmt.Errorf("save brief answer %d: %w", i, err)
 		}
@@ -433,7 +478,7 @@ func (s *WorkflowStore) GetSession(id string) (briefdomain.ArticleBriefSession, 
 SELECT id, style_profile_id, persona_id, output_format_id, parent_session_id, phase,
 	completed, deep_dive_skipped, questions_json, answers_json
 FROM brief_sessions
-WHERE id = ?`, id).Scan(&session.ID, &session.StyleProfileID, &session.PersonaID, &session.OutputFormatID, &session.ParentSessionID, &phase, &completed, &deepDiveSkipped, &questionsJSON, &answersJSON)
+WHERE id = ? AND user_id = ?`, id, s.currentUserID()).Scan(&session.ID, &session.StyleProfileID, &session.PersonaID, &session.OutputFormatID, &session.ParentSessionID, &phase, &completed, &deepDiveSkipped, &questionsJSON, &answersJSON)
 	if err != nil {
 		return briefdomain.ArticleBriefSession{}, false
 	}
@@ -454,7 +499,8 @@ func (s *WorkflowStore) ListSessions() ([]briefdomain.ArticleBriefSession, error
 	rows, err := s.db.Query(`
 SELECT id
 FROM brief_sessions
-ORDER BY updated_at DESC, id`)
+WHERE user_id = ?
+ORDER BY updated_at DESC, id`, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -503,45 +549,49 @@ func (s *WorkflowStore) SaveBrief(sessionID string, brief briefdomain.ArticleBri
 	previousErr := tx.QueryRow(`
 SELECT style_profile_id, persona_id, output_format_id, brief_json, created_at
 FROM briefs
-WHERE session_id = ?`, sessionID).Scan(&previousStyleProfileID, &previousPersonaID, &previousOutputFormatID, &previousBriefJSON, &previousCreatedAt)
+WHERE session_id = ? AND user_id = ?`, sessionID, s.currentUserID()).Scan(&previousStyleProfileID, &previousPersonaID, &previousOutputFormatID, &previousBriefJSON, &previousCreatedAt)
 	if previousErr != nil && previousErr != sql.ErrNoRows {
 		return fmt.Errorf("load previous brief: %w", previousErr)
 	}
 	var maxVersion int
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE session_id = ?`, sessionID).Scan(&maxVersion); err != nil {
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM brief_versions WHERE session_id = ? AND user_id = ?`, sessionID, s.currentUserID()).Scan(&maxVersion); err != nil {
 		return fmt.Errorf("load brief version: %w", err)
 	}
 	if maxVersion == 0 && previousErr == nil {
 		_, err = tx.Exec(`
 INSERT INTO brief_versions (
-	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at
+	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at, user_id
 )
-VALUES (?, 1, ?, ?, ?, ?, ?)`,
-			sessionID, previousStyleProfileID, previousPersonaID, previousOutputFormatID, previousBriefJSON, previousCreatedAt)
+VALUES (?, 1, ?, ?, ?, ?, ?, ?)`,
+			sessionID, previousStyleProfileID, previousPersonaID, previousOutputFormatID, previousBriefJSON, previousCreatedAt, s.currentUserID())
 		if err != nil {
 			return fmt.Errorf("seed previous brief version: %w", err)
 		}
 		maxVersion = 1
 	}
-	_, err = tx.Exec(`
-INSERT INTO briefs (session_id, style_profile_id, persona_id, output_format_id, brief_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+	resultExec, err := tx.Exec(`
+INSERT INTO briefs (session_id, style_profile_id, persona_id, output_format_id, brief_json, created_at, updated_at, user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
 	style_profile_id = excluded.style_profile_id,
 	persona_id = excluded.persona_id,
 	output_format_id = excluded.output_format_id,
 	brief_json = excluded.brief_json,
-	updated_at = excluded.updated_at`,
-		sessionID, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now), formatTime(now))
+	updated_at = excluded.updated_at
+	WHERE briefs.user_id = excluded.user_id`,
+		sessionID, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now), formatTime(now), s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save brief: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "brief", sessionID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save brief: %w", err)
 	}
 	_, err = tx.Exec(`
 INSERT INTO brief_versions (
-	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at
+	session_id, version, style_profile_id, persona_id, output_format_id, brief_json, created_at, user_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		sessionID, maxVersion+1, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, maxVersion+1, brief.StyleProfileID, brief.PersonaID, brief.OutputFormatID, briefJSON, formatTime(now), s.currentUserID())
 	if err != nil {
 		return fmt.Errorf("save brief version: %w", err)
 	}
@@ -555,7 +605,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 func (s *WorkflowStore) GetBrief(sessionID string) (briefdomain.ArticleBrief, bool) {
 	var brief briefdomain.ArticleBrief
 	var briefJSON string
-	err := s.db.QueryRow(`SELECT brief_json FROM briefs WHERE session_id = ?`, sessionID).Scan(&briefJSON)
+	err := s.db.QueryRow(`SELECT brief_json FROM briefs WHERE session_id = ? AND user_id = ?`, sessionID, s.currentUserID()).Scan(&briefJSON)
 	if err != nil {
 		return briefdomain.ArticleBrief{}, false
 	}
@@ -570,7 +620,8 @@ func (s *WorkflowStore) ListBriefs() (map[string]briefdomain.ArticleBrief, error
 	rows, err := s.db.Query(`
 SELECT session_id, brief_json
 FROM briefs
-ORDER BY updated_at DESC, session_id`)
+WHERE user_id = ?
+ORDER BY updated_at DESC, session_id`, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list briefs: %w", err)
 	}
@@ -599,7 +650,8 @@ func (s *WorkflowStore) ListBriefVersions(sessionID string) ([]briefdomain.Artic
 SELECT version, brief_json, created_at
 FROM brief_versions
 WHERE session_id = ?
-ORDER BY version`, sessionID)
+AND user_id = ?
+ORDER BY version`, sessionID, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list brief versions: %w", err)
 	}
@@ -637,16 +689,20 @@ func (s *WorkflowStore) SavePersona(persona personadomain.Persona) error {
 		return fmt.Errorf("encode persona: %w", err)
 	}
 	now := nowUTC()
-	_, err = s.db.Exec(`
-INSERT INTO custom_personas (id, display_name, default_format, persona_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+	resultExec, err := s.db.Exec(`
+INSERT INTO custom_personas (id, display_name, default_format, persona_json, created_at, updated_at, user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	display_name = excluded.display_name,
 	default_format = excluded.default_format,
 	persona_json = excluded.persona_json,
-	updated_at = excluded.updated_at`,
-		persona.ID, persona.DisplayName, persona.DefaultFormat, personaJSON, formatTime(now), formatTime(now))
+	updated_at = excluded.updated_at
+	WHERE custom_personas.user_id = excluded.user_id`,
+		persona.ID, persona.DisplayName, persona.DefaultFormat, personaJSON, formatTime(now), formatTime(now), s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save persona: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "custom_persona", persona.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save persona: %w", err)
 	}
 	return nil
@@ -655,7 +711,7 @@ ON CONFLICT(id) DO UPDATE SET
 // GetPersona returns a user-authored persona by ID.
 func (s *WorkflowStore) GetPersona(id string) (personadomain.Persona, bool) {
 	var personaJSON string
-	err := s.db.QueryRow(`SELECT persona_json FROM custom_personas WHERE id = ?`, strings.TrimSpace(id)).Scan(&personaJSON)
+	err := s.db.QueryRow(`SELECT persona_json FROM custom_personas WHERE id = ? AND user_id = ?`, strings.TrimSpace(id), s.currentUserID()).Scan(&personaJSON)
 	if err != nil {
 		return personadomain.Persona{}, false
 	}
@@ -671,7 +727,8 @@ func (s *WorkflowStore) ListPersonas() ([]personadomain.Persona, error) {
 	rows, err := s.db.Query(`
 SELECT persona_json
 FROM custom_personas
-ORDER BY created_at, id`)
+WHERE user_id = ?
+ORDER BY created_at, id`, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list personas: %w", err)
 	}
@@ -698,7 +755,7 @@ ORDER BY created_at, id`)
 func (s *WorkflowStore) DeletePersona(id string) error {
 	id = strings.TrimSpace(id)
 	var exists int
-	err := s.db.QueryRow(`SELECT 1 FROM custom_personas WHERE id = ?`, id).Scan(&exists)
+	err := s.db.QueryRow(`SELECT 1 FROM custom_personas WHERE id = ? AND user_id = ?`, id, s.currentUserID()).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return personadomain.ErrPersonaNotFound
 	}
@@ -712,7 +769,7 @@ func (s *WorkflowStore) DeletePersona(id string) error {
 	if referenced {
 		return personadomain.ErrPersonaReferenced
 	}
-	if _, err := s.db.Exec(`DELETE FROM custom_personas WHERE id = ?`, id); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM custom_personas WHERE id = ? AND user_id = ?`, id, s.currentUserID()); err != nil {
 		return fmt.Errorf("delete persona: %w", err)
 	}
 	return nil
@@ -720,15 +777,15 @@ func (s *WorkflowStore) DeletePersona(id string) error {
 
 func (s *WorkflowStore) personaReferenced(id string) (bool, error) {
 	checks := []string{
-		`SELECT 1 FROM brief_sessions WHERE persona_id = ? LIMIT 1`,
-		`SELECT 1 FROM briefs WHERE persona_id = ? LIMIT 1`,
-		`SELECT 1 FROM brief_versions WHERE persona_id = ? LIMIT 1`,
-		`SELECT 1 FROM articles WHERE persona_id = ? LIMIT 1`,
-		`SELECT 1 FROM drafts WHERE persona_id = ? LIMIT 1`,
+		`SELECT 1 FROM brief_sessions WHERE persona_id = ? AND user_id = ? LIMIT 1`,
+		`SELECT 1 FROM briefs WHERE persona_id = ? AND user_id = ? LIMIT 1`,
+		`SELECT 1 FROM brief_versions WHERE persona_id = ? AND user_id = ? LIMIT 1`,
+		`SELECT 1 FROM articles WHERE persona_id = ? AND user_id = ? LIMIT 1`,
+		`SELECT 1 FROM drafts WHERE persona_id = ? AND user_id = ? LIMIT 1`,
 	}
 	for _, query := range checks {
 		var exists int
-		err := s.db.QueryRow(query, id).Scan(&exists)
+		err := s.db.QueryRow(query, id, s.currentUserID()).Scan(&exists)
 		if err == nil {
 			return true, nil
 		}
@@ -753,15 +810,19 @@ func (s *WorkflowStore) SaveProject(project ProjectRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode project metadata: %w", err)
 	}
-	_, err = s.db.Exec(`
-INSERT INTO projects (id, name, created_at, updated_at, metadata_json)
-VALUES (?, ?, ?, ?, ?)
+	resultExec, err := s.db.Exec(`
+INSERT INTO projects (id, name, created_at, updated_at, metadata_json, user_id)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name = excluded.name,
 	updated_at = excluded.updated_at,
-	metadata_json = excluded.metadata_json`,
-		project.ID, project.Name, formatTime(project.CreatedAt), formatTime(project.UpdatedAt), metadataJSON)
+	metadata_json = excluded.metadata_json
+	WHERE projects.user_id = excluded.user_id`,
+		project.ID, project.Name, formatTime(project.CreatedAt), formatTime(project.UpdatedAt), metadataJSON, s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save project: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "project", project.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
 	return nil
@@ -771,7 +832,7 @@ ON CONFLICT(id) DO UPDATE SET
 func (s *WorkflowStore) GetProject(id string) (ProjectRecord, bool) {
 	var project ProjectRecord
 	var createdAt, updatedAt, metadataJSON string
-	err := s.db.QueryRow(`SELECT id, name, created_at, updated_at, metadata_json FROM projects WHERE id = ?`, id).
+	err := s.db.QueryRow(`SELECT id, name, created_at, updated_at, metadata_json FROM projects WHERE id = ? AND user_id = ?`, id, s.currentUserID()).
 		Scan(&project.ID, &project.Name, &createdAt, &updatedAt, &metadataJSON)
 	if err != nil {
 		return ProjectRecord{}, false
@@ -787,7 +848,8 @@ func (s *WorkflowStore) ListProjects() ([]ProjectRecord, error) {
 	rows, err := s.db.Query(`
 SELECT id, name, created_at, updated_at, metadata_json
 FROM projects
-ORDER BY updated_at DESC, id`)
+WHERE user_id = ?
+ORDER BY updated_at DESC, id`, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -827,12 +889,12 @@ func (s *WorkflowStore) SaveArticle(article ArticleRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode article metadata: %w", err)
 	}
-	_, err = s.db.Exec(`
+	resultExec, err := s.db.Exec(`
 INSERT INTO articles (
 	id, project_id, persona_id, output_format_id, brief_session_id,
-	current_draft_id, title, created_at, updated_at, metadata_json
+	current_draft_id, title, created_at, updated_at, metadata_json, user_id
 )
-VALUES (?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	project_id = excluded.project_id,
 	persona_id = excluded.persona_id,
@@ -841,10 +903,14 @@ ON CONFLICT(id) DO UPDATE SET
 	current_draft_id = excluded.current_draft_id,
 	title = excluded.title,
 	updated_at = excluded.updated_at,
-	metadata_json = excluded.metadata_json`,
+	metadata_json = excluded.metadata_json
+	WHERE articles.user_id = excluded.user_id`,
 		article.ID, article.ProjectID, article.PersonaID, article.OutputFormatID, article.BriefSessionID, article.CurrentDraftID,
-		article.Title, formatTime(article.CreatedAt), formatTime(article.UpdatedAt), metadataJSON)
+		article.Title, formatTime(article.CreatedAt), formatTime(article.UpdatedAt), metadataJSON, s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save article: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "article", article.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save article: %w", err)
 	}
 	return nil
@@ -858,7 +924,7 @@ func (s *WorkflowStore) GetArticle(id string) (ArticleRecord, bool) {
 	err := s.db.QueryRow(`
 SELECT id, project_id, persona_id, output_format_id, brief_session_id, current_draft_id,
 	title, created_at, updated_at, metadata_json
-FROM articles WHERE id = ?`, id).Scan(&article.ID, &projectID, &article.PersonaID, &article.OutputFormatID, &briefSessionID, &currentDraftID, &article.Title, &createdAt, &updatedAt, &metadataJSON)
+FROM articles WHERE id = ? AND user_id = ?`, id, s.currentUserID()).Scan(&article.ID, &projectID, &article.PersonaID, &article.OutputFormatID, &briefSessionID, &currentDraftID, &article.Title, &createdAt, &updatedAt, &metadataJSON)
 	if err != nil {
 		return ArticleRecord{}, false
 	}
@@ -877,7 +943,8 @@ func (s *WorkflowStore) ListArticlesByProject(projectID string) ([]ArticleRecord
 SELECT id
 FROM articles
 WHERE project_id = ?
-ORDER BY updated_at DESC, id`, projectID)
+AND user_id = ?
+ORDER BY updated_at DESC, id`, projectID, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list project articles: %w", err)
 	}
@@ -944,12 +1011,12 @@ func (s *WorkflowStore) SaveSourceSnapshot(snapshot SourceSnapshotRecord) error 
 		fetchedAt = nowUTC()
 	}
 	createdAt := defaultTime(snapshot.CreatedAt)
-	_, err = s.db.Exec(`
+	resultExec, err := s.db.Exec(`
 INSERT INTO source_selector_snapshots (
 	id, scope_type, scope_id, selector_json, profile_json, article_json,
-	content_hash, fetched_at, created_at
+	content_hash, fetched_at, created_at, user_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	scope_type = excluded.scope_type,
 	scope_id = excluded.scope_id,
@@ -957,9 +1024,13 @@ ON CONFLICT(id) DO UPDATE SET
 	profile_json = excluded.profile_json,
 	article_json = excluded.article_json,
 	content_hash = excluded.content_hash,
-	fetched_at = excluded.fetched_at`,
-		snapshot.ID, snapshot.ScopeType, snapshot.ScopeID, selectorJSON, nullString(profileJSON), nullString(articleJSON), contentHash, formatTime(fetchedAt), formatTime(createdAt))
+	fetched_at = excluded.fetched_at
+	WHERE source_selector_snapshots.user_id = excluded.user_id`,
+		snapshot.ID, snapshot.ScopeType, snapshot.ScopeID, selectorJSON, nullString(profileJSON), nullString(articleJSON), contentHash, formatTime(fetchedAt), formatTime(createdAt), s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save source snapshot: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "source_selector_snapshot", snapshot.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save source snapshot: %w", err)
 	}
 	return nil
@@ -971,7 +1042,8 @@ func (s *WorkflowStore) ListSourceSnapshots(scopeType, scopeID string) ([]Source
 SELECT id, scope_type, scope_id, selector_json, profile_json, article_json, content_hash, fetched_at, created_at
 FROM source_selector_snapshots
 WHERE scope_type = ? AND scope_id = ?
-ORDER BY created_at, id`, scopeType, scopeID)
+AND user_id = ?
+ORDER BY created_at, id`, scopeType, scopeID, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list source snapshots: %w", err)
 	}
@@ -1042,13 +1114,13 @@ func (s *WorkflowStore) SaveDraft(record DraftRecord) error {
 		return fmt.Errorf("begin save draft: %w", err)
 	}
 	defer rollbackUnlessDone(tx)
-	_, err = tx.Exec(`
+	resultExec, err := tx.Exec(`
 INSERT INTO drafts (
 	id, article_id, session_id, style_profile_id, persona_id, output_format_id,
 	version, markdown, content_hash, evaluation_json, verification_json,
-	question_template_version, created_at
+	question_template_version, created_at, user_id
 )
-VALUES (?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	article_id = excluded.article_id,
 	session_id = excluded.session_id,
@@ -1060,14 +1132,18 @@ ON CONFLICT(id) DO UPDATE SET
 	content_hash = excluded.content_hash,
 	evaluation_json = excluded.evaluation_json,
 	verification_json = excluded.verification_json,
-	question_template_version = excluded.question_template_version`,
+	question_template_version = excluded.question_template_version
+	WHERE drafts.user_id = excluded.user_id`,
 		record.ID, record.ArticleID, record.SessionID, record.StyleProfileID, record.PersonaID, record.OutputFormatID, record.Version, record.Markdown, record.ContentHash,
-		evaluationJSON, verificationJSON, record.QuestionTemplateVersion, formatTime(record.CreatedAt))
+		evaluationJSON, verificationJSON, record.QuestionTemplateVersion, formatTime(record.CreatedAt), s.currentUserID())
 	if err != nil {
 		return fmt.Errorf("save draft: %w", err)
 	}
+	if err := ensureScopedWrite(resultExec, "draft", record.ID, s.currentUserID()); err != nil {
+		return fmt.Errorf("save draft: %w", err)
+	}
 	if record.ArticleID != "" {
-		if _, err := tx.Exec(`UPDATE articles SET current_draft_id = ?, updated_at = ? WHERE id = ?`, record.ID, formatTime(record.CreatedAt), record.ArticleID); err != nil {
+		if _, err := tx.Exec(`UPDATE articles SET current_draft_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`, record.ID, formatTime(record.CreatedAt), record.ArticleID, s.currentUserID()); err != nil {
 			return fmt.Errorf("update article current draft: %w", err)
 		}
 	}
@@ -1086,7 +1162,7 @@ func (s *WorkflowStore) GetDraft(id string) (DraftRecord, bool) {
 SELECT id, article_id, session_id, style_profile_id, persona_id, output_format_id,
 	version, markdown, content_hash, evaluation_json, verification_json,
 	question_template_version, created_at
-FROM drafts WHERE id = ?`, id).Scan(&record.ID, &articleID, &record.SessionID, &record.StyleProfileID, &record.PersonaID, &record.OutputFormatID, &record.Version, &record.Markdown, &record.ContentHash, &evaluationJSON, &verificationJSON, &record.QuestionTemplateVersion, &createdAt)
+FROM drafts WHERE id = ? AND user_id = ?`, id, s.currentUserID()).Scan(&record.ID, &articleID, &record.SessionID, &record.StyleProfileID, &record.PersonaID, &record.OutputFormatID, &record.Version, &record.Markdown, &record.ContentHash, &evaluationJSON, &verificationJSON, &record.QuestionTemplateVersion, &createdAt)
 	if err != nil {
 		return DraftRecord{}, false
 	}
@@ -1102,7 +1178,8 @@ func (s *WorkflowStore) ListDrafts(articleID string) ([]DraftRecord, error) {
 	rows, err := s.db.Query(`
 SELECT id FROM drafts
 WHERE article_id = ?
-ORDER BY version, created_at, id`, articleID)
+AND user_id = ?
+ORDER BY version, created_at, id`, articleID, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list drafts: %w", err)
 	}
@@ -1154,13 +1231,13 @@ func (s *WorkflowStore) SaveSectionRegeneration(record SectionRegenerationRecord
 	if err != nil {
 		return fmt.Errorf("encode section regeneration verification: %w", err)
 	}
-	_, err = s.db.Exec(`
+	resultExec, err := s.db.Exec(`
 INSERT INTO section_regenerations (
 	id, draft_id, article_id, section_anchor, section_heading, base_version,
 	version, replacement_markdown, updated_draft_markdown, updated_content_hash,
-	verification_json, created_at
+	verification_json, created_at, user_id
 )
-VALUES (?, ?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, nullif(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	draft_id = excluded.draft_id,
 	article_id = excluded.article_id,
@@ -1171,10 +1248,14 @@ ON CONFLICT(id) DO UPDATE SET
 	replacement_markdown = excluded.replacement_markdown,
 	updated_draft_markdown = excluded.updated_draft_markdown,
 	updated_content_hash = excluded.updated_content_hash,
-	verification_json = excluded.verification_json`,
+	verification_json = excluded.verification_json
+	WHERE section_regenerations.user_id = excluded.user_id`,
 		record.ID, record.DraftID, record.ArticleID, record.SectionAnchor, record.SectionHeading, record.BaseVersion, record.Version,
-		record.ReplacementMarkdown, record.UpdatedDraftMarkdown, record.UpdatedContentHash, verificationJSON, formatTime(record.CreatedAt))
+		record.ReplacementMarkdown, record.UpdatedDraftMarkdown, record.UpdatedContentHash, verificationJSON, formatTime(record.CreatedAt), s.currentUserID())
 	if err != nil {
+		return fmt.Errorf("save section regeneration: %w", err)
+	}
+	if err := ensureScopedWrite(resultExec, "section_regeneration", record.ID, s.currentUserID()); err != nil {
 		return fmt.Errorf("save section regeneration: %w", err)
 	}
 	return nil
@@ -1188,7 +1269,8 @@ SELECT id, draft_id, article_id, section_anchor, section_heading, base_version,
 	verification_json, created_at
 FROM section_regenerations
 WHERE draft_id = ?
-ORDER BY version, created_at, id`, draftID)
+AND user_id = ?
+ORDER BY version, created_at, id`, draftID, s.currentUserID())
 	if err != nil {
 		return nil, fmt.Errorf("list section regenerations: %w", err)
 	}

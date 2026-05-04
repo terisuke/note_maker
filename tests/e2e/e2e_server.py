@@ -153,6 +153,10 @@ def _wait_until_ready(server: E2EServer, timeout_seconds: float) -> None:
             with urllib.request.urlopen(server.base_url + "/", timeout=0.5) as response:
                 if response.status < 500:
                     return
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                return
+            last_error = exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = exc
         time.sleep(0.1)

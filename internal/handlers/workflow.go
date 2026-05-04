@@ -22,6 +22,7 @@ import (
 	briefdomain "github.com/teradakousuke/note_maker/internal/domain/brief"
 	outputformat "github.com/teradakousuke/note_maker/internal/domain/format"
 	personadomain "github.com/teradakousuke/note_maker/internal/domain/persona"
+	authmw "github.com/teradakousuke/note_maker/internal/handlers/middleware"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/llamacpp"
 	"github.com/teradakousuke/note_maker/internal/infrastructure/repository/memory"
 	sqliterepo "github.com/teradakousuke/note_maker/internal/infrastructure/repository/sqlite"
@@ -67,6 +68,10 @@ type workflowHistoryWriter interface {
 	SaveSectionRegeneration(sqliterepo.SectionRegenerationRecord) error
 }
 
+type userScopedWorkflowStore interface {
+	ForUser(string) *sqliterepo.WorkflowStore
+}
+
 func newWorkflowStore() workflowStoreBackend {
 	config := resolveWorkflowStorageConfig()
 	setActiveWorkflowStorage(config)
@@ -84,6 +89,25 @@ func newWorkflowStore() workflowStoreBackend {
 		return store
 	}
 	return memory.NewWorkflowStore()
+}
+
+func workflowStoreForRequest(r *http.Request) workflowStoreBackend {
+	if scoped, ok := workflowStore.(userScopedWorkflowStore); ok {
+		return scoped.ForUser(authmw.Principal(r.Context()))
+	}
+	return workflowStore
+}
+
+func workflowHistoryReaderForRequest(r *http.Request) (workflowHistoryReader, bool) {
+	store := workflowStoreForRequest(r)
+	reader, ok := store.(workflowHistoryReader)
+	return reader, ok
+}
+
+func workflowHistoryWriterForRequest(r *http.Request) (workflowHistoryWriter, bool) {
+	store := workflowStoreForRequest(r)
+	writer, ok := store.(workflowHistoryWriter)
+	return writer, ok
 }
 
 type analyzeAuthorStyleRequest struct {
@@ -569,7 +593,7 @@ func draftGenerationErrorPayload(result draftapp.GenerateResult, err error, code
 
 // ListPersonasHandler returns built-in and user-authored writing personas.
 func ListPersonasHandler(w http.ResponseWriter, r *http.Request) {
-	personas, err := listPersonas()
+	personas, err := listPersonas(workflowStoreForRequest(r))
 	if err != nil {
 		respondWithError(w, "PERSONA_LIST_FAILED", "Failed to list personas", err.Error(), http.StatusInternalServerError)
 		return
@@ -579,6 +603,7 @@ func ListPersonasHandler(w http.ResponseWriter, r *http.Request) {
 
 // CreatePersonaHandler stores a user-authored writing persona.
 func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req createPersonaRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
@@ -606,7 +631,7 @@ func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "PERSONA_ID_RESERVED", "Persona id is reserved by a built-in persona", persona.ID, http.StatusConflict)
 		return
 	}
-	if _, ok := workflowStore.GetPersona(persona.ID); ok {
+	if _, ok := store.GetPersona(persona.ID); ok {
 		respondWithError(w, "PERSONA_ALREADY_EXISTS", "Persona already exists", persona.ID, http.StatusConflict)
 		return
 	}
@@ -614,7 +639,11 @@ func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", persona.DefaultFormat, http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SavePersona(persona); err != nil {
+	if err := store.SavePersona(persona); err != nil {
+		if errors.Is(err, sqliterepo.ErrScopedIDConflict) {
+			respondWithError(w, "PERSONA_ALREADY_EXISTS_FOR_ANOTHER_USER", "Persona id is already used by another user", persona.ID, http.StatusConflict)
+			return
+		}
 		respondWithError(w, "PERSONA_SAVE_FAILED", "Failed to save persona", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -623,12 +652,13 @@ func CreatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 
 // UpdatePersonaHandler updates a user-authored writing persona while preserving its ID.
 func UpdatePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	personaID := pathValue(r, "id")
 	if _, ok := personadomain.DefaultRegistry().Get(personaID); ok {
 		respondWithError(w, "PERSONA_ID_RESERVED", "Built-in personas cannot be updated", personaID, http.StatusConflict)
 		return
 	}
-	persona, ok := workflowStore.GetPersona(personaID)
+	persona, ok := store.GetPersona(personaID)
 	if !ok {
 		respondWithError(w, "PERSONA_NOT_FOUND", "Persona was not found", personaID, http.StatusNotFound)
 		return
@@ -671,7 +701,11 @@ func UpdatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "UNKNOWN_OUTPUT_FORMAT", "Output format was not found", persona.DefaultFormat, http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SavePersona(persona); err != nil {
+	if err := store.SavePersona(persona); err != nil {
+		if errors.Is(err, sqliterepo.ErrScopedIDConflict) {
+			respondWithError(w, "PERSONA_ALREADY_EXISTS_FOR_ANOTHER_USER", "Persona id is already used by another user", persona.ID, http.StatusConflict)
+			return
+		}
 		respondWithError(w, "PERSONA_SAVE_FAILED", "Failed to save persona", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -680,12 +714,13 @@ func UpdatePersonaHandler(w http.ResponseWriter, r *http.Request) {
 
 // DeletePersonaHandler removes a custom persona only when it is not referenced by history.
 func DeletePersonaHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	personaID := pathValue(r, "id")
 	if _, ok := personadomain.DefaultRegistry().Get(personaID); ok {
 		respondWithError(w, "PERSONA_ID_RESERVED", "Built-in personas cannot be deleted", personaID, http.StatusConflict)
 		return
 	}
-	if err := workflowStore.DeletePersona(personaID); err != nil {
+	if err := store.DeletePersona(personaID); err != nil {
 		switch {
 		case errors.Is(err, personadomain.ErrPersonaNotFound):
 			respondWithError(w, "PERSONA_NOT_FOUND", "Persona was not found", personaID, http.StatusNotFound)
@@ -706,7 +741,8 @@ func ListFormatsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetBriefSessionTemplateHandler returns the composed fixed-question template.
 func GetBriefSessionTemplateHandler(w http.ResponseWriter, r *http.Request) {
-	persona, ok := resolvePersona(r.URL.Query().Get("persona_id"))
+	store := workflowStoreForRequest(r)
+	persona, ok := resolvePersona(store, r.URL.Query().Get("persona_id"))
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", r.URL.Query().Get("persona_id"), http.StatusBadRequest)
 		return
@@ -729,12 +765,13 @@ func GetBriefSessionTemplateHandler(w http.ResponseWriter, r *http.Request) {
 
 // SeedAuthorStyleHandler stores a practical persona preset as a style guide.
 func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req seedAuthorStyleRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	persona, ok := resolvePersona(req.PersonaID)
+	persona, ok := resolvePersona(store, req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -753,7 +790,7 @@ func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "AUTHOR_STYLE_PRESET_FAILED", "Failed to build persona preset", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := workflowStore.SaveAuthorStyle(result); err != nil {
+	if err := store.SaveAuthorStyle(result); err != nil {
 		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -762,13 +799,14 @@ func SeedAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 
 // AnalyzeAuthorStyleHandler analyzes a writing source and stores the resulting style assets.
 func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req analyzeAuthorStyleRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
 
-	persona, ok := resolvePersona(req.PersonaID)
+	persona, ok := resolvePersona(store, req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -794,14 +832,14 @@ func AnalyzeAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "AUTHOR_STYLE_ANALYSIS_FAILED", "Failed to analyze author style", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := workflowStore.SaveAuthorStyle(result); err != nil {
+	if err := store.SaveAuthorStyle(result); err != nil {
 		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if strings.TrimSpace(req.StyleModel) != "" {
 		if refined, err := refineStyleGuideWithModel(r.Context(), result, req.StyleModel); err == nil {
 			result.Guide.Markdown = refined
-			_ = workflowStore.SaveAuthorStyle(result)
+			_ = store.SaveAuthorStyle(result)
 		}
 	}
 
@@ -886,17 +924,23 @@ func findPersonaSource(persona personadomain.Persona, kind string) (personadomai
 	return personadomain.AuthorSource{}, false
 }
 
-func resolvePersona(id string) (personadomain.Persona, bool) {
+func resolvePersona(store workflowStoreBackend, id string) (personadomain.Persona, bool) {
 	normalized := personadomain.NormalizeID(id)
 	if persona, ok := personadomain.DefaultRegistry().Get(normalized); ok {
 		return persona, true
 	}
-	return workflowStore.GetPersona(normalized)
+	if store == nil {
+		store = workflowStore
+	}
+	return store.GetPersona(normalized)
 }
 
-func listPersonas() ([]personadomain.Persona, error) {
+func listPersonas(store workflowStoreBackend) ([]personadomain.Persona, error) {
+	if store == nil {
+		store = workflowStore
+	}
 	builtIns := personadomain.DefaultRegistry().List()
-	custom, err := workflowStore.ListPersonas()
+	custom, err := store.ListPersonas()
 	if err != nil {
 		return nil, err
 	}
@@ -1014,7 +1058,8 @@ func buildPresetAuthorStyle(persona personadomain.Persona, format outputformat.O
 
 // ListAuthorStylesHandler returns stored style-guide artifacts for picker UIs.
 func ListAuthorStylesHandler(w http.ResponseWriter, r *http.Request) {
-	results, err := workflowStore.ListAuthorStyles()
+	store := workflowStoreForRequest(r)
+	results, err := store.ListAuthorStyles()
 	if err != nil {
 		respondWithError(w, "AUTHOR_STYLE_LIST_FAILED", "Failed to list author styles", err.Error(), http.StatusInternalServerError)
 		return
@@ -1027,8 +1072,9 @@ func ListAuthorStylesHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetAuthorStyleHandler returns a stored author style analysis result.
 func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	id := pathValue(r, "id")
-	result, ok := workflowStore.GetAuthorStyle(id)
+	result, ok := store.GetAuthorStyle(id)
 	if !ok {
 		respondWithError(w, "AUTHOR_STYLE_NOT_FOUND", "Author style was not found", "", http.StatusNotFound)
 		return
@@ -1038,12 +1084,13 @@ func GetAuthorStyleHandler(w http.ResponseWriter, r *http.Request) {
 
 // CreateStyleGuideVersionHandler stores an edited style guide as a new version.
 func CreateStyleGuideVersionHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req updateStyleGuideRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	base, ok := workflowStore.GetAuthorStyle(pathValue(r, "id"))
+	base, ok := store.GetAuthorStyle(pathValue(r, "id"))
 	if !ok {
 		respondWithError(w, "AUTHOR_STYLE_NOT_FOUND", "Author style was not found", "", http.StatusNotFound)
 		return
@@ -1053,7 +1100,7 @@ func CreateStyleGuideVersionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "INVALID_STYLE_GUIDE_VERSION", "Invalid style guide version", err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SaveAuthorStyle(updated); err != nil {
+	if err := store.SaveAuthorStyle(updated); err != nil {
 		respondWithError(w, "AUTHOR_STYLE_SAVE_FAILED", "Failed to save author style", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1062,12 +1109,13 @@ func CreateStyleGuideVersionHandler(w http.ResponseWriter, r *http.Request) {
 
 // ListBriefSessionsHandler returns saved interview sessions for project history UIs.
 func ListBriefSessionsHandler(w http.ResponseWriter, r *http.Request) {
-	sessions, err := workflowStore.ListSessions()
+	store := workflowStoreForRequest(r)
+	sessions, err := store.ListSessions()
 	if err != nil {
 		respondWithError(w, "BRIEF_SESSION_LIST_FAILED", "Failed to list brief sessions", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	briefs, err := workflowStore.ListBriefs()
+	briefs, err := store.ListBriefs()
 	if err != nil {
 		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
 		return
@@ -1080,6 +1128,7 @@ func ListBriefSessionsHandler(w http.ResponseWriter, r *http.Request) {
 
 // CreateBriefSessionHandler starts the fixed-question interview.
 func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req createBriefSessionRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
@@ -1089,14 +1138,14 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "MISSING_REQUIRED_FIELD", "style_profile_id is required", "", http.StatusBadRequest)
 		return
 	}
-	if _, _, ok := workflowStore.GetProfileAndGuide(req.StyleProfileID); !ok {
+	if _, _, ok := store.GetProfileAndGuide(req.StyleProfileID); !ok {
 		respondWithError(w, "AUTHOR_STYLE_NOT_FOUND", "Author style was not found", "", http.StatusNotFound)
 		return
 	}
 	if strings.TrimSpace(req.SessionID) == "" {
 		req.SessionID = newID("abs")
 	}
-	persona, ok := resolvePersona(req.PersonaID)
+	persona, ok := resolvePersona(store, req.PersonaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", req.PersonaID, http.StatusBadRequest)
 		return
@@ -1122,7 +1171,7 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "BRIEF_SESSION_CREATE_FAILED", "Failed to create brief session", err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SaveSession(result.Session); err != nil {
+	if err := store.SaveSession(result.Session); err != nil {
 		respondWithError(w, "BRIEF_SESSION_SAVE_FAILED", "Failed to save brief session", err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1131,7 +1180,8 @@ func CreateBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetBriefSessionHandler returns the current interview state.
 func GetBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
-	session, ok := workflowStore.GetSession(pathValue(r, "id"))
+	store := workflowStoreForRequest(r)
+	session, ok := store.GetSession(pathValue(r, "id"))
 	if !ok {
 		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
 		return
@@ -1148,36 +1198,39 @@ func GetBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 // ListBriefArtifactsHandler returns completed brief artifacts for reuse.
 func ListBriefArtifactsHandler(w http.ResponseWriter, r *http.Request) {
-	briefs, err := workflowStore.ListBriefs()
+	store := workflowStoreForRequest(r)
+	briefs, err := store.ListBriefs()
 	if err != nil {
 		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
 		return
 	}
 	respondWithJSON(w, http.StatusOK, briefArtifactListResponse{
-		Briefs: listBriefArtifactResponses(briefs),
+		Briefs: listBriefArtifactResponses(store, briefs),
 	})
 }
 
 // GetBriefArtifactHandler returns one completed brief artifact by session ID.
 func GetBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	sessionID := pathValue(r, "id")
-	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	articleBrief, ok := store.GetBrief(sessionID)
 	if !ok {
 		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
 		return
 	}
-	session, sessionOK := workflowStore.GetSession(sessionID)
+	session, sessionOK := store.GetSession(sessionID)
 	respondWithJSON(w, http.StatusOK, toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK))
 }
 
 // ListBriefVersionsHandler returns persisted versions for one completed brief artifact.
 func ListBriefVersionsHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	sessionID := pathValue(r, "id")
-	if _, ok := workflowStore.GetBrief(sessionID); !ok {
+	if _, ok := store.GetBrief(sessionID); !ok {
 		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
 		return
 	}
-	versions, err := workflowStore.ListBriefVersions(sessionID)
+	versions, err := store.ListBriefVersions(sessionID)
 	if err != nil {
 		respondWithError(w, "BRIEF_VERSION_LIST_FAILED", "Failed to list brief versions", err.Error(), http.StatusInternalServerError)
 		return
@@ -1191,8 +1244,9 @@ func ListBriefVersionsHandler(w http.ResponseWriter, r *http.Request) {
 
 // UpdateBriefArtifactHandler updates the saved brief artifact without rewriting session answers.
 func UpdateBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	sessionID := pathValue(r, "id")
-	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	articleBrief, ok := store.GetBrief(sessionID)
 	if !ok {
 		respondWithError(w, "BRIEF_NOT_FOUND", "Brief was not found", sessionID, http.StatusNotFound)
 		return
@@ -1202,15 +1256,15 @@ func UpdateBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := applyBriefUpdateFields(&articleBrief, fields); err != nil {
+	if err := applyBriefUpdateFields(store, &articleBrief, fields); err != nil {
 		respondWithError(w, "INVALID_BRIEF_UPDATE", "Invalid brief update", err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SaveBrief(sessionID, articleBrief); err != nil {
+	if err := store.SaveBrief(sessionID, articleBrief); err != nil {
 		respondWithError(w, "BRIEF_SAVE_FAILED", "Failed to save article brief", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	session, sessionOK := workflowStore.GetSession(sessionID)
+	session, sessionOK := store.GetSession(sessionID)
 	respondWithJSON(w, http.StatusOK, updateBriefResponse{
 		Brief: toBriefArtifactResponse(sessionID, articleBrief, session, sessionOK),
 	})
@@ -1218,17 +1272,18 @@ func UpdateBriefArtifactHandler(w http.ResponseWriter, r *http.Request) {
 
 // ListWorkflowArtifactsHandler returns all currently reusable workflow artifacts.
 func ListWorkflowArtifactsHandler(w http.ResponseWriter, r *http.Request) {
-	styles, err := workflowStore.ListAuthorStyles()
+	store := workflowStoreForRequest(r)
+	styles, err := store.ListAuthorStyles()
 	if err != nil {
 		respondWithError(w, "AUTHOR_STYLE_LIST_FAILED", "Failed to list author styles", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	briefs, err := workflowStore.ListBriefs()
+	briefs, err := store.ListBriefs()
 	if err != nil {
 		respondWithError(w, "BRIEF_LIST_FAILED", "Failed to list completed briefs", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sessions, err := workflowStore.ListSessions()
+	sessions, err := store.ListSessions()
 	if err != nil {
 		respondWithError(w, "BRIEF_SESSION_LIST_FAILED", "Failed to list brief sessions", err.Error(), http.StatusInternalServerError)
 		return
@@ -1238,10 +1293,10 @@ func ListWorkflowArtifactsHandler(w http.ResponseWriter, r *http.Request) {
 	response := workflowArtifactsResponse{
 		StyleGuides: toStyleGuideArtifactResponses(styles),
 		Sessions:    toBriefSessionSummaryResponses(sessions, briefs),
-		Briefs:      listBriefArtifactResponses(briefs),
+		Briefs:      listBriefArtifactResponses(store, briefs),
 	}
-	if store, ok := workflowStore.(workflowHistoryReader); ok {
-		if projects, articles, drafts, err := listWorkflowHistoryResponses(store); err != nil {
+	if historyStore, ok := workflowHistoryReaderForRequest(r); ok {
+		if projects, articles, drafts, err := listWorkflowHistoryResponses(historyStore); err != nil {
 			respondWithError(w, "WORKFLOW_HISTORY_LIST_FAILED", "Failed to list project history", err.Error(), http.StatusInternalServerError)
 			return
 		} else {
@@ -1255,7 +1310,7 @@ func ListWorkflowArtifactsHandler(w http.ResponseWriter, r *http.Request) {
 
 // ListProjectsHandler returns SQLite-backed project history when available.
 func ListProjectsHandler(w http.ResponseWriter, r *http.Request) {
-	store, ok := workflowStore.(workflowHistoryReader)
+	store, ok := workflowHistoryReaderForRequest(r)
 	if !ok {
 		respondWithJSON(w, http.StatusOK, projectHistoryListResponse{Projects: []projectHistoryResponse{}})
 		return
@@ -1270,7 +1325,7 @@ func ListProjectsHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetProjectHandler returns one project with its article and source history.
 func GetProjectHandler(w http.ResponseWriter, r *http.Request) {
-	store, ok := workflowStore.(workflowHistoryReader)
+	store, ok := workflowHistoryReaderForRequest(r)
 	if !ok {
 		respondWithError(w, "PROJECT_NOT_FOUND", "Project was not found", "", http.StatusNotFound)
 		return
@@ -1312,7 +1367,7 @@ func GetProjectHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetArticleHandler returns one article with draft versions and source history.
 func GetArticleHandler(w http.ResponseWriter, r *http.Request) {
-	store, ok := workflowStore.(workflowHistoryReader)
+	store, ok := workflowHistoryReaderForRequest(r)
 	if !ok {
 		respondWithError(w, "ARTICLE_NOT_FOUND", "Article was not found", "", http.StatusNotFound)
 		return
@@ -1337,7 +1392,7 @@ func GetArticleHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetDraftHandler returns one draft with regeneration history.
 func GetDraftHandler(w http.ResponseWriter, r *http.Request) {
-	store, ok := workflowStore.(workflowHistoryReader)
+	store, ok := workflowHistoryReaderForRequest(r)
 	if !ok {
 		respondWithError(w, "DRAFT_NOT_FOUND", "Draft was not found", "", http.StatusNotFound)
 		return
@@ -1362,28 +1417,29 @@ func GetDraftHandler(w http.ResponseWriter, r *http.Request) {
 
 // EditBriefAnswerHandler creates a new child session from an edited past answer.
 func EditBriefAnswerHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req editBriefAnswerRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	session, ok := workflowStore.GetSession(pathValue(r, "id"))
+	session, ok := store.GetSession(pathValue(r, "id"))
 	if !ok {
 		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
 		return
 	}
-	service := newBriefInterviewServiceForSession(session, req.BriefModel)
+	service := newBriefInterviewServiceForSession(store, session, req.BriefModel)
 	result, err := service.ForkAnswer(r.Context(), session, newID("abs"), pathValue(r, "answer_id"), req.Content)
 	if err != nil {
 		respondWithError(w, "BRIEF_ANSWER_EDIT_FAILED", "Failed to edit brief answer", err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := workflowStore.SaveSession(result.Session); err != nil {
+	if err := store.SaveSession(result.Session); err != nil {
 		respondWithError(w, "BRIEF_SESSION_SAVE_FAILED", "Failed to save brief session", err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if result.Completed && result.Brief != nil {
-		if err := workflowStore.SaveBrief(result.Session.ID, *result.Brief); err != nil {
+		if err := store.SaveBrief(result.Session.ID, *result.Brief); err != nil {
 			respondWithError(w, "BRIEF_SAVE_FAILED", "Failed to save article brief", err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1393,18 +1449,19 @@ func EditBriefAnswerHandler(w http.ResponseWriter, r *http.Request) {
 
 // AnswerBriefSessionHandler records one interview answer and returns the next question.
 func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req answerBriefSessionRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	session, ok := workflowStore.GetSession(pathValue(r, "id"))
+	session, ok := store.GetSession(pathValue(r, "id"))
 	if !ok {
 		respondWithError(w, "BRIEF_SESSION_NOT_FOUND", "Brief session was not found", "", http.StatusNotFound)
 		return
 	}
 	if wantsEventStream(r) && !req.SkipDeepDive {
-		streamAnswerBriefSession(w, r, req, session)
+		streamAnswerBriefSession(w, r, store, req, session)
 		return
 	}
 
@@ -1418,7 +1475,7 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		result = briefapp.InterviewResult{Session: session, Brief: &brief, Completed: true}
 	} else {
-		service := newBriefInterviewServiceForSession(session, req.BriefModel)
+		service := newBriefInterviewServiceForSession(store, session, req.BriefModel)
 		next, err := service.Answer(r.Context(), session, req.Content)
 		if err != nil {
 			respondWithError(w, "BRIEF_ANSWER_FAILED", "Failed to record brief answer", err.Error(), http.StatusBadRequest)
@@ -1426,12 +1483,12 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		result = next
 	}
-	if err := workflowStore.SaveSession(result.Session); err != nil {
+	if err := store.SaveSession(result.Session); err != nil {
 		respondWithError(w, "BRIEF_SESSION_SAVE_FAILED", "Failed to save brief session", err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if result.Completed && result.Brief != nil {
-		if err := workflowStore.SaveBrief(result.Session.ID, *result.Brief); err != nil {
+		if err := store.SaveBrief(result.Session.ID, *result.Brief); err != nil {
 			respondWithError(w, "BRIEF_SAVE_FAILED", "Failed to save article brief", err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1439,13 +1496,13 @@ func AnswerBriefSessionHandler(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, toBriefSessionResponse(result))
 }
 
-func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, req answerBriefSessionRequest, session briefdomain.ArticleBriefSession) {
+func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, store workflowStoreBackend, req answerBriefSessionRequest, session briefdomain.ArticleBriefSession) {
 	stream, ok := newSSEStream(w)
 	if !ok {
 		respondWithError(w, "STREAMING_UNSUPPORTED", "Streaming is not supported by this response writer", "", http.StatusInternalServerError)
 		return
 	}
-	service := newBriefInterviewServiceForSession(session, req.BriefModel)
+	service := newBriefInterviewServiceForSession(store, session, req.BriefModel)
 	model := strings.TrimSpace(req.BriefModel)
 	stopHeartbeat := stream.StartHeartbeat(r.Context(), "follow_up", "", model, 10*time.Second)
 	defer stopHeartbeat()
@@ -1461,12 +1518,12 @@ func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, req answer
 		_ = stream.Send("error", streamError{Code: "BRIEF_ANSWER_FAILED", Message: "Failed to record brief answer", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 		return
 	}
-	if err := workflowStore.SaveSession(result.Session); err != nil {
+	if err := store.SaveSession(result.Session); err != nil {
 		_ = stream.Send("error", streamError{Code: "BRIEF_SESSION_SAVE_FAILED", Message: "Failed to save brief session", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 		return
 	}
 	if result.Completed && result.Brief != nil {
-		if err := workflowStore.SaveBrief(result.Session.ID, *result.Brief); err != nil {
+		if err := store.SaveBrief(result.Session.ID, *result.Brief); err != nil {
 			_ = stream.Send("error", streamError{Code: "BRIEF_SAVE_FAILED", Message: "Failed to save article brief", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 			return
 		}
@@ -1477,19 +1534,20 @@ func streamAnswerBriefSession(w http.ResponseWriter, r *http.Request, req answer
 
 // GenerateDraftHandler generates a draft from a stored style guide and completed brief.
 func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req generateDraftRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
-	profile, guide, ok := workflowStore.GetProfileAndGuide(req.StyleProfileID)
+	profile, guide, ok := store.GetProfileAndGuide(req.StyleProfileID)
 	if !ok {
 		respondWithError(w, "AUTHOR_STYLE_NOT_FOUND", "Author style was not found", "", http.StatusNotFound)
 		return
 	}
-	articleBrief, ok := workflowStore.GetBrief(req.SessionID)
+	articleBrief, ok := store.GetBrief(req.SessionID)
 	if !ok {
-		session, sessionOK := workflowStore.GetSession(req.SessionID)
+		session, sessionOK := store.GetSession(req.SessionID)
 		if !sessionOK || !session.Completed {
 			respondWithError(w, "BRIEF_NOT_FOUND", "Completed article brief was not found", "", http.StatusBadRequest)
 			return
@@ -1504,7 +1562,7 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 	if formatID == "" {
 		formatID = articleBrief.OutputFormatID
 	}
-	persona, ok := resolvePersona(personaID)
+	persona, ok := resolvePersona(store, personaID)
 	if !ok {
 		respondWithError(w, "UNKNOWN_PERSONA", "Persona was not found", personaID, http.StatusBadRequest)
 		return
@@ -1521,7 +1579,7 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 	articleBrief.OutputFormatID = format.ID
 
 	if wantsEventStream(r) {
-		streamGenerateDraft(w, r, req, profile, guide, articleBrief, persona, format)
+		streamGenerateDraft(w, r, store, req, profile, guide, articleBrief, persona, format)
 		return
 	}
 
@@ -1550,11 +1608,11 @@ func GenerateDraftHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "DRAFT_GENERATION_FAILED", "Failed to generate draft", err.Error(), http.StatusInternalServerError)
 		return
 	}
-	draftPath := saveGeneratedDraftHistory(req, result, articleBrief, persona, format)
+	draftPath := saveGeneratedDraftHistory(store, req, result, articleBrief, persona, format)
 	respondWithJSON(w, http.StatusOK, toGenerateDraftResponse(result, draftPath))
 }
 
-func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDraftRequest, profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) {
+func streamGenerateDraft(w http.ResponseWriter, r *http.Request, store workflowStoreBackend, req generateDraftRequest, profile authordomain.AuthorStyleProfile, guide authordomain.WritingStyleGuide, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) {
 	stream, ok := newSSEStream(w)
 	if !ok {
 		respondWithError(w, "STREAMING_UNSUPPORTED", "Streaming is not supported by this response writer", "", http.StatusInternalServerError)
@@ -1607,20 +1665,21 @@ func streamGenerateDraft(w http.ResponseWriter, r *http.Request, req generateDra
 		_ = stream.Send("error", streamError{Code: "DRAFT_GENERATION_FAILED", Message: "Failed to generate draft", Detail: err.Error(), ElapsedMS: stream.ElapsedMS()})
 		return
 	}
-	draftPath := saveGeneratedDraftHistory(req, result, articleBrief, persona, format)
+	draftPath := saveGeneratedDraftHistory(store, req, result, articleBrief, persona, format)
 	_ = stream.Send("result", toGenerateDraftResponse(result, draftPath))
 	_ = stream.Send("done", streamStatus{Status: "completed", Phase: "draft", Endpoint: endpoint, Model: model, StartedAt: stream.started.Format(time.RFC3339), ElapsedMS: stream.ElapsedMS(), Runes: len([]rune(result.Draft.Markdown())), Score: result.Evaluation.Comparison.Score})
 }
 
 // RegenerateDraftSectionHandler rewrites only one h2 subtree of the current draft.
 func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
+	store := workflowStoreForRequest(r)
 	var req regenerateDraftSectionRequest
 	if err := decodeJSONRequest(r, &req); err != nil {
 		respondWithError(w, "INVALID_REQUEST_FORMAT", "Invalid request body", "", http.StatusBadRequest)
 		return
 	}
 	pathID := pathValue(r, "id")
-	baseDraft, hasBaseDraft := historyDraftFromPath(pathID)
+	baseDraft, hasBaseDraft := historyDraftFromPath(store, pathID)
 	if hasBaseDraft {
 		if strings.TrimSpace(req.SessionID) == "" {
 			req.SessionID = baseDraft.SessionID
@@ -1641,7 +1700,7 @@ func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.SessionID) == "" {
 		req.SessionID = pathID
 	}
-	profile, guide, articleBrief, persona, format, ok := draftContextFromRequest(req.StyleProfileID, req.SessionID, req.PersonaID, req.OutputFormatID)
+	profile, guide, articleBrief, persona, format, ok := draftContextFromRequest(store, req.StyleProfileID, req.SessionID, req.PersonaID, req.OutputFormatID)
 	if !ok {
 		respondWithError(w, "DRAFT_CONTEXT_NOT_FOUND", "Draft context was not found", "", http.StatusBadRequest)
 		return
@@ -1667,7 +1726,7 @@ func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, "DRAFT_SECTION_REGENERATE_FAILED", "Failed to regenerate draft section", err.Error(), http.StatusBadRequest)
 		return
 	}
-	regenerationID := saveSectionRegenerationHistory(baseDraft, hasBaseDraft, req, result)
+	regenerationID := saveSectionRegenerationHistory(store, baseDraft, hasBaseDraft, req, result)
 	respondWithJSON(w, http.StatusOK, regenerateDraftSectionResponse{
 		Section:              result.Section,
 		ReplacementMarkdown:  result.ReplacementMarkdown,
@@ -1676,20 +1735,20 @@ func RegenerateDraftSectionHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, briefdomain.ArticleBrief, personadomain.Persona, outputformat.OutputFormat, bool) {
+func draftContextFromRequest(store workflowStoreBackend, styleProfileID, sessionID, personaID, formatID string) (authordomain.AuthorStyleProfile, authordomain.WritingStyleGuide, briefdomain.ArticleBrief, personadomain.Persona, outputformat.OutputFormat, bool) {
 	sessionID = strings.TrimSpace(sessionID)
 	if strings.TrimSpace(styleProfileID) == "" && sessionID != "" {
-		if session, ok := workflowStore.GetSession(sessionID); ok {
+		if session, ok := store.GetSession(sessionID); ok {
 			styleProfileID = session.StyleProfileID
 		}
 	}
-	profile, guide, ok := workflowStore.GetProfileAndGuide(styleProfileID)
+	profile, guide, ok := store.GetProfileAndGuide(styleProfileID)
 	if !ok {
 		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
 	}
-	articleBrief, ok := workflowStore.GetBrief(sessionID)
+	articleBrief, ok := store.GetBrief(sessionID)
 	if !ok {
-		session, sessionOK := workflowStore.GetSession(sessionID)
+		session, sessionOK := store.GetSession(sessionID)
 		if !sessionOK || !session.Completed {
 			return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
 		}
@@ -1698,7 +1757,7 @@ func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID stri
 	if strings.TrimSpace(personaID) == "" {
 		personaID = articleBrief.PersonaID
 	}
-	persona, ok := resolvePersona(personaID)
+	persona, ok := resolvePersona(store, personaID)
 	if !ok {
 		return authordomain.AuthorStyleProfile{}, authordomain.WritingStyleGuide{}, briefdomain.ArticleBrief{}, personadomain.Persona{}, outputformat.OutputFormat{}, false
 	}
@@ -1717,19 +1776,19 @@ func draftContextFromRequest(styleProfileID, sessionID, personaID, formatID stri
 	return profile, guide, articleBrief, persona, format, true
 }
 
-func historyDraftFromPath(pathID string) (sqliterepo.DraftRecord, bool) {
+func historyDraftFromPath(store workflowStoreBackend, pathID string) (sqliterepo.DraftRecord, bool) {
 	if strings.TrimSpace(pathID) == "" {
 		return sqliterepo.DraftRecord{}, false
 	}
-	store, ok := workflowStore.(workflowHistoryReader)
+	reader, ok := store.(workflowHistoryReader)
 	if !ok {
 		return sqliterepo.DraftRecord{}, false
 	}
-	return store.GetDraft(pathID)
+	return reader.GetDraft(pathID)
 }
 
-func saveGeneratedDraftHistory(req generateDraftRequest, result draftapp.GenerateResult, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) string {
-	store, ok := workflowStore.(workflowHistoryWriter)
+func saveGeneratedDraftHistory(store workflowStoreBackend, req generateDraftRequest, result draftapp.GenerateResult, articleBrief briefdomain.ArticleBrief, persona personadomain.Persona, format outputformat.OutputFormat) string {
+	writer, ok := store.(workflowHistoryWriter)
 	if !ok {
 		return ""
 	}
@@ -1750,18 +1809,18 @@ func saveGeneratedDraftHistory(req generateDraftRequest, result draftapp.Generat
 		UpdatedAt: now,
 		Metadata:  map[string]any{"session_id": sessionID},
 	}
-	if existing, ok := store.GetProject(projectID); ok {
+	if existing, ok := writer.GetProject(projectID); ok {
 		project.CreatedAt = existing.CreatedAt
 		if strings.TrimSpace(existing.Name) != "" {
 			project.Name = existing.Name
 		}
 		project.Metadata = mergeHistoryMetadata(existing.Metadata, project.Metadata)
 	}
-	if err := store.SaveProject(project); err != nil {
+	if err := writer.SaveProject(project); err != nil {
 		return ""
 	}
 
-	drafts, err := store.ListDrafts(articleID)
+	drafts, err := writer.ListDrafts(articleID)
 	if err != nil {
 		return ""
 	}
@@ -1779,11 +1838,11 @@ func saveGeneratedDraftHistory(req generateDraftRequest, result draftapp.Generat
 		UpdatedAt:      now,
 		Metadata:       map[string]any{"session_id": sessionID},
 	}
-	if existing, ok := store.GetArticle(articleID); ok {
+	if existing, ok := writer.GetArticle(articleID); ok {
 		article.CreatedAt = existing.CreatedAt
 		article.Metadata = mergeHistoryMetadata(existing.Metadata, article.Metadata)
 	}
-	if err := store.SaveArticle(article); err != nil {
+	if err := writer.SaveArticle(article); err != nil {
 		return ""
 	}
 	draft := sqliterepo.DraftRecord{
@@ -1799,21 +1858,21 @@ func saveGeneratedDraftHistory(req generateDraftRequest, result draftapp.Generat
 		Verification:   result.Verification,
 		CreatedAt:      now,
 	}
-	if err := store.SaveDraft(draft); err != nil {
+	if err := writer.SaveDraft(draft); err != nil {
 		return ""
 	}
 	return draftID
 }
 
-func saveSectionRegenerationHistory(baseDraft sqliterepo.DraftRecord, hasBaseDraft bool, req regenerateDraftSectionRequest, result draftapp.RegenerateSectionResult) string {
+func saveSectionRegenerationHistory(store workflowStoreBackend, baseDraft sqliterepo.DraftRecord, hasBaseDraft bool, req regenerateDraftSectionRequest, result draftapp.RegenerateSectionResult) string {
 	if !hasBaseDraft {
 		return ""
 	}
-	store, ok := workflowStore.(workflowHistoryWriter)
+	writer, ok := store.(workflowHistoryWriter)
 	if !ok {
 		return ""
 	}
-	regenerations, err := store.ListSectionRegenerations(baseDraft.ID)
+	regenerations, err := writer.ListSectionRegenerations(baseDraft.ID)
 	if err != nil {
 		return ""
 	}
@@ -1836,7 +1895,7 @@ func saveSectionRegenerationHistory(baseDraft sqliterepo.DraftRecord, hasBaseDra
 	if record.Version <= record.BaseVersion {
 		record.Version = record.BaseVersion + 1
 	}
-	if err := store.SaveSectionRegeneration(record); err != nil {
+	if err := writer.SaveSectionRegeneration(record); err != nil {
 		return ""
 	}
 	return record.ID
@@ -1912,14 +1971,14 @@ func decodeBriefUpdateFields(r *http.Request) (map[string]string, error) {
 	return fields, nil
 }
 
-func applyBriefUpdateFields(articleBrief *briefdomain.ArticleBrief, fields map[string]string) error {
+func applyBriefUpdateFields(store workflowStoreBackend, articleBrief *briefdomain.ArticleBrief, fields map[string]string) error {
 	for key, value := range fields {
 		switch normalizeBriefFieldName(key) {
 		case "style_profile_id":
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("style_profile_id cannot be empty")
 			}
-			if _, _, ok := workflowStore.GetProfileAndGuide(value); !ok {
+			if _, _, ok := store.GetProfileAndGuide(value); !ok {
 				return fmt.Errorf("style_profile_id was not found")
 			}
 			articleBrief.StyleProfileID = strings.TrimSpace(value)
@@ -1927,7 +1986,7 @@ func applyBriefUpdateFields(articleBrief *briefdomain.ArticleBrief, fields map[s
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("persona_id cannot be empty")
 			}
-			persona, ok := resolvePersona(value)
+			persona, ok := resolvePersona(store, value)
 			if !ok {
 				return fmt.Errorf("persona_id was not found")
 			}
@@ -2537,7 +2596,7 @@ func toSectionRegenerationHistoryResponse(regeneration sqliterepo.SectionRegener
 	}
 }
 
-func listBriefArtifactResponses(briefs map[string]briefdomain.ArticleBrief) []briefArtifactResponse {
+func listBriefArtifactResponses(store workflowStoreBackend, briefs map[string]briefdomain.ArticleBrief) []briefArtifactResponse {
 	sessionIDs := make([]string, 0, len(briefs))
 	for sessionID := range briefs {
 		sessionIDs = append(sessionIDs, sessionID)
@@ -2545,7 +2604,7 @@ func listBriefArtifactResponses(briefs map[string]briefdomain.ArticleBrief) []br
 	sort.Strings(sessionIDs)
 	items := make([]briefArtifactResponse, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
-		session, sessionOK := workflowStore.GetSession(sessionID)
+		session, sessionOK := store.GetSession(sessionID)
 		items = append(items, toBriefArtifactResponse(sessionID, briefs[sessionID], session, sessionOK))
 	}
 	return items
@@ -2618,8 +2677,8 @@ func newBriefInterviewService(model string) *briefapp.InterviewService {
 	return newBriefInterviewServiceWithStyleGuide(model, "")
 }
 
-func newBriefInterviewServiceForSession(session briefdomain.ArticleBriefSession, model string) *briefapp.InterviewService {
-	_, guide, ok := workflowStore.GetProfileAndGuide(session.StyleProfileID)
+func newBriefInterviewServiceForSession(store workflowStoreBackend, session briefdomain.ArticleBriefSession, model string) *briefapp.InterviewService {
+	_, guide, ok := store.GetProfileAndGuide(session.StyleProfileID)
 	if !ok {
 		return newBriefInterviewService(model)
 	}
