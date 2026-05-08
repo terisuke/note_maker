@@ -258,7 +258,7 @@ static/js/
 
 ### Migration of `marked.min.js`
 
-`marked.min.js` is currently loaded from a CDN reference in `static/index.html`. In Cut D2-1 or immediately after, download the pinned version to `static/vendor/marked.min.js`, update the `<script>` tag to `/static/vendor/marked.min.js`, and add its SHA-256 to `lockfile.json`. This ensures the Wails desktop build (Tier 2) and Docker container (Tier 3) have no runtime internet dependency for UI scripts.
+`marked.min.js` is vendored at `static/vendor/marked.min.js`, referenced from `static/index.html`, and recorded in `static/vendor/lockfile.json`. This keeps the Wails desktop build (Tier 2) and Docker container (Tier 3) free of runtime internet dependency for UI scripts.
 
 ---
 

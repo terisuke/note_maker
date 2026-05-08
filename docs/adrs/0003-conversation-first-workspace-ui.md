@@ -49,7 +49,7 @@ Three options were evaluated against the constraints (preserve existing 13 E2E t
 
 Alpine.js was chosen because it removes the worst of vanilla's pain (3-pane store-driven sync) without adding the npm/Vite build pipeline that React requires. This aligns with the user's "minimum changes if possible" constraint while still producing the conversation-first feel.
 
-The existing `marked.min.js` is already loaded from CDN, so adding `alpine.min.js` does not change the dependency model — both are single-file vendored libraries. The Alpine version is pinned and committed under `static/vendor/` so the launcher does not depend on internet access at startup.
+`marked.min.js` and `alpine.min.js` are both pinned and committed under `static/vendor/`, so the launcher does not depend on internet access for UI scripts at startup.
 
 ### Layout target
 

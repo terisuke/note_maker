@@ -124,7 +124,7 @@ New packages:
 
 - `internal/domain/persona`
   - types: `Persona`, `PersonaID`, `PersonaSeed`
-  - registry: in-memory + opt-in SQLite-backed workflow store after Phase C1
+  - registry: in-memory defaults + SQLite-backed custom personas after Phase C1
 - `internal/domain/format`
   - types: `OutputFormat`, `FormatID`, `Validator`
   - registry: same dual-mode
@@ -266,7 +266,7 @@ Status: implemented in the current cut as an opt-in workflow store. C2/C3 still 
 - Schema migrations under `internal/infrastructure/repository/sqlite/migrations/` numbered `0001_*.sql`, applied at boot via a tiny in-process migrator.
 - Tables (minimum): `personas`, `author_sources`, `writing_style_guides` (versioned), `projects`, `articles`, `brief_sessions`, `brief_answers` (with `parent_answer_id`), `drafts` (versioned).
 - The existing JSON file remains the default compatibility store for now. Import/export between JSON and SQLite stays under the broader [#14](https://github.com/terisuke/note_maker/issues/14) umbrella.
-- Default SQLite DB path: `data/workflow_store.db` when `WORKFLOW_STORE_DRIVER=sqlite` is set.
+- Default SQLite DB path: `data/workflow_store.db`. JSON remains an explicit compatibility mode.
 
 Acceptance:
 

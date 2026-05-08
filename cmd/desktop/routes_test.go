@@ -116,7 +116,7 @@ func TestEnsureDesktopDataDirWritesLauncherCompatibleDefaults(t *testing.T) {
 	config := desktopRuntimeConfig{
 		DataDir:      dataDir,
 		ConfigPath:   filepath.Join(dataDir, "app_config.json"),
-		WorkflowPath: filepath.Join(dataDir, "workflow_store.json"),
+		WorkflowPath: filepath.Join(dataDir, "workflow_store.db"),
 	}
 	t.Setenv("WORKFLOW_STORE_DRIVER", "")
 
@@ -134,7 +134,7 @@ func TestEnsureDesktopDataDirWritesLauncherCompatibleDefaults(t *testing.T) {
 	if err := json.Unmarshal(encoded, &persisted); err != nil {
 		t.Fatalf("decode app config: %v", err)
 	}
-	if persisted.WorkflowStoreDriver != "json" || persisted.WorkflowStorePath != config.WorkflowPath {
+	if persisted.WorkflowStoreDriver != "sqlite" || persisted.WorkflowStorePath != config.WorkflowPath {
 		t.Fatalf("unexpected persisted config: %#v", persisted)
 	}
 }
