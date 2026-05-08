@@ -71,7 +71,7 @@ launcher の既定保存先:
 - macOS: `~/Library/Application Support/Note Maker`
 - Linux/その他: `$XDG_DATA_HOME/note-maker` または `~/.local/share/note-maker`
 
-この配下に `app_config.json`、`workflow_store.json`、`logs/`、ビルド済みサーバーバイナリを置きます。保存先を変える場合は `NOTE_MAKER_DATA_DIR=/path/to/dir make launcher` または `./scripts/launcher.sh --data-dir /path/to/dir` を指定します。
+この配下に `app_config.json`、`workflow_store.db`、`logs/`、ビルド済みサーバーバイナリを置きます。保存先を変える場合は `NOTE_MAKER_DATA_DIR=/path/to/dir make launcher` または `./scripts/launcher.sh --data-dir /path/to/dir` を指定します。旧 JSON store が同じディレクトリの `workflow_store.json` にある場合、SQLite store が空の初回起動時に既存の文体・取材・ブリーフ・カスタム書き手を取り込みます。
 
 Evo X2 Tailnet が到達不能な場合、既定ではアプリを起動しません。UIだけを起動したい検証時は `make launcher-status` で状態を確認し、必要に応じて `./scripts/launcher.sh --allow-degraded` を使います。ローカル `llama-server` を明示的に起動して primary として使う場合だけ、次を実行します。
 
@@ -122,9 +122,9 @@ mise run evo-x2
 
 画面上部の「設定」から、フェーズ別に使うモデルと一問一答の質問を変更できます。質問は選択したペルソナと出力形式に応じた固定テンプレートが表示され、追加質問も下書き生成のブリーフに含まれます。
 
-文体分析結果、取材セッションの回答、完成ブリーフは `WORKFLOW_STORE_PATH` にJSONとして永続化されます。既定値は `data/workflow_store.json` です。
+文体分析結果、取材セッションの回答、完成ブリーフ、記事・ドラフト履歴は `WORKFLOW_STORE_PATH` に永続化されます。既定値は SQLite の `data/workflow_store.db` です。
 
-保存方式は設定画面の「保存方式」から選べます。UIで変更した内容は `data/app_config.json` に保存され、サーバー再起動後に反映されます。SQLiteを選んだ場合の既定パスは `data/workflow_store.db` です。JSON store は互換性のため既定のまま残しています。
+保存方式は設定画面の「保存方式」から選べます。UIで変更した内容は `data/app_config.json` に保存され、サーバー再起動後に反映されます。JSON store は互換性と軽量退避のため残していますが、プロジェクト・記事・ドラフト履歴まで安定して扱う既定は SQLite です。
 
 開発・検証で強制したい場合は `WORKFLOW_STORE_DRIVER=sqlite` を指定できます。この環境変数がある場合、設定画面では保存方式がロック表示になります。
 

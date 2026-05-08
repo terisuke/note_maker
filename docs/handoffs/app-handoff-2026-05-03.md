@@ -83,14 +83,20 @@ Users can override these from the app settings.
 
 ## Storage contract
 
-The settings UI can switch between JSON and SQLite unless environment variables
-lock the store.
+The settings UI can switch between SQLite and JSON unless environment variables
+lock the store. SQLite is the default because the app now persists related
+style, brief, project, article, draft, and regeneration records.
 
-- JSON compatibility store: `data/workflow_store.json`
 - SQLite store: `data/workflow_store.db`
+- JSON compatibility store: `data/workflow_store.json`
 - Launcher user data directory:
   - macOS: `~/Library/Application Support/Note Maker`
   - Linux/other: `$XDG_DATA_HOME/note-maker` or `~/.local/share/note-maker`
+
+When the SQLite store is empty and a legacy `workflow_store.json` exists next
+to it, the server imports existing author styles, sessions, briefs, brief
+versions, and custom personas on startup. JSON remains readable as an explicit
+compatibility mode.
 
 Current persisted product memory includes:
 

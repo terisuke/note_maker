@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -79,6 +82,7 @@ func newWorkflowStore() workflowStoreBackend {
 		path := config.Path
 		store, err := sqliterepo.NewWorkflowStore(path)
 		if err == nil {
+			importLegacyJSONStoreIfNeeded(store, path)
 			return store
 		}
 		panic(fmt.Sprintf("initialize sqlite workflow store: %v", err))
@@ -89,6 +93,124 @@ func newWorkflowStore() workflowStoreBackend {
 		return store
 	}
 	return memory.NewWorkflowStore()
+}
+
+func importLegacyJSONStoreIfNeeded(target *sqliterepo.WorkflowStore, sqlitePath string) {
+	if target == nil || !workflowStoreEmpty(target) {
+		return
+	}
+	legacyPath := legacyJSONStorePath(sqlitePath)
+	if legacyPath == "" {
+		return
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("check legacy JSON workflow store %q: %v", legacyPath, err)
+		}
+		return
+	}
+	legacy, err := memory.NewPersistentWorkflowStore(legacyPath)
+	if err != nil {
+		log.Printf("open legacy JSON workflow store %q: %v", legacyPath, err)
+		return
+	}
+	if err := importWorkflowStore(legacy, target); err != nil {
+		log.Printf("import legacy JSON workflow store %q: %v", legacyPath, err)
+	}
+}
+
+func workflowStoreEmpty(store interface {
+	ListAuthorStyles() ([]authorstyleapp.AnalyzeResult, error)
+	ListSessions() ([]briefdomain.ArticleBriefSession, error)
+	ListBriefs() (map[string]briefdomain.ArticleBrief, error)
+	ListPersonas() ([]personadomain.Persona, error)
+	ListProjects() ([]sqliterepo.ProjectRecord, error)
+}) bool {
+	styles, err := store.ListAuthorStyles()
+	if err != nil || len(styles) > 0 {
+		return false
+	}
+	sessions, err := store.ListSessions()
+	if err != nil || len(sessions) > 0 {
+		return false
+	}
+	briefs, err := store.ListBriefs()
+	if err != nil || len(briefs) > 0 {
+		return false
+	}
+	personas, err := store.ListPersonas()
+	if err != nil || len(personas) > 0 {
+		return false
+	}
+	projects, err := store.ListProjects()
+	return err == nil && len(projects) == 0
+}
+
+func importWorkflowStore(source workflowStoreBackend, target workflowStoreBackend) error {
+	if source == nil || target == nil {
+		return nil
+	}
+	personas, err := source.ListPersonas()
+	if err != nil {
+		return err
+	}
+	for _, persona := range personas {
+		if err := target.SavePersona(persona); err != nil {
+			return err
+		}
+	}
+	styles, err := source.ListAuthorStyles()
+	if err != nil {
+		return err
+	}
+	for _, style := range styles {
+		if err := target.SaveAuthorStyle(style); err != nil {
+			return err
+		}
+	}
+	sessions, err := source.ListSessions()
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if err := target.SaveSession(session); err != nil {
+			return err
+		}
+	}
+	briefs, err := source.ListBriefs()
+	if err != nil {
+		return err
+	}
+	for sessionID, brief := range briefs {
+		versions, err := source.ListBriefVersions(sessionID)
+		if err != nil {
+			return err
+		}
+		if len(versions) == 0 {
+			if err := target.SaveBrief(sessionID, brief); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, version := range versions {
+			if err := target.SaveBrief(sessionID, version.Brief); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func legacyJSONStorePath(sqlitePath string) string {
+	sqlitePath = strings.TrimSpace(sqlitePath)
+	if sqlitePath == "" || sqlitePath == ":memory:" {
+		return ""
+	}
+	ext := filepath.Ext(sqlitePath)
+	if ext == "" {
+		return sqlitePath + ".json"
+	}
+	return strings.TrimSuffix(sqlitePath, ext) + ".json"
 }
 
 func workflowStoreForRequest(r *http.Request) workflowStoreBackend {

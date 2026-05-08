@@ -11,13 +11,16 @@ import (
 )
 
 const (
-	storageDriverJSON   = "json"
-	storageDriverSQLite = "sqlite"
+	storageDriverJSON    = "json"
+	storageDriverSQLite  = "sqlite"
+	defaultStorageDriver = storageDriverSQLite
+	defaultSQLitePath    = "data/workflow_store.db"
+	defaultJSONPath      = "data/workflow_store.json"
 )
 
 var activeWorkflowStorage = workflowStorageConfig{
-	Driver: storageDriverJSON,
-	Path:   "data/workflow_store.json",
+	Driver: defaultStorageDriver,
+	Path:   defaultSQLitePath,
 	Source: "default",
 }
 
@@ -84,7 +87,7 @@ func UpdateStorageConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 func currentStorageConfigResponse() storageConfigResponse {
 	active := getActiveWorkflowStorage()
-	configured := resolveNextBootWorkflowStorage()
+	configured := resolveWorkflowStorageConfig()
 	restartRequired := active.Driver != configured.Driver || active.Path != configured.Path
 	message := "現在の保存先で動作中です。"
 	if restartRequired {
@@ -115,11 +118,11 @@ func resolveWorkflowStorageConfig() workflowStorageConfig {
 	configured := resolveNextBootWorkflowStorage()
 	if configured.Source == "default" && strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH")) != "" {
 		path := strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH"))
-		_, normalizedPath, err := normalizeWorkflowStorage(storageDriverJSON, path)
+		normalizedDriver, normalizedPath, err := normalizeWorkflowStorage("", path)
 		if err != nil {
-			return workflowStorageConfig{Driver: storageDriverJSON, Path: path, Source: "env-path-invalid"}
+			return workflowStorageConfig{Driver: defaultStorageDriver, Path: path, Source: "env-path-invalid"}
 		}
-		return workflowStorageConfig{Driver: storageDriverJSON, Path: normalizedPath, Source: "env-path"}
+		return workflowStorageConfig{Driver: normalizedDriver, Path: normalizedPath, Source: "env-path"}
 	}
 	return configured
 }
@@ -127,11 +130,11 @@ func resolveWorkflowStorageConfig() workflowStorageConfig {
 func resolveNextBootWorkflowStorage() workflowStorageConfig {
 	config, ok := readPersistedAppConfig()
 	if !ok {
-		return workflowStorageConfig{Driver: storageDriverJSON, Path: "data/workflow_store.json", Source: "default"}
+		return workflowStorageConfig{Driver: defaultStorageDriver, Path: defaultSQLitePath, Source: "default"}
 	}
 	driver, path, err := normalizeWorkflowStorage(config.WorkflowStoreDriver, config.WorkflowStorePath)
 	if err != nil {
-		return workflowStorageConfig{Driver: storageDriverJSON, Path: "data/workflow_store.json", Source: "config-invalid"}
+		return workflowStorageConfig{Driver: defaultStorageDriver, Path: defaultSQLitePath, Source: "config-invalid"}
 	}
 	return workflowStorageConfig{Driver: driver, Path: path, Source: "config"}
 }
@@ -139,19 +142,35 @@ func resolveNextBootWorkflowStorage() workflowStorageConfig {
 func normalizeWorkflowStorage(driver, path string) (string, string, error) {
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	switch driver {
-	case "", storageDriverJSON:
-		driver = storageDriverJSON
+	case "":
+		driver = inferWorkflowStorageDriver(path)
+	case storageDriverJSON:
 		if strings.TrimSpace(path) == "" {
-			path = "data/workflow_store.json"
+			path = defaultJSONPath
 		}
 	case storageDriverSQLite:
 		if strings.TrimSpace(path) == "" {
-			path = "data/workflow_store.db"
+			path = defaultSQLitePath
 		}
 	default:
 		return "", "", fmt.Errorf("workflow_store_driver must be json or sqlite")
 	}
+	if driver == storageDriverJSON && strings.TrimSpace(path) == "" {
+		path = defaultJSONPath
+	}
+	if driver == storageDriverSQLite && strings.TrimSpace(path) == "" {
+		path = defaultSQLitePath
+	}
 	return driver, filepath.Clean(strings.TrimSpace(path)), nil
+}
+
+func inferWorkflowStorageDriver(path string) string {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+	case ".json":
+		return storageDriverJSON
+	default:
+		return defaultStorageDriver
+	}
 }
 
 func setActiveWorkflowStorage(config workflowStorageConfig) {

@@ -4,6 +4,11 @@
       "version": "3.15.12",
       "source": "https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js",
       "sha256": "57b37d7cae9a27d965fdae4adcc844245dfdc407e655aee85dcfff3a08036a3f"
+    },
+    "marked.min.js": {
+      "version": "4.3.0",
+      "source": "https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js",
+      "sha256": "c68075672d976e4777390560baa112194855bd4404b13647da4855aae1f9360c"
     }
   }
 }

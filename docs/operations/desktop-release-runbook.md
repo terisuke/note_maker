@@ -31,8 +31,10 @@ On first launch the desktop binary bootstraps the same data paths as
 - Windows: `%APPDATA%\Note Maker`
 
 The bootstrap creates `logs/`, sets `NOTE_MAKER_CONFIG_PATH` and
-`WORKFLOW_STORE_PATH`, and writes a default `app_config.json` only when one does
-not already exist.
+`WORKFLOW_STORE_PATH`, and writes a default SQLite `app_config.json` only when
+one does not already exist. If a legacy `workflow_store.json` exists next to the
+new `workflow_store.db`, the server imports compatible records on first SQLite
+startup.
 
 ## CI Dry Run
 
@@ -90,7 +92,7 @@ For each produced platform artifact:
 
 1. Start the app.
 2. Confirm the existing Note Maker UI loads.
-3. Confirm `/static/vendor/alpine.min.js` and `/static/js/store.js` load.
+3. Confirm `/static/vendor/alpine.min.js`, `/static/vendor/marked.min.js`, and `/static/js/store.js` load.
 4. Use the native menu to open the data folder.
 5. Use the native menu to run LLM diagnostics against the configured endpoint.
 6. Create or open a history item without changing the Tier 1 data directory.

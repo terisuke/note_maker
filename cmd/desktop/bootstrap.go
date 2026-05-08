@@ -67,7 +67,7 @@ func applyDesktopDefaults() (desktopRuntimeConfig, bool, error) {
 
 	workflowPath := filepath.Clean(strings.TrimSpace(os.Getenv("WORKFLOW_STORE_PATH")))
 	if workflowPath == "." {
-		workflowPath = filepath.Join(dataDir, "workflow_store.json")
+		workflowPath = filepath.Join(dataDir, "workflow_store.db")
 		changed = setEnvDefault("WORKFLOW_STORE_PATH", workflowPath) || changed
 	}
 
@@ -100,7 +100,7 @@ func ensureDesktopDataDir(config desktopRuntimeConfig) error {
 		return fmt.Errorf("create desktop config dir: %w", err)
 	}
 	encoded, err := json.MarshalIndent(desktopPersistedConfig{
-		WorkflowStoreDriver: "json",
+		WorkflowStoreDriver: "sqlite",
 		WorkflowStorePath:   config.WorkflowPath,
 	}, "", "  ")
 	if err != nil {

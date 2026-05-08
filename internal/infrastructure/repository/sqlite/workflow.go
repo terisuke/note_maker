@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -117,6 +118,9 @@ func NewWorkflowStore(path string) (*WorkflowStore, error) {
 	}
 	if path != ":memory:" {
 		path = filepath.Clean(path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, fmt.Errorf("create sqlite workflow store dir: %w", err)
+		}
 	}
 	db, err := sql.Open(driverName, path)
 	if err != nil {
